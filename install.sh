@@ -131,12 +131,14 @@ fi
 MCP_CONFIG="$PI_DIR/mcp.json"
 if [ -n "$GALAXY_MCP_DIR" ] && [ ! -f "$MCP_CONFIG" ]; then
     info "Creating MCP configuration..."
+    # galaxy-mcp Python package is in mcp-server-galaxy-py subdirectory
+    GALAXY_MCP_PY_DIR="$GALAXY_MCP_DIR/mcp-server-galaxy-py"
     cat > "$MCP_CONFIG" << EOF
 {
   "mcpServers": {
     "galaxy": {
       "command": "uv",
-      "args": ["run", "--directory", "$GALAXY_MCP_DIR", "galaxy-mcp"],
+      "args": ["run", "--directory", "$GALAXY_MCP_PY_DIR", "galaxy-mcp"],
       "lifecycle": "lazy",
       "directTools": [
         "connect", "get_histories", "create_history",
