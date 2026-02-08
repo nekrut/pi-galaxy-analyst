@@ -17,8 +17,13 @@
     "@sinclair/typebox": "^0.32.0",
     "uuid": "^9.0.0"
   },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0",
+    "@mariozechner/pi-ai": ">=0.50.0"
+  },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.1.0",
+    "@mariozechner/pi-coding-agent": "^0.52.8",
+    "@mariozechner/pi-ai": "^0.52.8",
     "@types/uuid": "^9.0.0",
     "typescript": "^5.0.0"
   }

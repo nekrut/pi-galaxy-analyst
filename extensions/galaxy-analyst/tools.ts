@@ -6,6 +6,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
   createPlan,
@@ -117,14 +118,12 @@ all steps, decisions, and results throughout the analysis.`,
       };
     },
     renderResult: (result) => {
-      const lines = [
-        `✅ Analysis plan created`,
-        `   ID: ${result.details?.planId || 'unknown'}`,
-      ];
-      if (result.details?.notebookPath) {
-        lines.push(`   📓 Notebook: ${result.details.notebookPath}`);
+      const d = result.details as { planId?: string; notebookPath?: string } | undefined;
+      const lines = [`✅ Analysis plan created`, `   ID: ${d?.planId || 'unknown'}`];
+      if (d?.notebookPath) {
+        lines.push(`   📓 Notebook: ${d.notebookPath}`);
       }
-      return lines;
+      return new Text(lines.join('\n'));
     },
   });
 
@@ -547,9 +546,9 @@ in the analysis to validate results before proceeding.`,
       }
     },
     renderResult: (result) => {
-      const status = result.details?.status;
-      const icon = status === 'passed' ? '✅' : status === 'failed' ? '❌' : '⏸️';
-      return [`${icon} QC Checkpoint: ${status}`];
+      const d = result.details as { status?: string } | undefined;
+      const icon = d?.status === 'passed' ? '✅' : d?.status === 'failed' ? '❌' : '⏸️';
+      return new Text(`${icon} QC Checkpoint: ${d?.status}`);
     },
   });
 
@@ -706,10 +705,11 @@ Must have an active plan to create a notebook.`,
       }
     },
     renderResult: (result) => {
-      if (result.details?.path) {
-        return [`📓 Notebook: ${result.details.path}`];
+      const d = result.details as { path?: string } | undefined;
+      if (d?.path) {
+        return new Text(`📓 Notebook: ${d.path}`);
       }
-      return ["❌ Notebook creation failed"];
+      return new Text("❌ Notebook creation failed");
     },
   });
 
@@ -769,10 +769,11 @@ allowing you to resume a previous analysis session.`,
       }
     },
     renderResult: (result) => {
-      if (result.details?.planId) {
-        return [`📓 Loaded notebook: ${result.details.path}`];
+      const d = result.details as { planId?: string; path?: string } | undefined;
+      if (d?.planId) {
+        return new Text(`📓 Loaded notebook: ${d.path}`);
       }
-      return ["❌ Failed to open notebook"];
+      return new Text("❌ Failed to open notebook");
     },
   });
 

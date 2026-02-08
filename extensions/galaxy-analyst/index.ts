@@ -61,12 +61,11 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     try {
       const entries = ctx.sessionManager?.getEntries?.() || [];
       const planEntries = entries.filter(
-        (e: { type: string }) => e.type === "galaxy_analyst_plan"
+        (e) => e.type === "custom" && (e as { customType?: string }).customType === "galaxy_analyst_plan"
       );
 
       if (planEntries.length > 0) {
-        // Restore most recent plan
-        const latestEntry = planEntries[planEntries.length - 1];
+        const latestEntry = planEntries[planEntries.length - 1] as { type: "custom"; data?: unknown };
         if (latestEntry.data) {
           restorePlan(latestEntry.data as AnalysisPlan);
           ctx.ui.notify(`Restored plan: ${(latestEntry.data as AnalysisPlan).title}`, "info");
@@ -356,7 +355,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // Watch for galaxy connect results to update our state
     if (event.toolName === "mcp__galaxy__connect" || event.toolName === "galaxy__connect") {
       try {
-        const resultText = event.result?.content?.[0]?.text;
+        const firstContent = event.content?.[0];
+        const resultText = firstContent && 'text' in firstContent ? firstContent.text : undefined;
         if (resultText && resultText.includes('"success": true')) {
           const state = getState();
           state.galaxyConnected = true;
@@ -369,7 +369,8 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // Watch for history creation
     if (event.toolName === "mcp__galaxy__create_history" || event.toolName === "galaxy__create_history") {
       try {
-        const resultText = event.result?.content?.[0]?.text;
+        const firstContent = event.content?.[0];
+        const resultText = firstContent && 'text' in firstContent ? firstContent.text : undefined;
         if (resultText) {
           const match = resultText.match(/"id":\s*"([^"]+)"/);
           if (match) {

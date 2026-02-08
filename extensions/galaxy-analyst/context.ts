@@ -20,7 +20,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
     if (!plan) {
       // No active plan - provide minimal guidance
       return {
-        modifySystemPrompt: `
+        systemPrompt: `
 ## Galaxy Analyst Status
 No active analysis plan. To start a new analysis:
 1. Discuss the research question and data with the researcher
@@ -38,7 +38,7 @@ ${state.currentHistoryId ? `Current history: ${state.currentHistoryId}` : ''}
     const planSummary = formatPlanSummary(plan);
 
     return {
-      modifySystemPrompt: `
+      systemPrompt: `
 ## Current Analysis Plan
 
 ${planSummary}
