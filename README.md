@@ -1,81 +1,112 @@
 # gxypi
 
-A [Pi.dev](https://pi.dev) package that transforms Pi into a Galaxy-focused co-scientist agent for bioinformatics analysis.
+An AI co-scientist for [Galaxy](https://galaxyproject.org) bioinformatics, built on [Pi.dev](https://pi.dev).
 
-## What It Does
+gxypi turns Pi into a structured analysis partner — it creates plans, runs Galaxy tools, documents every decision, and saves everything to a persistent notebook you can share, resume, and reproduce.
 
-gxypi provides a **complete research lifecycle platform** — a structured approach to bioinformatics workflows covering everything from problem definition through publication:
-
-```
-┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐
-│  Phase 1   │ → │  Phase 2   │ → │  Phase 3   │ → │  Phase 4   │ → │  Phase 5   │
-│  PROBLEM   │   │   DATA     │   │  ANALYSIS  │   │  INTERPRET │   │  PUBLISH   │
-│  DEFINE    │   │  ACQUIRE   │   │            │   │            │   │            │
-└────────────┘   └────────────┘   └────────────┘   └────────────┘   └────────────┘
-```
-
-### The Five Phases
-
-| Phase | What Happens | Key Tools |
-|-------|--------------|-----------|
-| **1. Problem Definition** | Refine research question, review literature | `research_question_refine`, `research_add_literature` |
-| **2. Data Acquisition** | Find public data, import to Galaxy, create samplesheets | `data_set_source`, `data_generate_samplesheet` |
-| **3. Analysis** | Execute tools/workflows with QC checkpoints | `analysis_plan_*`, Galaxy MCP tools |
-| **4. Interpretation** | Review results, biological context, pathway analysis | `result-review` skill |
-| **5. Publication** | Generate methods, track figures, prepare data sharing | `publication_generate_methods`, `publication_add_figure` |
-
-The agent works WITH you, not FOR you — you make the decisions, it helps execute them rigorously.
-
-## Quick Start
-
-### One-Line Install
+## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/galaxyproject/gxypi/main/install.sh | bash
-```
-
-Then run:
-```bash
-gxypi
-```
-
-The first time you run it, you'll be prompted for your Galaxy server URL and API key.
-
-### What Gets Installed
-
-- **Pi coding agent** — The AI agent framework
-- **pi-mcp-adapter** — Connects Pi to MCP servers
-- **galaxy-mcp** — MCP server for Galaxy API
-- **gxypi** — This package (skills + extensions)
-
-## Manual Installation
-
-If you prefer to install components separately:
-
-### Prerequisites
-
-1. Node.js 18+
-2. [Pi coding agent](https://github.com/badlogic/pi-mono)
-3. [uv](https://github.com/astral-sh/uv) or Python 3.10+
-
-### Install Steps
-
-```bash
-# 1. Install Pi if needed
+# Install Pi
 npm install -g @mariozechner/pi-coding-agent
 
-# 2. Install pi-mcp-adapter
-pi install npm:pi-mcp-adapter
-
-# 3. Clone and install gxypi
-git clone https://github.com/galaxyproject/gxypi.git
-pi install git:./gxypi
-
-# 4. Clone galaxy-mcp
-git clone https://github.com/galaxyproject/galaxy-mcp.git ~/.galaxy-mcp
+# Install gxypi
+pi install npm:gxypi
 ```
 
-### Configure Galaxy MCP
+You'll also need the [Galaxy MCP server](https://github.com/galaxyproject/galaxy-mcp) to connect to Galaxy. See [Galaxy MCP Setup](#galaxy-mcp-setup) below.
+
+## Usage
+
+Start Pi with gxypi installed, then just describe what you want to analyze:
+
+```
+$ pi
+
+You: I have RNA-seq data from a drug treatment experiment — 6 samples,
+     3 treated and 3 control HeLa cells. I want to find differentially
+     expressed genes. The data is at GEO accession GSE164073.
+
+Pi:  I'll help you set up a structured analysis. Let me start by refining
+     the research question.
+
+     Research Question: "Does drug X treatment alter gene expression
+     in HeLa cells, specifically in inflammatory response pathways?"
+
+     I've created an analysis plan and saved it to:
+     📓 rna-seq-drug-treatment-notebook.md
+
+     The plan has 5 steps:
+       1. ⬜ Quality Control (FastQC + MultiQC)
+       2. ⬜ Read Trimming (Cutadapt)
+       3. ⬜ Alignment (HISAT2 to hg38)
+       4. ⬜ Quantification (featureCounts)
+       5. ⬜ Differential Expression (DESeq2)
+
+     Ready to start with QC?
+
+You: Yes, run FastQC on all samples.
+
+Pi:  Running FastQC via Galaxy...
+
+     ✅ FastQC complete. Results:
+     - All samples: Q30 > 88%
+     - Adapter content detected in samples 2 and 5
+     - Recommendation: proceed with trimming
+
+     I've logged this as a QC checkpoint. Move on to trimming?
+```
+
+The next day, come back to the same directory and everything picks up where you left off:
+
+```
+$ pi
+
+Pi:  Loaded notebook: RNA-seq Drug Treatment (1/5 steps completed)
+
+     Last session completed Quality Control (passed).
+     Next step: Read Trimming with Cutadapt.
+
+     Ready to continue?
+```
+
+### Commands
+
+| Command | What it does |
+|---------|-------------|
+| `/status` | Galaxy connection state, current plan progress |
+| `/plan` | View analysis plan with step status |
+| `/plan-decisions` | View the decision log |
+| `/notebook` | Notebook info or list available notebooks |
+| `/connect` | Connect to a Galaxy server (prompts for credentials) |
+
+## How It Works
+
+gxypi guides analyses through five phases:
+
+**1. Problem Definition** — Refine your research question using the PICO framework, add literature references.
+
+**2. Data Acquisition** — Track data sources (GEO, SRA, local files), register samples, generate samplesheets, link to Galaxy datasets.
+
+**3. Analysis** — Create a step-by-step plan, execute tools/workflows via Galaxy, log every decision, create QC checkpoints that require your approval before proceeding.
+
+**4. Interpretation** — Review results in biological context, pathway analysis.
+
+**5. Publication** — Generate methods sections from the tool versions actually used, track figures, prepare data sharing.
+
+Everything is saved to a **notebook file** — a readable markdown document with YAML blocks for structured data. You can open it in any editor, share it with collaborators, or use it to reproduce the analysis later.
+
+## Galaxy MCP Setup
+
+gxypi talks to Galaxy through the [Galaxy MCP server](https://github.com/galaxyproject/galaxy-mcp). To set it up:
+
+```bash
+# Clone the Galaxy MCP server
+git clone https://github.com/galaxyproject/galaxy-mcp.git ~/.galaxy-mcp
+
+# Install pi-mcp-adapter
+pi install npm:pi-mcp-adapter
+```
 
 Create `~/.pi/agent/mcp.json`:
 
@@ -99,30 +130,28 @@ Create `~/.pi/agent/mcp.json`:
 }
 ```
 
-Note: Python 3.12 is specified because newer Python versions (3.14+) have compatibility issues with pydantic-core.
+Set your Galaxy credentials:
 
-### Set Galaxy Credentials
-
-Either via environment:
 ```bash
 export GALAXY_URL="https://usegalaxy.org"
 export GALAXY_API_KEY="your-api-key"
 ```
 
-Or use `/connect` command after starting — it will prompt you interactively.
+Or just use `/connect` after starting Pi — it'll prompt you.
 
-### Using Local LLMs (Optional)
+> **Note:** Python 3.12 is recommended. Python 3.14+ has compatibility issues with pydantic-core.
 
-To use a local LLM provider like [LiteLLM](https://litellm.ai/) instead of commercial APIs:
+## Using Local LLMs
 
-1. Create `~/.pi/agent/models.json`:
+Pi supports any OpenAI-compatible API. To use a local provider like [LiteLLM](https://litellm.ai/), create `~/.pi/agent/models.json`:
+
 ```json
 {
   "providers": {
     "litellm": {
       "baseUrl": "http://localhost:4000/v1",
       "api": "openai-completions",
-      "apiKey": "your-litellm-key",
+      "apiKey": "your-key",
       "models": [
         {
           "id": "your-model-name",
@@ -135,234 +164,37 @@ To use a local LLM provider like [LiteLLM](https://litellm.ai/) instead of comme
 }
 ```
 
-2. Create `~/.pi/agent/settings.json`:
-```json
-{
-  "defaultProvider": "litellm",
-  "defaultModel": "your-model-name"
-}
+Then start Pi with `--provider litellm --model your-model-name`, or set defaults in `~/.pi/agent/settings.json`.
+
+## One-Line Install
+
+For a fully automated setup (Pi + MCP + gxypi + launcher script):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galaxyproject/gxypi/main/install.sh | bash
 ```
 
-The `api` field should be `openai-completions` for most OpenAI-compatible APIs.
+This creates a `gxypi` launcher at `~/.local/bin/gxypi` that handles Galaxy credentials on first run.
 
-## Usage
+## Tool Reference
 
-Start Pi and begin an analysis conversation:
+gxypi registers 26 tools across the analysis lifecycle:
 
-```
-$ pi
+| Category | Tools |
+|----------|-------|
+| **Phase management** | `analysis_set_phase` |
+| **Problem definition** | `research_question_refine`, `research_add_literature` |
+| **Data acquisition** | `data_set_source`, `data_add_sample`, `data_add_file`, `data_link_galaxy`, `data_generate_samplesheet`, `data_get_provenance` |
+| **Analysis** | `analysis_plan_create`, `analysis_plan_add_step`, `analysis_plan_update_step`, `analysis_plan_get`, `analysis_plan_activate`, `analysis_plan_summary`, `analysis_step_log`, `analysis_checkpoint` |
+| **Notebooks** | `analysis_notebook_create`, `analysis_notebook_open`, `analysis_notebook_list` |
+| **Publication** | `publication_init`, `publication_generate_methods`, `publication_add_figure`, `publication_update_figure`, `publication_recommend_figures`, `publication_get_status` |
 
-You: I have RNA-seq data from a drug treatment experiment. 6 samples - 3 treated, 3 control.
-     I want to find differentially expressed genes.
+## Related Projects
 
-Pi: I'll help you set up a structured RNA-seq differential expression analysis...
-    [Creates analysis plan, walks through each step with you]
-```
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `/connect` | Connect to Galaxy (prompts for credentials if not set) |
-| `/status` | Show Galaxy connection and plan status |
-| `/plan` | View current analysis plan summary |
-| `/plan-decisions` | View recent decisions in the analysis |
-| `/notebook` | View notebook info or list available notebooks |
-
-### Skills Provided
-
-| Skill | Phase | Purpose |
-|-------|-------|---------|
-| `analysis-plan` | 1-5 | Core plan-based protocol, phase transitions |
-| `data-acquisition` | 2 | GEO/SRA search, Galaxy import, samplesheets |
-| `rnaseq-analysis` | 3 | RNA-seq differential expression workflows |
-| `data-assessment` | 3 | Inspecting and validating data |
-| `result-review` | 4 | Results interpretation, pathway analysis |
-| `publication-prep` | 5 | Methods, figures, data sharing prep |
-
-### Custom Tools
-
-The extension registers tools for each phase:
-
-#### Phase Management
-| Tool | Purpose |
-|------|---------|
-| `analysis_set_phase` | Transition between lifecycle phases |
-
-#### Phase 1: Problem Definition
-| Tool | Purpose |
-|------|---------|
-| `research_question_refine` | Refine hypothesis with PICO framework |
-| `research_add_literature` | Add literature reference |
-
-#### Phase 2: Data Acquisition
-| Tool | Purpose |
-|------|---------|
-| `data_set_source` | Set data source (GEO, SRA, local) |
-| `data_add_sample` | Register sample with metadata |
-| `data_add_file` | Register file with pairing info |
-| `data_link_galaxy` | Link to Galaxy dataset |
-| `data_generate_samplesheet` | Create pipeline samplesheet |
-| `data_get_provenance` | View data provenance summary |
-
-#### Phase 3: Analysis
-| Tool | Purpose |
-|------|---------|
-| `analysis_plan_create` | Create new analysis plan |
-| `analysis_plan_add_step` | Add step to plan |
-| `analysis_plan_update_step` | Update step status |
-| `analysis_plan_get` | Get plan details |
-| `analysis_step_log` | Log decisions |
-| `analysis_checkpoint` | Create QC checkpoints |
-
-#### Phase 5: Publication
-| Tool | Purpose |
-|------|---------|
-| `publication_init` | Start publication prep |
-| `publication_generate_methods` | Generate methods from analysis |
-| `publication_add_figure` | Track figure specifications |
-| `publication_update_figure` | Update figure status |
-| `publication_recommend_figures` | Get figure suggestions |
-| `publication_get_status` | View publication status |
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                        gxypi                             │
-│  ┌──────────────────┐  ┌────────────────────────────┐  │
-│  │    Extensions    │  │          Skills            │  │
-│  │ - state.ts       │  │ - analysis-plan            │  │
-│  │ - tools.ts       │  │ - data-acquisition         │  │
-│  │ - types.ts       │  │ - rnaseq-analysis          │  │
-│  │ - context.ts     │  │ - data-assessment          │  │
-│  │ - notebook-*.ts  │  │ - result-review            │  │
-│  └──────────────────┘  │ - publication-prep         │  │
-│            │           └────────────────────────────┘  │
-│    ┌───────┴───────┐                                   │
-│    │ Notebook      │ (persistent markdown files)       │
-│    │ System        │                                   │
-│    └───────────────┘                                   │
-└────────────┬───────────────────────────────────────────┘
-             │ pi-mcp-adapter
-             ▼
-      ┌─────────────┐
-      │ galaxy-mcp  │
-      └──────┬──────┘
-             ▼
-      ┌─────────────┐
-      │   Galaxy    │
-      │ (6000+ tools)│
-      └─────────────┘
-```
-
-## Example Session
-
-```
-You: I want to analyze some RNA-seq data from GEO
-
-Pi: I'd be happy to help! Let me start by understanding your research question.
-
-    What biological question are you investigating? What do you hope to learn
-    from this dataset?
-
-You: I want to see if drug X affects inflammatory gene expression in cancer cells
-
-Pi: Got it. Let me refine that into a testable hypothesis...
-    [Uses research_question_refine with PICO framework]
-
-    Hypothesis: "Drug X treatment causes differential expression of inflammatory
-    pathway genes in cancer cell lines"
-
-    Now, what GEO dataset are you working with?
-
-You: GSE164073
-
-Pi: I'll set up the data provenance tracking and import the data...
-    [Uses data_set_source, data_add_sample, Galaxy MCP to import]
-
-    Data imported. I've created a samplesheet with 6 samples (3 treated, 3 control).
-    Ready to create the analysis plan?
-
-You: Yes, let's do RNA-seq DE analysis
-
-Pi: [Creates structured plan with QC → Alignment → Quantification → DE steps]
-    [Works through each step with researcher approval]
-    [Documents all decisions in notebook]
-
-    Analysis complete. Key finding: 847 DE genes (FDR<0.05), strong enrichment
-    for inflammatory response pathways.
-
-    Ready to prepare publication materials?
-
-You: Yes
-
-Pi: [Transitions to publication phase]
-    [Generates methods section from tool versions]
-    [Recommends figures: PCA, volcano plot, pathway enrichment]
-    [Tracks figure generation in Galaxy]
-```
-
-## Notebook System
-
-All analysis state is persisted to markdown notebook files:
-
-```markdown
----
-plan_id: "abc123"
-title: "Drug X RNA-seq Analysis"
-status: active
-phase: analysis
----
-
-# Drug X RNA-seq Analysis
-
-**Current Phase**: Analysis
-
-## Research Context
-**Research Question**: Does drug X affect inflammatory gene expression?
-**Hypothesis**: Drug X treatment causes differential expression of inflammatory genes
-
-## Data Provenance
-**Source**: GEO
-**Accession**: GSE164073
-
-| ID | Name | Condition |
-|----|------|-----------|
-| SRR1 | Sample1 | treated |
-...
-
-## Analysis Plan
-### Step 1: Quality Control
-[YAML block with status, inputs, outputs]
-...
-
-## Execution Log
-[Complete audit trail of all decisions]
-
-## Galaxy References
-[Links to Galaxy datasets and history]
-
-## Publication Materials
-[Methods draft, figure tracking]
-```
-
-Notebooks can be:
-- Opened in any text editor or GitHub
-- Used to resume analysis across sessions
-- Shared with collaborators for review
-- Used to reproduce the analysis
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+- [Galaxy](https://galaxyproject.org) — Open-source platform for data-intensive biomedical research
+- [galaxy-mcp](https://github.com/galaxyproject/galaxy-mcp) — MCP server for the Galaxy API
+- [Pi coding agent](https://github.com/badlogic/pi-mono) — The Pi.dev agent framework
 
 ## License
 
 MIT
-
-## Related Projects
-
-- [galaxy-mcp](https://github.com/galaxyproject/galaxy-mcp) - MCP server for Galaxy
-- [galaxy-skills](https://github.com/galaxyproject/galaxy-skills) - Skills for Galaxy development
-- [Pi coding agent](https://github.com/badlogic/pi-mono) - The Pi.dev agent framework
