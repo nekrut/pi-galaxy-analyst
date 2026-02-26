@@ -209,6 +209,20 @@ export type FindingCategory =
   | 'other';
 
 /**
+ * Workflow structure metadata fetched from Galaxy API
+ */
+export interface WorkflowStructure {
+  name: string;
+  annotation?: string;
+  version: number;
+  toolIds: string[];       // full Galaxy tool IDs
+  toolNames: string[];     // human-readable short names
+  inputLabels: string[];   // workflow input step labels
+  outputLabels: string[];  // labeled workflow outputs
+  stepCount: number;
+}
+
+/**
  * Main analysis plan with 5-phase lifecycle support
  */
 export interface AnalysisPlan {
@@ -278,6 +292,9 @@ export interface AnalysisStep {
 
   // Results
   result?: StepResult;
+
+  // Workflow metadata (when executionType is 'workflow')
+  workflowStructure?: WorkflowStructure;
 
   // Dependencies
   dependsOn: string[];

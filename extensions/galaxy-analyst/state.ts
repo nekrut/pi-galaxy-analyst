@@ -32,6 +32,7 @@ import type {
   ToolVersionInfo,
   BiologicalFinding,
   InterpretationFindings,
+  WorkflowStructure,
 } from "./types";
 import {
   generateNotebook,
@@ -198,6 +199,92 @@ export function addStep(params: {
   state.currentPlan.updated = new Date().toISOString();
 
   return step;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow Integration State Functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Add a workflow step to the plan, populated from WorkflowStructure metadata.
+ */
+export function addWorkflowStep(params: {
+  name?: string;
+  description?: string;
+  workflowId: string;
+  trsId?: string;
+  workflowStructure: WorkflowStructure;
+  dependsOn?: string[];
+}): AnalysisStep {
+  if (!state.currentPlan) {
+    throw new Error("No active plan");
+  }
+
+  const ws = params.workflowStructure;
+  const stepNumber = state.currentPlan.steps.length + 1;
+
+  const step: AnalysisStep = {
+    id: String(stepNumber),
+    name: params.name || ws.name,
+    description: params.description || ws.annotation || `Run workflow: ${ws.name}`,
+    status: 'pending',
+    execution: {
+      type: 'workflow',
+      workflowId: params.workflowId,
+      trsId: params.trsId,
+    },
+    inputs: ws.inputLabels.map(label => ({
+      name: label,
+      description: `Workflow input: ${label}`,
+    })),
+    expectedOutputs: ws.outputLabels.length > 0 ? ws.outputLabels : [`Workflow outputs from ${ws.name}`],
+    actualOutputs: [],
+    workflowStructure: ws,
+    dependsOn: params.dependsOn || [],
+  };
+
+  state.currentPlan.steps.push(step);
+  state.currentPlan.updated = new Date().toISOString();
+
+  return step;
+}
+
+/**
+ * Link a Galaxy invocation to a workflow step, marking it in-progress.
+ */
+export function linkInvocation(stepId: string, invocationId: string): AnalysisStep {
+  if (!state.currentPlan) {
+    throw new Error("No active plan");
+  }
+
+  const step = state.currentPlan.steps.find(s => s.id === stepId);
+  if (!step) {
+    throw new Error(`Step ${stepId} not found`);
+  }
+
+  step.status = 'in_progress';
+  step.result = {
+    completedAt: '',
+    invocationId,
+    summary: '',
+    qcPassed: null,
+  };
+  state.currentPlan.updated = new Date().toISOString();
+
+  return step;
+}
+
+/**
+ * Get all in-progress workflow steps that have linked invocations.
+ */
+export function getWorkflowSteps(): AnalysisStep[] {
+  if (!state.currentPlan) return [];
+
+  return state.currentPlan.steps.filter(s =>
+    s.execution.type === 'workflow' &&
+    s.status === 'in_progress' &&
+    s.result?.invocationId
+  );
 }
 
 /**
