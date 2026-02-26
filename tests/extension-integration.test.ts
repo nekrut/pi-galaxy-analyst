@@ -100,6 +100,10 @@ const EXPECTED_TOOLS = [
   "analysis_notebook_open",
   "analysis_notebook_list",
 
+  // Phase 4: Interpretation
+  "interpretation_add_finding",
+  "interpretation_summarize",
+
   // Phase 5: Publication
   "publication_init",
   "publication_generate_methods",
@@ -107,6 +111,10 @@ const EXPECTED_TOOLS = [
   "publication_update_figure",
   "publication_recommend_figures",
   "publication_get_status",
+
+  // GTN Tutorial Discovery
+  "gtn_search",
+  "gtn_fetch",
 ];
 
 const EXPECTED_COMMANDS = [
@@ -123,6 +131,8 @@ const EXPECTED_EVENTS = [
   "turn_end",
   "session_before_compact",
   "session_shutdown",
+  "tool_execution_start",
+  "tool_execution_end",
   "tool_result",
 ];
 
