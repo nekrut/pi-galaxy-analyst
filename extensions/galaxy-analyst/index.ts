@@ -241,14 +241,25 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       const { profiles, active } = loadProfiles();
       const profileNames = Object.keys(profiles);
 
+      // After switching profiles, reload extensions so the session_start
+      // handler auto-connects with the new credentials. Falls back to
+      // sendUserMessage if reload() isn't available.
+      async function reloadOrMessage(url: string) {
+        if (typeof ctx.reload === 'function') {
+          await ctx.reload();
+        } else {
+          pi.sendUserMessage(
+            `Please connect to Galaxy at ${url} using the API key from environment variables.`
+          );
+        }
+      }
+
       // /connect <name> — switch to a named profile
       const requestedName = args?.trim();
       if (requestedName) {
         if (switchProfile(requestedName)) {
           ctx.ui.notify(`Switched to ${requestedName} (${profiles[requestedName].url})`, "info");
-          pi.sendUserMessage(
-            `Please connect to Galaxy at ${profiles[requestedName].url} using the API key from environment variables.`
-          );
+          await reloadOrMessage(profiles[requestedName].url);
         } else {
           ctx.ui.notify(`Unknown profile "${requestedName}". Use /profiles to see available profiles.`, "warning");
         }
@@ -277,18 +288,14 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
           const name = profileNames[selectedIndex];
           switchProfile(name);
           ctx.ui.notify(`Switched to ${name} (${profiles[name].url})`, "info");
-          pi.sendUserMessage(
-            `Please connect to Galaxy at ${profiles[name].url} using the API key from environment variables.`
-          );
+          await reloadOrMessage(profiles[name].url);
           return;
         }
         // Fall through to "add new server" flow below
       } else if (profileNames.length === 1 && active && process.env.GALAXY_URL && process.env.GALAXY_API_KEY) {
         // One profile, already active — just connect
         ctx.ui.notify(`Connecting to ${profiles[active].url}...`, "info");
-        pi.sendUserMessage(
-          `Please connect to Galaxy at ${profiles[active].url} using the API key from environment variables.`
-        );
+        await reloadOrMessage(profiles[active].url);
         return;
       }
 
@@ -320,10 +327,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       process.env.GALAXY_API_KEY = apiKey;
 
       ctx.ui.notify(`Saved profile "${name}" and connecting to ${galaxyUrl}...`, "info");
-
-      pi.sendUserMessage(
-        `Please connect to Galaxy at ${galaxyUrl} using the API key from environment variables.`
-      );
+      await reloadOrMessage(galaxyUrl);
     },
   });
 
@@ -467,7 +471,58 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Monitor tool calls for Galaxy connection state
+  // Tool execution lifecycle: show status when Galaxy tools run
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.on("tool_execution_start", async (event, ctx) => {
+    if (event.toolName?.startsWith("galaxy_")) {
+      const label = event.toolName.replace(/^galaxy_/, "").replace(/_/g, " ");
+      ctx.ui.setStatus("galaxy-tool", `🔧 Running ${label}...`);
+    }
+  });
+
+  pi.on("tool_execution_end", async (event, ctx) => {
+    if (event.toolName?.startsWith("galaxy_")) {
+      ctx.ui.setStatus("galaxy-tool", "");
+    }
+
+    // Track galaxy_connect success
+    if (event.toolName === "galaxy_connect" && !event.isError) {
+      try {
+        const resultText = typeof event.result === 'string'
+          ? event.result
+          : JSON.stringify(event.result);
+        if (resultText.includes('"success": true') || resultText.includes('success')) {
+          const state = getState();
+          state.galaxyConnected = true;
+        }
+      } catch {
+        // Ignore parsing errors
+      }
+    }
+
+    // Track history creation
+    if (event.toolName === "galaxy_create_history" && !event.isError) {
+      try {
+        const resultText = typeof event.result === 'string'
+          ? event.result
+          : JSON.stringify(event.result);
+        const match = resultText.match(/"id":\s*"([^"]+)"/);
+        if (match) {
+          const state = getState();
+          state.currentHistoryId = match[1];
+          const plan = getCurrentPlan();
+          if (plan) {
+            plan.galaxy.historyId = match[1];
+          }
+        }
+      } catch {
+        // Ignore parsing errors
+      }
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Monitor tool calls for Galaxy connection state (fallback for tool_result)
   // ─────────────────────────────────────────────────────────────────────────────
   pi.on("tool_result", async (event, _ctx) => {
     // Watch for galaxy connect results to update our state
