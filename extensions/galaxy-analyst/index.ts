@@ -96,12 +96,29 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       : "";
 
     if (plan) {
-      // Existing analysis — recap it
+      // Existing analysis — recap it with richer context
       const completed = plan.steps.filter(s => s.status === 'completed').length;
       const current = plan.steps.find(s => s.status === 'in_progress');
+      const lastDecision = plan.decisions.length > 0
+        ? plan.decisions[plan.decisions.length - 1]
+        : null;
+      const pendingReviews = plan.checkpoints.filter(c => c.status === 'needs_review');
+      const nextPending = plan.steps.find(s => s.status === 'pending');
+
+      let recapExtra = '';
+      if (lastDecision) {
+        recapExtra += ` Last decision: "${lastDecision.description}" (${lastDecision.type.replace(/_/g, ' ')}).`;
+      }
+      if (pendingReviews.length > 0) {
+        recapExtra += ` There are ${pendingReviews.length} QC checkpoint(s) awaiting review.`;
+      }
+      if (nextPending && !current) {
+        recapExtra += ` Suggested next action: start step "${nextPending.name}".`;
+      }
+
       pi.sendUserMessage(
         `Session started with an existing analysis plan loaded: "${plan.title}" (${completed}/${plan.steps.length} steps complete` +
-        `${current ? `, currently on: ${current.name}` : ""}).` +
+        `${current ? `, currently on: ${current.name}` : ""}).${recapExtra}` +
         ` Give a brief welcome, then recap where we left off — what's been done, what's next, and any open questions. ` +
         `Keep it concise (a short paragraph, not a bulleted list).${connectInstr}`
       );
@@ -166,13 +183,33 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         return;
       }
 
+      const phaseLabels: Record<string, string> = {
+        problem_definition: 'Problem Definition',
+        data_acquisition: 'Data Acquisition',
+        analysis: 'Analysis',
+        interpretation: 'Interpretation',
+        publication: 'Publication',
+      };
+
+      const phaseOrder = ['problem_definition', 'data_acquisition', 'analysis', 'interpretation', 'publication'];
+      const phaseIdx = phaseOrder.indexOf(plan.phase);
+
       // Build summary display
       const lines: string[] = [];
       lines.push(`📋 ${plan.title} [${plan.status}]`);
-      lines.push(`   ${plan.context.researchQuestion.slice(0, 60)}...`);
+      lines.push(`   ${plan.context.researchQuestion.slice(0, 60)}${plan.context.researchQuestion.length > 60 ? '...' : ''}`);
       lines.push('');
 
-      // Steps
+      // Phase progress
+      const phaseBar = phaseOrder.map((p, i) => {
+        if (i < phaseIdx) return '●';
+        if (i === phaseIdx) return '◉';
+        return '○';
+      }).join('─');
+      lines.push(`   Phase: ${phaseBar}  ${phaseLabels[plan.phase] || plan.phase}`);
+      lines.push('');
+
+      // Steps with completion info
       for (const step of plan.steps) {
         const icon = {
           'pending': '⬜',
@@ -181,7 +218,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
           'skipped': '⏭️',
           'failed': '❌',
         }[step.status];
-        lines.push(`   ${icon} ${step.id}. ${step.name}`);
+        let extra = '';
+        if (step.result?.completedAt) {
+          const elapsed = timeSince(step.result.completedAt);
+          extra = ` (${elapsed} ago)`;
+        }
+        lines.push(`   ${icon} ${step.id}. ${step.name}${extra}`);
       }
 
       // Stats
@@ -190,6 +232,19 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       lines.push(`   Progress: ${completed}/${plan.steps.length} steps completed`);
       lines.push(`   Decisions: ${plan.decisions.length} logged`);
       lines.push(`   Checkpoints: ${plan.checkpoints.length}`);
+
+      // Last QC checkpoint
+      const lastCp = [...plan.checkpoints].reverse().find(c => c.status !== 'pending');
+      if (lastCp) {
+        const cpIcon = lastCp.status === 'passed' ? '✅' : lastCp.status === 'failed' ? '❌' : '⚠️';
+        lines.push(`   Last QC: ${cpIcon} ${lastCp.name} (${lastCp.status.replace('_', ' ')})`);
+      }
+
+      // Pending decisions (not yet approved)
+      const pendingDecisions = plan.decisions.filter(d => !d.researcherApproved);
+      if (pendingDecisions.length > 0) {
+        lines.push(`   ⚠️  ${pendingDecisions.length} decision(s) pending approval`);
+      }
 
       ctx.ui.setWidget("plan-view", lines);
     },
@@ -473,16 +528,29 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ─────────────────────────────────────────────────────────────────────────────
   // Tool execution lifecycle: show status when Galaxy tools run
   // ─────────────────────────────────────────────────────────────────────────────
+  const toolStartTimes = new Map<string, number>();
+
   pi.on("tool_execution_start", async (event, ctx) => {
     if (event.toolName?.startsWith("galaxy_")) {
       const label = event.toolName.replace(/^galaxy_/, "").replace(/_/g, " ");
+      toolStartTimes.set(event.toolName, Date.now());
       ctx.ui.setStatus("galaxy-tool", `🔧 Running ${label}...`);
     }
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {
     if (event.toolName?.startsWith("galaxy_")) {
-      ctx.ui.setStatus("galaxy-tool", "");
+      const startTime = toolStartTimes.get(event.toolName);
+      if (startTime) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const label = event.toolName.replace(/^galaxy_/, "").replace(/_/g, " ");
+        ctx.ui.setStatus("galaxy-tool", `✓ ${label} (${elapsed}s)`);
+        toolStartTimes.delete(event.toolName);
+        // Clear after a brief display
+        setTimeout(() => ctx.ui.setStatus("galaxy-tool", ""), 3000);
+      } else {
+        ctx.ui.setStatus("galaxy-tool", "");
+      }
     }
 
     // Track galaxy_connect success
@@ -560,4 +628,16 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
       }
     }
   });
+}
+
+function timeSince(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d`;
 }
