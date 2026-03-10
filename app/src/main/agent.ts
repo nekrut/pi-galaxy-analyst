@@ -13,6 +13,10 @@ interface PendingResponse {
   reject: (err: Error) => void;
 }
 
+function log(...args: unknown[]): void {
+  console.log("[agent]", ...args);
+}
+
 export class AgentManager {
   private process: ChildProcess | null = null;
   private window: BrowserWindow;
@@ -20,22 +24,43 @@ export class AgentManager {
   private stderr = "";
   private pendingResponses = new Map<string, PendingResponse>();
   private idCounter = 0;
+  private cwd: string;
 
-  constructor(window: BrowserWindow) {
+  constructor(window: BrowserWindow, cwd: string) {
     this.window = window;
+    this.cwd = cwd;
+  }
+
+  setCwd(cwd: string): void {
+    this.cwd = cwd;
+    log("cwd set to", cwd);
+  }
+
+  getCwd(): string {
+    return this.cwd;
   }
 
   start(): void {
     if (this.process) this.stop();
 
     this.stderr = "";
-    this.setStatus("running");
 
-    this.process = spawn("node", [GXYPI_BIN, "--mode", "rpc"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      cwd: process.cwd(),
-      env: { ...process.env },
-    });
+    log("starting agent", { bin: GXYPI_BIN, cwd: this.cwd });
+
+    try {
+      this.process = spawn("node", [GXYPI_BIN, "--mode", "rpc"], {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: this.cwd,
+        env: { ...process.env },
+      });
+    } catch (err) {
+      log("spawn failed:", err);
+      this.setStatus("error", `Failed to spawn agent: ${err}`);
+      return;
+    }
+
+    log("agent spawned, pid:", this.process.pid);
+    this.setStatus("running");
 
     const rl = createInterface({
       input: this.process.stdout!,
@@ -45,10 +70,16 @@ export class AgentManager {
     rl.on("line", (line) => this.handleLine(line));
 
     this.process.stderr?.on("data", (chunk: Buffer) => {
-      this.stderr += chunk.toString();
+      const text = chunk.toString();
+      this.stderr += text;
+      log("stderr:", text.trimEnd());
     });
 
-    this.process.on("exit", (code) => {
+    this.process.on("exit", (code, signal) => {
+      log("agent exited, code:", code, "signal:", signal);
+      if (this.stderr) {
+        log("accumulated stderr:\n" + this.stderr);
+      }
       this.process = null;
       if (code !== 0 && code !== null) {
         this.setStatus("error", `Agent exited with code ${code}`);
@@ -58,6 +89,7 @@ export class AgentManager {
     });
 
     this.process.on("error", (err) => {
+      log("agent process error:", err.message);
       this.process = null;
       this.setStatus("error", err.message);
     });
@@ -65,20 +97,26 @@ export class AgentManager {
 
   stop(): void {
     if (this.process) {
+      log("stopping agent, pid:", this.process.pid);
       this.process.kill("SIGTERM");
       this.process = null;
     }
     this.setStatus("stopped");
-    // Reject all pending responses
-    for (const [, pending] of this.pendingResponses) {
+    for (const [id, pending] of this.pendingResponses) {
+      log("rejecting pending response:", id);
       pending.reject(new Error("Agent stopped"));
     }
     this.pendingResponses.clear();
   }
 
   send(obj: Record<string, unknown>): void {
-    if (!this.process?.stdin?.writable) return;
-    this.process.stdin.write(JSON.stringify(obj) + "\n");
+    if (!this.process?.stdin?.writable) {
+      log("send failed: stdin not writable");
+      return;
+    }
+    const json = JSON.stringify(obj);
+    log("→ stdin:", json.slice(0, 200));
+    this.process.stdin.write(json + "\n");
   }
 
   sendCommand(obj: Record<string, unknown>): Promise<unknown> {
@@ -99,6 +137,7 @@ export class AgentManager {
 
   private setStatus(status: AgentStatus, message?: string): void {
     this.status = status;
+    log("status:", status, message || "");
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:status", status, message);
     }
@@ -111,11 +150,15 @@ export class AgentManager {
     try {
       data = JSON.parse(line);
     } catch {
+      log("non-JSON stdout:", line.slice(0, 200));
       return;
     }
 
+    const type = data.type as string;
+    log("← event:", type, type === "message_update" ? "" : JSON.stringify(data).slice(0, 150));
+
     // Route responses to pending promises
-    if (data.type === "response" && data.id) {
+    if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);
       if (pending) {
         this.pendingResponses.delete(data.id as string);
@@ -129,7 +172,8 @@ export class AgentManager {
     }
 
     // Route extension UI requests
-    if (data.type === "extension_ui_request") {
+    if (type === "extension_ui_request") {
+      log("  ui request:", (data as { method?: string }).method, (data as { id?: string }).id);
       this.window.webContents.send("agent:ui-request", data);
       return;
     }

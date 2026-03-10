@@ -11,6 +11,8 @@ declare global {
 
 const gxypi = window.gxypi;
 
+console.log("[gxypi] renderer loaded");
+
 const chatPanel = new ChatPanel(
   document.getElementById("messages")!,
   document.getElementById("chat-input") as HTMLTextAreaElement,
@@ -26,6 +28,9 @@ const sidebar = new SidebarPanel(
 let isStreaming = false;
 
 gxypi.onAgentEvent((event) => {
+  if (event.type !== "message_update") {
+    console.log("[gxypi] event:", event.type, event);
+  }
   switch (event.type) {
     case "agent_start":
       isStreaming = true;
@@ -63,6 +68,23 @@ gxypi.onAgentEvent((event) => {
         event.result as string | undefined
       );
       break;
+
+    case "auto_retry_start":
+      showToast(
+        `Retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage}`,
+        "warning"
+      );
+      break;
+
+    case "auto_retry_end":
+      if (!event.success) {
+        showToast(`Failed after ${event.attempt} retries: ${event.finalError}`, "error");
+      }
+      break;
+
+    case "extension_error":
+      showToast(`Extension error: ${event.message || event.error}`, "error");
+      break;
   }
 });
 
@@ -77,6 +99,7 @@ gxypi.onUiRequest((request) => {
 const statusDot = document.getElementById("agent-status")!;
 
 gxypi.onAgentStatus((status, msg) => {
+  console.log("[gxypi] status:", status, msg || "");
   statusDot.className = `status-dot ${status}`;
   statusDot.title = msg || status;
 

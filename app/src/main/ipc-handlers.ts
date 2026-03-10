@@ -2,20 +2,28 @@ import { ipcMain, dialog } from "electron";
 import type { AgentManager } from "./agent.js";
 import { loadConfig, saveConfig } from "./config.js";
 
+function log(...args: unknown[]): void {
+  console.log("[ipc]", ...args);
+}
+
 export function registerIpcHandlers(agent: AgentManager): void {
   ipcMain.handle("agent:prompt", async (_e, message: string) => {
+    log("prompt:", message.slice(0, 80));
     agent.send({ type: "prompt", message });
   });
 
   ipcMain.handle("agent:steer", async (_e, message: string) => {
+    log("steer:", message.slice(0, 80));
     agent.send({ type: "steer", message });
   });
 
   ipcMain.handle("agent:abort", async () => {
+    log("abort");
     agent.send({ type: "abort" });
   });
 
   ipcMain.handle("agent:new-session", async () => {
+    log("new-session");
     return agent.sendCommand({ type: "new_session" });
   });
 
@@ -28,6 +36,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   ipcMain.on("agent:ui-response", (_e, response: Record<string, unknown>) => {
+    log("ui-response:", JSON.stringify(response).slice(0, 120));
     agent.send(response);
   });
 
@@ -36,18 +45,27 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   ipcMain.handle("config:save", async (_e, config) => {
+    log("config:save");
     saveConfig(config);
   });
 
   ipcMain.handle("agent:restart", async () => {
+    log("restart");
     agent.stop();
     agent.start();
   });
 
   ipcMain.handle("dialog:select-directory", async () => {
     const result = await dialog.showOpenDialog({
-      properties: ["openDirectory"],
+      title: "Choose working directory",
+      defaultPath: agent.getCwd(),
+      properties: ["openDirectory", "createDirectory"],
     });
-    return result.filePaths[0] ?? null;
+    const dir = result.filePaths[0] ?? null;
+    if (dir) {
+      log("directory changed to:", dir);
+      agent.setCwd(dir);
+    }
+    return dir;
   });
 }
