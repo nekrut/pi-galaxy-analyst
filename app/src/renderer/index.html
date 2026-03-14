@@ -47,6 +47,14 @@
     <!-- Toast container -->
     <div id="toast-container"></div>
 
+    <script>
+      window.addEventListener("error", (e) => {
+        console.error("UNCAUGHT:", e.message, e.filename, e.lineno);
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        console.error("UNHANDLED REJECTION:", e.reason);
+      });
+    </script>
     <script type="module" src="app.ts"></script>
   </body>
 </html>

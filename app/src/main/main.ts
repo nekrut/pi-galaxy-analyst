@@ -1,8 +1,15 @@
 import { app, BrowserWindow, Menu, dialog } from "electron";
+import { mkdirSync, appendFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { registerIpcHandlers } from "./ipc-handlers.js";
 import { AgentManager } from "./agent.js";
+
+const LOG_FILE = path.join(os.homedir(), ".gxypi", "debug.log");
+function debugLog(...args: unknown[]): void {
+  const line = `[${new Date().toISOString()}] ${args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}\n`;
+  try { appendFileSync(LOG_FILE, line); } catch {}
+}
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -11,21 +18,15 @@ function log(...args: unknown[]): void {
   console.log("[main]", ...args);
 }
 
+const DEFAULT_CWD = path.join(os.homedir(), ".gxypi", "analyses");
+
 let mainWindow: BrowserWindow | null = null;
 let agentManager: AgentManager | null = null;
 
-async function selectWorkingDirectory(): Promise<string> {
-  const result = await dialog.showOpenDialog({
-    title: "Choose analysis directory",
-    defaultPath: os.homedir(),
-    properties: ["openDirectory", "createDirectory"],
-    message: "Select a directory to work in. gxypi will look for notebooks here.",
-  });
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return os.homedir();
-  }
-  return result.filePaths[0];
+function getDefaultCwd(): string {
+  const cwd = process.env.GXYPI_CWD || DEFAULT_CWD;
+  mkdirSync(cwd, { recursive: true });
+  return cwd;
 }
 
 function createWindow(cwd: string): void {
@@ -39,7 +40,7 @@ function createWindow(cwd: string): void {
     title: "gxypi",
     titleBarStyle: "hiddenInset",
     webPreferences: {
-      preload: path.join(__dirname, "../preload/preload.js"),
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -56,7 +57,17 @@ function createWindow(cwd: string): void {
   agentManager = new AgentManager(mainWindow, cwd);
   registerIpcHandlers(agentManager);
 
-  agentManager.start();
+  // Pipe renderer console to file for debugging
+  mainWindow.webContents.on("console-message", (_e, level, message, line, sourceId) => {
+    const prefix = ["LOG", "WARN", "ERR"][level] || "?";
+    debugLog(`[renderer:${prefix}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.once("did-finish-load", () => {
+    debugLog("renderer did-finish-load, starting agent");
+    log("renderer loaded, starting agent");
+    agentManager!.start();
+  });
 
   mainWindow.on("closed", () => {
     log("window closed");
@@ -72,6 +83,28 @@ function buildMenu(): void {
         { role: "about" },
         { type: "separator" },
         { role: "quit" },
+      ],
+    },
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Open Analysis Directory...",
+          accelerator: "CmdOrCtrl+O",
+          click: async () => {
+            if (!agentManager) return;
+            const result = await dialog.showOpenDialog({
+              title: "Choose analysis directory",
+              defaultPath: agentManager.getCwd(),
+              properties: ["openDirectory", "createDirectory"],
+            });
+            if (result.canceled || result.filePaths.length === 0) return;
+            log("switching cwd to:", result.filePaths[0]);
+            agentManager.setCwd(result.filePaths[0]);
+            agentManager.stop();
+            agentManager.start();
+          },
+        },
       ],
     },
     {
@@ -121,16 +154,13 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
+  debugLog("app ready, LOG_FILE:", LOG_FILE);
   log("app ready");
   buildMenu();
 
-  // Use GXYPI_CWD env var if set, otherwise prompt
-  let cwd = process.env.GXYPI_CWD;
-  if (!cwd) {
-    cwd = await selectWorkingDirectory();
-  }
-  log("selected cwd:", cwd);
+  const cwd = getDefaultCwd();
+  log("cwd:", cwd);
   createWindow(cwd);
 
   app.on("activate", () => {

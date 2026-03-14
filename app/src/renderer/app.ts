@@ -12,6 +12,9 @@ declare global {
 const gxypi = window.gxypi;
 
 console.log("[gxypi] renderer loaded");
+if (!gxypi) {
+  console.error("[gxypi] FATAL: window.gxypi is undefined — preload script may have failed");
+}
 
 const chatPanel = new ChatPanel(
   document.getElementById("messages")!,
@@ -29,8 +32,9 @@ let isStreaming = false;
 
 gxypi.onAgentEvent((event) => {
   if (event.type !== "message_update") {
-    console.log("[gxypi] event:", event.type, event);
+    console.log("[gxypi] event:", event.type);
   }
+
   switch (event.type) {
     case "agent_start":
       isStreaming = true;
@@ -51,6 +55,7 @@ gxypi.onAgentEvent((event) => {
       if (evt.type === "text_delta" && evt.delta) {
         chatPanel.appendDelta(evt.delta);
       }
+      // thinking_delta intentionally not rendered — it's internal reasoning
       break;
     }
 
