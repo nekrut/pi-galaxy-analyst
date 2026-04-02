@@ -59,6 +59,8 @@ Notes:
 
 - `gxypi` writes Galaxy MCP configuration into `~/.pi/agent/mcp.json` during startup
 - use the wrapper path when you want to validate the real end-user terminal experience
+- informational wrapper commands are side-effect free:
+  `gxypi --help`, `gxypi --version`, and `gxypi --list-models` should not rewrite MCP config
 
 Check:
 

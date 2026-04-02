@@ -2,7 +2,7 @@
 
 import { main } from "@mariozechner/pi-coding-agent";
 import { resolve, dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 
@@ -18,6 +18,62 @@ const extensionPath = resolve(__dirname, "../extensions/galaxy-analyst");
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const mcpAdapterPath = dirname(require.resolve("pi-mcp-adapter/index.ts"));
+const piEntryPointPath = fileURLToPath(import.meta.resolve("@mariozechner/pi-coding-agent"));
+const piPackageDir = dirname(dirname(piEntryPointPath));
+const piArgsModulePath = join(piPackageDir, "dist/cli/args.js");
+const piListModelsModulePath = join(piPackageDir, "dist/cli/list-models.js");
+const piConfigModulePath = join(piPackageDir, "dist/config.js");
+const piAuthStorageModulePath = join(piPackageDir, "dist/core/auth-storage.js");
+const piModelRegistryModulePath = join(piPackageDir, "dist/core/model-registry.js");
+const userArgs = process.argv.slice(2);
+
+function hasArg(flag) {
+  return userArgs.includes(flag) || userArgs.some(arg => arg.startsWith(`${flag}=`));
+}
+
+const isInformationalCommand = [
+  "--help",
+  "-h",
+  "--version",
+  "--list-models",
+].some(hasArg);
+
+function getListModelsSearchPattern() {
+  const index = userArgs.findIndex(arg => arg === "--list-models");
+  if (index === -1) return undefined;
+  const candidate = userArgs[index + 1];
+  if (!candidate || candidate.startsWith("-") || candidate.startsWith("@")) {
+    return undefined;
+  }
+  return candidate;
+}
+
+async function handleInformationalCommand() {
+  if (hasArg("--help") || hasArg("-h")) {
+    const { printHelp } = await import(pathToFileURL(piArgsModulePath).href);
+    printHelp();
+    return true;
+  }
+
+  if (hasArg("--version")) {
+    const { VERSION } = await import(pathToFileURL(piConfigModulePath).href);
+    console.log(VERSION);
+    return true;
+  }
+
+  if (hasArg("--list-models")) {
+    const { listModels } = await import(pathToFileURL(piListModelsModulePath).href);
+    const { getModelsPath } = await import(pathToFileURL(piConfigModulePath).href);
+    const { AuthStorage } = await import(pathToFileURL(piAuthStorageModulePath).href);
+    const { ModelRegistry } = await import(pathToFileURL(piModelRegistryModulePath).href);
+    const authStorage = AuthStorage.inMemory();
+    const modelRegistry = new ModelRegistry(authStorage, getModelsPath());
+    await listModels(modelRegistry, getListModelsSearchPattern());
+    return true;
+  }
+
+  return false;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Consolidated config (~/.gxypi/config.json)
@@ -95,7 +151,9 @@ function migrateLegacyFiles() {
   }
 }
 
-migrateLegacyFiles();
+if (!isInformationalCommand) {
+  migrateLegacyFiles();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Apply consolidated config
@@ -129,24 +187,26 @@ if (gxypiConfig.llm?.apiKey) {
 const mcpConfigPath = join(agentDir, "mcp.json");
 
 let mcpConfig = {};
-if (existsSync(mcpConfigPath)) {
-  mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
-}
+if (!isInformationalCommand) {
+  if (existsSync(mcpConfigPath)) {
+    mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
+  }
 
-mcpConfig.mcpServers = mcpConfig.mcpServers || {};
-if (!mcpConfig.mcpServers.galaxy) {
-  mcpConfig.mcpServers.galaxy = {
-    command: "uvx",
-    args: ["galaxy-mcp"],
-  };
+  mcpConfig.mcpServers = mcpConfig.mcpServers || {};
+  if (!mcpConfig.mcpServers.galaxy) {
+    mcpConfig.mcpServers.galaxy = {
+      command: "uvx",
+      args: ["galaxy-mcp"],
+    };
+  }
+  // Expose Galaxy tools as direct (first-class) tools so the LLM can call them
+  // by name instead of going through the mcp() proxy gateway
+  if (!mcpConfig.mcpServers.galaxy.directTools) {
+    mcpConfig.mcpServers.galaxy.directTools = true;
+  }
+  mkdirSync(dirname(mcpConfigPath), { recursive: true });
+  writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 }
-// Expose Galaxy tools as direct (first-class) tools so the LLM can call them
-// by name instead of going through the mcp() proxy gateway
-if (!mcpConfig.mcpServers.galaxy.directTools) {
-  mcpConfig.mcpServers.galaxy.directTools = true;
-}
-mkdirSync(dirname(mcpConfigPath), { recursive: true });
-writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Load Galaxy credentials: consolidated config → legacy profiles → mcp.json
@@ -155,7 +215,7 @@ writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 let galaxyLoaded = false;
 
 // 1. Consolidated config
-if (gxypiConfig.galaxy?.active && gxypiConfig.galaxy.profiles) {
+if (!isInformationalCommand && gxypiConfig.galaxy?.active && gxypiConfig.galaxy.profiles) {
   const active = gxypiConfig.galaxy.profiles[gxypiConfig.galaxy.active];
   if (active) {
     if (!process.env.GALAXY_URL) process.env.GALAXY_URL = active.url;
@@ -173,7 +233,7 @@ if (gxypiConfig.galaxy?.active && gxypiConfig.galaxy.profiles) {
 }
 
 // 2. Legacy galaxy-profiles.json (for setups that haven't migrated yet)
-if (!galaxyLoaded) {
+if (!isInformationalCommand && !galaxyLoaded) {
   const profilesPath = join(agentDir, "galaxy-profiles.json");
 
   if (!existsSync(profilesPath)) {
@@ -226,10 +286,9 @@ if (!galaxyLoaded) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function checkLLMProvider() {
-  const argv = process.argv.slice(2);
-  const skipFlags = ["--version", "--help", "-h", "--api-key"];
-  if (argv.some(a => skipFlags.some(f => a.startsWith(f)))) return;
-  if (argv.includes("--provider")) return;
+  const skipFlags = ["--version", "--help", "-h", "--api-key", "--list-models"];
+  if (userArgs.some(a => skipFlags.some(f => a.startsWith(f)))) return;
+  if (hasArg("--provider")) return;
 
   // Consolidated config has an API key
   if (gxypiConfig.llm?.apiKey) return;
@@ -293,9 +352,8 @@ Set up one of the following:
 // Inject --provider / --model from consolidated config or legacy models.json
 // ─────────────────────────────────────────────────────────────────────────────
 
-const userArgs = process.argv.slice(2);
 const providerArgs = [];
-if (!userArgs.includes("--provider") && !userArgs.some(a => a.startsWith("--provider="))) {
+if (!hasArg("--provider")) {
   // Prefer consolidated config
   if (gxypiConfig.llm?.provider) {
     providerArgs.push("--provider", gxypiConfig.llm.provider);
@@ -323,6 +381,10 @@ if (!userArgs.includes("--provider") && !userArgs.some(a => a.startsWith("--prov
 
 // Build args: inject both extensions, pass through everything else
 const args = ["-e", mcpAdapterPath, "-e", extensionPath, ...providerArgs, ...userArgs];
+
+if (await handleInformationalCommand()) {
+  process.exit(0);
+}
 
 checkLLMProvider();
 main(args);
