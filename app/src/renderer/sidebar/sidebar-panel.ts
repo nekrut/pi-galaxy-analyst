@@ -1,3 +1,8 @@
+// Strip ANSI escape sequences (color codes, cursor movement, etc.)
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 // Widget key → friendly label
 const WIDGET_LABELS: Record<string, string> = {
   "plan-view": "Analysis Plan",
@@ -27,7 +32,7 @@ export class SidebarPanel {
 
     const linesEl = section.querySelector(".widget-lines") as HTMLElement;
     if (linesEl) {
-      linesEl.textContent = lines.join("\n");
+      linesEl.textContent = stripAnsi(lines.join("\n"));
     }
   }
 
@@ -52,7 +57,7 @@ export class SidebarPanel {
       // Insert status entries at the top
       this.container.insertBefore(el, this.container.firstChild);
     }
-    el.textContent = text;
+    el.textContent = stripAnsi(text);
   }
 
   private createSection(key: string): HTMLElement {
