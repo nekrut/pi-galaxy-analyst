@@ -52,10 +52,9 @@ gxypi.onAgentEvent((event) => {
         | undefined;
       if (!evt) break;
 
-      if (evt.type === "text_delta" && evt.delta) {
+      if ((evt.type === "text_delta" || evt.type === "thinking_delta") && evt.delta) {
         chatPanel.appendDelta(evt.delta);
       }
-      // thinking_delta intentionally not rendered — it's internal reasoning
       break;
     }
 
