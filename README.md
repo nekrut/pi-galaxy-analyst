@@ -4,7 +4,7 @@ An AI co-scientist for [Galaxy](https://galaxyproject.org) bioinformatics, built
 
 gxypi turns Pi into a structured analysis partner — it creates plans, runs Galaxy tools, documents every decision, and saves everything to a persistent notebook you can share, resume, and reproduce.
 
-The primary product experience is terminal-first. The Electron app in [`app/`](/Users/dannon/work/pi-galaxy-analyst/app) is an optional shell around the same runtime, not the only supported way to use gxypi.
+The primary product experience is terminal-first. The Electron app in [`app/`](app/) is an optional desktop shell around the same gxypi RPC runtime -- Galaxy-branded, with window state persistence, a working directory picker, and thinking/text streaming in the chat panel. It's a convenience wrapper, not the only supported way to use gxypi.
 
 ## Current Status
 
