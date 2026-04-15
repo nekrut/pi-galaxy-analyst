@@ -1,7 +1,7 @@
 {
-  "name": "gxypi",
+  "name": "orbit",
   "version": "0.1.0",
-  "description": "AI co-scientist for Galaxy bioinformatics",
+  "description": "Electron desktop shell for the Loom agent runtime (Galaxy bioinformatics)",
   "main": ".vite/build/main.js",
   "scripts": {
     "start": "electron-forge start",
