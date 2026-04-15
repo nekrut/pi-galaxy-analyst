@@ -10,7 +10,7 @@ Loom weaves the threads of a research project -- question, data, analysis, inter
 
 Consumers sit on top of Loom and are named independently:
 
-- **`gxypi`** -- the terminal CLI consumer. First-class and the primary validation path. Installed from npm, configured in `~/.gxypi/config.json`.
+- **`gxypi`** -- the terminal CLI consumer. First-class and the primary validation path. Installed from npm; reads brain-level config from `~/.loom/config.json`.
 - **Orbit** (in [`app/`](app/)) -- the Electron desktop shell. Galaxy-branded; chat panel with streaming, a sidebar tab bar auto-populated with plan/decisions/notebook/status, window state persistence, and a working-directory picker. Orbit is optional -- the `gxypi` CLI is the supported primary path.
 - **Future shells** -- a Galaxy-embedded web UI, a hosted server mode, and anything else can talk to the same brain over RPC.
 
@@ -127,7 +127,7 @@ Pi:  Loaded notebook: RNA-seq Drug Treatment (1/5 steps completed)
 
 ### Configuration
 
-The `gxypi` CLI uses a single config file at `~/.gxypi/config.json` for both Galaxy credentials and LLM provider settings:
+Loom uses a single brain-level config file at `~/.loom/config.json` for Galaxy credentials, LLM provider settings, and execution mode. All consumers (the `gxypi` CLI, Orbit, any future shell) read and write the same file:
 
 ```json
 {
@@ -158,7 +158,7 @@ export GALAXY_URL="https://usegalaxy.org"
 export GALAXY_API_KEY="your-api-key"
 ```
 
-If you have an existing setup with `~/.pi/agent/galaxy-profiles.json` or `~/.pi/agent/models.json`, the CLI migrates them into `~/.gxypi/config.json` on first run.
+If you have an existing setup with `~/.gxypi/config.json` (from earlier CLI versions) or with `~/.pi/agent/galaxy-profiles.json` / `~/.pi/agent/models.json`, the CLI migrates them into `~/.loom/config.json` on first run. The old files are left in place; nothing is deleted.
 
 ### Commands
 
@@ -204,7 +204,7 @@ Granular changes like Galaxy dataset references and literature additions are bun
 
 ## Using Local LLMs
 
-Pi supports any OpenAI-compatible API. To use a local provider like [LiteLLM](https://litellm.ai/), set it in `~/.gxypi/config.json`:
+Pi supports any OpenAI-compatible API. To use a local provider like [LiteLLM](https://litellm.ai/), set it in `~/.loom/config.json`:
 
 ```json
 {

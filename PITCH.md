@@ -46,7 +46,7 @@ It directly addresses the manuscript's fourth guideline — "save all interactio
 
 To make this concrete, here's what a full analysis looks like in gxypi, based on the GTN "Reference-based RNA-Seq" tutorial — the Pasilla gene knockdown experiment in *Drosophila* (Brooks et al. 2011, 7 samples, data on Zenodo).
 
-**Startup.** The researcher has `~/.gxypi/config.json` with their LLM provider and a Galaxy profile. They run `gxypi` in an empty directory. The tool reads the config, sets up the LLM, connects to Galaxy automatically, and asks what they'd like to work on.
+**Startup.** The researcher has `~/.loom/config.json` with their LLM provider and a Galaxy profile. They run `gxypi` in an empty directory. The tool reads the config, sets up the LLM, connects to Galaxy automatically, and asks what they'd like to work on.
 
 **"I want to find differentially expressed genes after Pasilla knockdown in Drosophila. The data is on Zenodo."** From this, gxypi:
 
