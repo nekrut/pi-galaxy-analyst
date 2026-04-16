@@ -5,6 +5,12 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
+import {
+  getConfigDir,
+  getConfigPath,
+  loadConfig as loadLoomConfig,
+  saveConfig as saveLoomConfig,
+} from "../shared/loom-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -83,27 +89,11 @@ async function handleInformationalCommand() {
 // each shell's own dir.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const loomConfigDir = join(homedir(), ".loom");
-const loomConfigPath = join(loomConfigDir, "config.json");
+const loomConfigDir = getConfigDir();
+const loomConfigPath = getConfigPath();
 
 // Legacy path kept for one-shot migration.
 const legacyGxypiConfigPath = join(homedir(), ".gxypi", "config.json");
-
-function loadLoomConfig() {
-  if (existsSync(loomConfigPath)) {
-    try {
-      return JSON.parse(readFileSync(loomConfigPath, "utf-8"));
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function saveLoomConfig(config) {
-  mkdirSync(loomConfigDir, { recursive: true });
-  writeFileSync(loomConfigPath, JSON.stringify(config, null, 2) + "\n");
-}
 
 // One-shot migration: copy ~/.gxypi/config.json to ~/.loom/config.json.
 // Runs before any other legacy migration so the canonical path is populated
