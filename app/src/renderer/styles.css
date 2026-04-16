@@ -1205,13 +1205,30 @@ body:not(.artifact-collapsed) #artifact-toggle {
 
 .empty-state {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   height: 100%;
+  max-width: 520px;
+  margin: 0 auto;
   color: var(--text-dim);
   font-size: 14px;
   text-align: center;
   padding: 40px;
+  line-height: 1.5;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+.empty-state code {
+  background: var(--bg-inset, rgba(255, 255, 255, 0.06));
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
 }
 
 /* ── Plan Toolbar ──────────────────────────────────────────────────────────── */
