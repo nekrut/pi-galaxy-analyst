@@ -261,22 +261,27 @@ if (!isInformationalCommand) {
     }
   }
 
-  // Publish to env so the extension can read them
-  if (galaxyUrl) process.env.GALAXY_URL = galaxyUrl;
-  if (galaxyApiKey) process.env.GALAXY_API_KEY = galaxyApiKey;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configure Galaxy MCP based on executionMode + credential availability
 //
 // Remote (default) WITH credentials: register Galaxy MCP so the LLM can call
-// Galaxy tools directly.
+// Galaxy tools directly. Publish credentials to env so the extension can
+// read them for the greeting/context.
 // Remote WITHOUT credentials: skip Galaxy MCP -- the greeting will tell the
 // user about /connect. No MCP server = no "tool not found" noise.
-// Local: strip Galaxy MCP entirely.
+// Local: strip Galaxy MCP entirely, don't publish credentials to env.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const executionMode = loomConfig.executionMode || "remote";
+
+// Only publish Galaxy credentials to env in remote mode -- in local mode the
+// extension shouldn't see them and shouldn't tell the LLM to connect.
+if (executionMode === "remote" && galaxyUrl && galaxyApiKey) {
+  process.env.GALAXY_URL = galaxyUrl;
+  process.env.GALAXY_API_KEY = galaxyApiKey;
+}
 const mcpConfigPath = join(agentDir, "mcp.json");
 
 let mcpConfig = {};
