@@ -1,11 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { toShellSteps } from "../extensions/loom/ui-bridge";
+import { describe, it, expect, beforeEach } from "vitest";
+import { toShellSteps, setupUIBridge } from "../extensions/loom/ui-bridge";
 import { createPlan, addStep, updateStepStatus, resetState, onPlanChange, formatPlanSummary, addStepOutputs, linkInvocation } from "../extensions/loom/state";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 describe("ui-bridge", () => {
+  beforeEach(() => {
+    resetState();
+  });
+
   describe("toShellSteps", () => {
     it("maps AnalysisStep[] to ShellStep[]", () => {
-      resetState();
       const plan = createPlan({
         title: "Test Plan",
         researchQuestion: "Does X cause Y?",
@@ -45,7 +49,6 @@ describe("ui-bridge", () => {
     });
 
     it("maps step result summary", () => {
-      resetState();
       const p = createPlan({
         title: "Test",
         researchQuestion: "Q",
@@ -75,7 +78,6 @@ describe("ui-bridge", () => {
 
   describe("formatPlanSummary", () => {
     it("renders plan title, phase, and steps", () => {
-      resetState();
       const plan = createPlan({
         title: "RNA-seq Analysis",
         researchQuestion: "What genes are differentially expressed?",
@@ -103,7 +105,6 @@ describe("ui-bridge", () => {
 
   describe("onPlanChange", () => {
     it("fires when createPlan is called", () => {
-      resetState();
       let fired = false;
       const unsub = onPlanChange(() => { fired = true; });
       createPlan({
@@ -118,7 +119,6 @@ describe("ui-bridge", () => {
     });
 
     it("fires when addStep is called", () => {
-      resetState();
       createPlan({
         title: "Test",
         researchQuestion: "Q",
@@ -141,7 +141,6 @@ describe("ui-bridge", () => {
     });
 
     it("fires when updateStepStatus is called", () => {
-      resetState();
       createPlan({
         title: "Test",
         researchQuestion: "Q",
@@ -165,7 +164,6 @@ describe("ui-bridge", () => {
     });
 
     it("unsubscribe stops firing", () => {
-      resetState();
       let count = 0;
       const unsub = onPlanChange(() => { count++; });
       createPlan({
@@ -188,7 +186,6 @@ describe("ui-bridge", () => {
     });
 
     it("fires when addStepOutputs is called", () => {
-      resetState();
       createPlan({
         title: "Test",
         researchQuestion: "Q",
@@ -212,7 +209,6 @@ describe("ui-bridge", () => {
     });
 
     it("fires when linkInvocation is called", () => {
-      resetState();
       createPlan({
         title: "Test",
         researchQuestion: "Q",
@@ -234,6 +230,54 @@ describe("ui-bridge", () => {
       linkInvocation("1", "inv-123");
       expect(fired).toBe(true);
       unsub();
+    });
+  });
+
+  describe("setupUIBridge", () => {
+    it("flushes an already-restored plan when the UI context becomes available", async () => {
+      const handlers = new Map<string, Function[]>();
+      const api = {
+        on(event: string, handler: Function) {
+          const list = handlers.get(event) || [];
+          list.push(handler);
+          handlers.set(event, list);
+        },
+      } as unknown as ExtensionAPI;
+
+      setupUIBridge(api);
+
+      createPlan({
+        title: "Restored Plan",
+        researchQuestion: "Q",
+        dataDescription: "D",
+        expectedOutcomes: [],
+        constraints: [],
+      });
+      addStep({
+        name: "QC",
+        description: "Quality control",
+        executionType: "tool",
+        inputs: [],
+        expectedOutputs: [],
+        dependsOn: [],
+      });
+
+      const widgets: Array<{ key: string; lines: string[] }> = [];
+      const ctx = {
+        ui: {
+          setWidget(key: string, lines: string[]) {
+            widgets.push({ key, lines });
+          },
+        },
+      };
+
+      const beforeAgentStart = handlers.get("before_agent_start") || [];
+      expect(beforeAgentStart).toHaveLength(1);
+      await beforeAgentStart[0]({}, ctx);
+
+      expect(widgets.map((w) => w.key)).toEqual(["plan", "steps"]);
+      expect(widgets[0].lines.join("\n")).toContain("Restored Plan");
+      expect(JSON.parse(widgets[1].lines[0])).toHaveLength(1);
     });
   });
 });

@@ -5,7 +5,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AnalysisPlan, AnalysisStep } from "./types.js";
-import { onPlanChange, formatPlanSummary } from "./state.js";
+import { onPlanChange, formatPlanSummary, getCurrentPlan } from "./state.js";
 
 /** The step shape shells expect (e.g. the React step-graph renderer). */
 export interface ShellStep {
@@ -35,6 +35,25 @@ export function toShellSteps(plan: AnalysisPlan): ShellStep[] {
   return plan.steps.map(toShellStep);
 }
 
+function emitPlanWidgets(
+  ctx: ExtensionContext,
+  plan: AnalysisPlan,
+  last: { planMd: string; stepsJson: string }
+): void {
+  const md = formatPlanSummary(plan);
+  const stepsJson = JSON.stringify(toShellSteps(plan));
+
+  if (md !== last.planMd) {
+    last.planMd = md;
+    ctx.ui.setWidget("plan", md.split("\n"));
+  }
+
+  if (stepsJson !== last.stepsJson) {
+    last.stepsJson = stepsJson;
+    ctx.ui.setWidget("steps", [stepsJson]);
+  }
+}
+
 /**
  * Wire up the bridge. Captures the latest ExtensionContext from
  * before_agent_start so plan-change listeners can emit widgets.
@@ -42,27 +61,18 @@ export function toShellSteps(plan: AnalysisPlan): ShellStep[] {
  */
 export function setupUIBridge(pi: ExtensionAPI): void {
   let latestCtx: ExtensionContext | null = null;
-  let lastPlanMd = "";
-  let lastStepsJson = "";
+  const last = { planMd: "", stepsJson: "" };
 
   pi.on("before_agent_start", async (_event, ctx) => {
     latestCtx = ctx;
+    const plan = getCurrentPlan();
+    if (plan) {
+      emitPlanWidgets(ctx, plan, last);
+    }
   });
 
   onPlanChange((plan) => {
     if (!plan || !latestCtx) return;
-
-    const md = formatPlanSummary(plan);
-    const stepsJson = JSON.stringify(toShellSteps(plan));
-
-    if (md !== lastPlanMd) {
-      lastPlanMd = md;
-      latestCtx.ui.setWidget("plan", md.split("\n"));
-    }
-
-    if (stepsJson !== lastStepsJson) {
-      lastStepsJson = stepsJson;
-      latestCtx.ui.setWidget("steps", [stepsJson]);
-    }
+    emitPlanWidgets(latestCtx, plan, last);
   });
 }

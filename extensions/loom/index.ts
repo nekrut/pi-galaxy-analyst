@@ -22,6 +22,7 @@ import {
   loadNotebook,
   getNotebookPath,
   saveNotebook,
+  isNotebookLoaded,
 } from "./state";
 import type { AnalysisPlan } from "./types";
 import {
@@ -83,16 +84,18 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
 
       // Fall back to restoring from session entries
       try {
-        const entries = ctx.sessionManager?.getEntries?.() || [];
-        const planEntries = entries.filter(
-          (e) => e.type === "custom" && (e as { customType?: string }).customType === "galaxy_analyst_plan"
-        );
+        if (!isNotebookLoaded()) {
+          const entries = ctx.sessionManager?.getEntries?.() || [];
+          const planEntries = entries.filter(
+            (e) => e.type === "custom" && (e as { customType?: string }).customType === "galaxy_analyst_plan"
+          );
 
-        if (planEntries.length > 0) {
-          const latestEntry = planEntries[planEntries.length - 1] as { type: "custom"; data?: unknown };
-          if (latestEntry.data) {
-            restorePlan(latestEntry.data as AnalysisPlan);
-            ctx.ui.notify(`Restored plan: ${(latestEntry.data as AnalysisPlan).title}`, "info");
+          if (planEntries.length > 0) {
+            const latestEntry = planEntries[planEntries.length - 1] as { type: "custom"; data?: unknown };
+            if (latestEntry.data) {
+              restorePlan(latestEntry.data as AnalysisPlan);
+              ctx.ui.notify(`Restored plan: ${(latestEntry.data as AnalysisPlan).title}`, "info");
+            }
           }
         }
       } catch {

@@ -7,12 +7,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { afterEach, beforeEach } from "vitest";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import galaxyAnalystExtension from "../extensions/loom/index";
-import { resetState } from "../extensions/loom/state";
+import { createPlan, getCurrentPlan, resetState } from "../extensions/loom/state";
+import { generateNotebook } from "../extensions/loom/notebook-writer";
 
 interface RegisteredTool {
   name: string;
@@ -330,6 +331,70 @@ describe("provenance notebook sync", () => {
     expect(notebook).toContain("| mutant_R1 | mutant_R1.fastq | fastq | - |");
     expect(notebook).toContain("sample_count: 1");
     expect(notebook).toContain("file_count: 1");
+  });
+});
+
+describe("session restore precedence", () => {
+  const originalCwd = process.cwd();
+
+  beforeEach(() => {
+    resetState();
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    resetState();
+  });
+
+  it("keeps the notebook state when both a notebook and stale session entry exist", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-restore-"));
+    process.chdir(tempDir);
+
+    resetState();
+    const notebookPlan = createPlan({
+      title: "Notebook Truth",
+      researchQuestion: "Notebook question",
+      dataDescription: "Notebook data",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+    const notebookPath = path.join(tempDir, "notebook-truth-notebook.md");
+    await writeFile(notebookPath, generateNotebook(notebookPlan), "utf-8");
+
+    resetState();
+
+    const { api, handlers } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+
+    const notifications: string[] = [];
+    const ctx = {
+      ui: {
+        setToolsExpanded() {},
+        notify(message: string) {
+          notifications.push(message);
+        },
+      },
+      sessionManager: {
+        getEntries() {
+          return [{
+            type: "custom",
+            customType: "galaxy_analyst_plan",
+            data: {
+              ...notebookPlan,
+              title: "Stale Session Entry",
+            },
+          }];
+        },
+      },
+    };
+
+    const sessionStart = handlers.get("session_start") || [];
+    expect(sessionStart).toHaveLength(1);
+    await sessionStart[0]({}, ctx);
+
+    expect(getCurrentPlan()?.title).toBe("Notebook Truth");
+    expect(notifications).toContain("Loaded notebook: Notebook Truth (0/0 steps)");
+    expect(notifications).not.toContain("Restored plan: Stale Session Entry");
   });
 });
 
