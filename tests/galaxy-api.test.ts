@@ -3,7 +3,7 @@ import {
   getGalaxyConfig,
   extractWorkflowStructure,
   type GalaxyWorkflowResponse,
-} from "../extensions/galaxy-analyst/galaxy-api";
+} from "../extensions/loom/galaxy-api";
 
 describe("getGalaxyConfig", () => {
   const origUrl = process.env.GALAXY_URL;

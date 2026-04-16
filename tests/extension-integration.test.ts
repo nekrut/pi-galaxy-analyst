@@ -11,8 +11,8 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import galaxyAnalystExtension from "../extensions/galaxy-analyst/index";
-import { resetState } from "../extensions/galaxy-analyst/state";
+import galaxyAnalystExtension from "../extensions/loom/index";
+import { resetState } from "../extensions/loom/state";
 
 interface RegisteredTool {
   name: string;

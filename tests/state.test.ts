@@ -28,7 +28,7 @@ import {
   formatPlanSummary,
   restorePlan,
   setGalaxyConnection,
-} from "../extensions/galaxy-analyst/state";
+} from "../extensions/loom/state";
 
 describe("state management", () => {
   beforeEach(() => {

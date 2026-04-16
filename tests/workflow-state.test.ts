@@ -8,8 +8,8 @@ import {
   linkInvocation,
   getWorkflowSteps,
   updateStepStatus,
-} from "../extensions/galaxy-analyst/state";
-import type { WorkflowStructure } from "../extensions/galaxy-analyst/types";
+} from "../extensions/loom/state";
+import type { WorkflowStructure } from "../extensions/loom/types";
 
 function makeWorkflowStructure(overrides?: Partial<WorkflowStructure>): WorkflowStructure {
   return {

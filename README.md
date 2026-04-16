@@ -6,7 +6,7 @@ Loom weaves the threads of a research project -- question, data, analysis, inter
 
 This repo hosts both the brain and a reference shell:
 
-- **Loom** is the *brain* -- the Pi.dev agent runtime in [`extensions/galaxy-analyst/`](extensions/galaxy-analyst/) plus the RPC contract it exposes. Plan state, notebook persistence, Galaxy integration, the five-phase lifecycle, provenance.
+- **Loom** is the *brain* -- the Pi.dev agent runtime in [`extensions/loom/`](extensions/loom/) plus the RPC contract it exposes. Plan state, notebook persistence, Galaxy integration, the five-phase lifecycle, provenance.
 - **`loom`** is the terminal CLI consumer. First-class and the primary validation path. Installed from npm; reads brain-level config from `~/.loom/config.json`.
 - **Orbit** (in [`app/`](app/)) is the Electron desktop shell -- chat + dual-pane artifact layout with a Galaxy-themed step graph. Orbit is optional; the `loom` CLI is a supported standalone path.
 
@@ -27,7 +27,7 @@ The repo is still named `pi-galaxy-analyst`; a rename is a follow-up. Loom is th
 ```
 Brain (Loom)                                  Shells
 ────────────                                  ──────
-extensions/galaxy-analyst/                    bin/loom.js              terminal CLI
+extensions/loom/                    bin/loom.js              terminal CLI
   index.ts      extension entry               app/                      Orbit Electron shell
   state.ts      plan + notebook state           src/main/               Node.js main process
   tools.ts      34 LLM-callable tools           src/preload/            window.orbit bridge
@@ -213,7 +213,7 @@ Pi:  Loaded notebook: RNA-seq Drug Treatment (1/5 steps completed)
 You can also load just the extension into Pi directly:
 
 ```bash
-pi --no-extensions -e ./extensions/galaxy-analyst
+pi --no-extensions -e ./extensions/loom
 ```
 
 If you're debugging the terminal path, prefer these commands before using Orbit.
@@ -371,7 +371,7 @@ For non-Electron validation:
 npm run typecheck
 npm test
 npm run validate:provenance
-pi --no-extensions -e ./extensions/galaxy-analyst
+pi --no-extensions -e ./extensions/loom
 ```
 
 Then validate the wrapper in a plain working directory:

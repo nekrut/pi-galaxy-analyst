@@ -20,10 +20,10 @@ import {
   setBRCOrganism,
   setBRCAssembly,
   setBRCWorkflow,
-} from "../extensions/galaxy-analyst/state";
-import { generateNotebook } from "../extensions/galaxy-analyst/notebook-writer";
-import { parseNotebook, notebookToPlan, parseFrontmatter } from "../extensions/galaxy-analyst/notebook-parser";
-import type { AnalysisPlan } from "../extensions/galaxy-analyst/types";
+} from "../extensions/loom/state";
+import { generateNotebook } from "../extensions/loom/notebook-writer";
+import { parseNotebook, notebookToPlan, parseFrontmatter } from "../extensions/loom/notebook-parser";
+import type { AnalysisPlan } from "../extensions/loom/types";
 
 describe("notebook round-trip", () => {
   beforeEach(() => {

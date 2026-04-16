@@ -1,5 +1,5 @@
 /**
- * UI Bridge -- translates galaxy-analyst state changes into shell widgets.
+ * UI Bridge -- translates Loom state changes into shell widgets.
  * Single emission path: state mutation -> onPlanChange -> setWidget.
  */
 

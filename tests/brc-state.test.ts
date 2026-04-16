@@ -7,7 +7,7 @@ import {
   setBRCAssembly,
   setBRCWorkflow,
   getBRCContext,
-} from "../extensions/galaxy-analyst/state";
+} from "../extensions/loom/state";
 
 describe("BRC context state functions", () => {
   beforeEach(() => {

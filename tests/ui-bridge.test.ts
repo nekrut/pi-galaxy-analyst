@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toShellSteps } from "../extensions/galaxy-analyst/ui-bridge";
-import { createPlan, addStep, updateStepStatus, resetState, onPlanChange, formatPlanSummary, addStepOutputs, linkInvocation } from "../extensions/galaxy-analyst/state";
+import { toShellSteps } from "../extensions/loom/ui-bridge";
+import { createPlan, addStep, updateStepStatus, resetState, onPlanChange, formatPlanSummary, addStepOutputs, linkInvocation } from "../extensions/loom/state";
 
 describe("ui-bridge", () => {
   describe("toShellSteps", () => {

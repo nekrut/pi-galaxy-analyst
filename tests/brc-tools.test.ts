@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import galaxyAnalystExtension from "../extensions/galaxy-analyst/index";
-import { resetState, getCurrentPlan, createPlan } from "../extensions/galaxy-analyst/state";
+import galaxyAnalystExtension from "../extensions/loom/index";
+import { resetState, getCurrentPlan, createPlan } from "../extensions/loom/state";
 
 interface RegisteredTool {
   name: string;

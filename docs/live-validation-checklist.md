@@ -31,7 +31,7 @@ Expected:
 ## 2. Load the extension in a clean Pi runtime
 
 ```bash
-pi --no-extensions -e ./extensions/galaxy-analyst
+pi --no-extensions -e ./extensions/loom
 ```
 
 Check:
@@ -83,7 +83,7 @@ In an empty test directory:
 ```bash
 mkdir -p /tmp/loom-validation
 cd /tmp/loom-validation
-pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/galaxy-analyst
+pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/loom
 ```
 
 Prompt:
@@ -103,7 +103,7 @@ Then exit and restart in the same directory:
 
 ```bash
 cd /tmp/loom-validation
-pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/galaxy-analyst
+pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/loom
 ```
 
 Expected:

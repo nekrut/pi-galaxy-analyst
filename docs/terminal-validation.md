@@ -32,7 +32,7 @@ Expected:
 Load the extension directly into Pi:
 
 ```bash
-pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/galaxy-analyst
+pi --no-extensions -e /Users/dannon/work/pi-galaxy-analyst/extensions/loom
 ```
 
 Check:

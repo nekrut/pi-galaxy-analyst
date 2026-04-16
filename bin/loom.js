@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 process.env.PI_SKIP_VERSION_CHECK = "1";
 
 // Resolve extension paths relative to this script
-const extensionPath = resolve(__dirname, "../extensions/galaxy-analyst");
+const extensionPath = resolve(__dirname, "../extensions/loom");
 
 // pi-mcp-adapter is what teaches Pi how to use MCP servers from mcp.json
 import { createRequire } from "module";
