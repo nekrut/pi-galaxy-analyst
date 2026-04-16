@@ -502,6 +502,62 @@ export function setPhase(phase: LifecyclePhase): void {
   if (!state.currentPlan) {
     throw new Error("No active plan");
   }
+
+  const currentPhase = state.currentPlan.phase;
+  const phaseOrder: LifecyclePhase[] = [
+    "problem_definition",
+    "data_acquisition",
+    "analysis",
+    "interpretation",
+    "publication",
+  ];
+  const currentIdx = phaseOrder.indexOf(currentPhase);
+  const targetIdx = phaseOrder.indexOf(phase);
+
+  // Allow lateral/backward moves for iteration, but validate forward progression.
+  if (targetIdx > currentIdx) {
+    if (currentPhase === "problem_definition" && phase === "data_acquisition") {
+      const hasQuestion =
+        state.currentPlan.context.researchQuestion.trim().length > 0 ||
+        !!state.currentPlan.researchQuestion?.hypothesis?.trim() ||
+        !!state.currentPlan.researchQuestion?.rawQuestion?.trim();
+      if (!hasQuestion) {
+        throw new Error("Cannot move to data acquisition until the research question is defined");
+      }
+    }
+
+    if (currentPhase === "data_acquisition" && phase === "analysis") {
+      const dp = state.currentPlan.dataProvenance;
+      const hasTrackedData = !!dp && (
+        dp.samples.length > 0 ||
+        dp.originalFiles.length > 0 ||
+        !!state.currentPlan.galaxy.historyId
+      );
+      if (!hasTrackedData) {
+        throw new Error("Cannot move to analysis until data provenance is tracked or data is in Galaxy");
+      }
+    }
+
+    if (currentPhase === "analysis" && phase === "interpretation") {
+      const steps = state.currentPlan.steps;
+      const hasSteps = steps.length > 0;
+      const incomplete = steps.some((step) => !["completed", "skipped"].includes(step.status));
+      if (!hasSteps || incomplete) {
+        throw new Error("Cannot move to interpretation until all analysis steps are complete");
+      }
+    }
+
+    if (currentPhase === "interpretation" && phase === "publication") {
+      const interpretation = state.currentPlan.interpretation;
+      const hasInterpretation =
+        !!interpretation?.summary?.trim() ||
+        (interpretation?.findings.length || 0) > 0;
+      if (!hasInterpretation) {
+        throw new Error("Cannot move to publication until interpretation findings are recorded");
+      }
+    }
+  }
+
   state.currentPlan.phase = phase;
   state.currentPlan.updated = new Date().toISOString();
   notifyPlanChange();

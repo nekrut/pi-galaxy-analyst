@@ -231,6 +231,53 @@ describe("state management", () => {
       resetState();
       expect(getPhase()).toBeNull();
     });
+
+    it("blocks moving into analysis before data acquisition is tracked", () => {
+      setPhase("data_acquisition");
+      expect(() => setPhase("analysis")).toThrow(
+        "Cannot move to analysis until data provenance is tracked or data is in Galaxy"
+      );
+    });
+
+    it("blocks moving into interpretation until all steps are complete", () => {
+      setPhase("data_acquisition");
+      setDataProvenance({ source: "local" });
+      addSample({ id: "s1", name: "Sample 1", metadata: {}, files: [] });
+      setPhase("analysis");
+      addStep({ name: "QC", description: "Quality control", executionType: "tool", inputs: [], expectedOutputs: [], dependsOn: [] });
+
+      expect(() => setPhase("interpretation")).toThrow(
+        "Cannot move to interpretation until all analysis steps are complete"
+      );
+    });
+
+    it("blocks moving into publication until interpretation exists", () => {
+      setPhase("data_acquisition");
+      setDataProvenance({ source: "local" });
+      addSample({ id: "s1", name: "Sample 1", metadata: {}, files: [] });
+      setPhase("analysis");
+      addStep({ name: "QC", description: "Quality control", executionType: "tool", inputs: [], expectedOutputs: [], dependsOn: [] });
+      updateStepStatus("1", "completed");
+      setPhase("interpretation");
+
+      expect(() => setPhase("publication")).toThrow(
+        "Cannot move to publication until interpretation findings are recorded"
+      );
+    });
+
+    it("allows valid forward transitions once prerequisites are met", () => {
+      setPhase("data_acquisition");
+      setDataProvenance({ source: "local" });
+      addSample({ id: "s1", name: "Sample 1", metadata: {}, files: [] });
+      setPhase("analysis");
+      addStep({ name: "QC", description: "Quality control", executionType: "tool", inputs: [], expectedOutputs: [], dependsOn: [] });
+      updateStepStatus("1", "completed");
+      setPhase("interpretation");
+      setInterpretationSummary("All expected signal was recovered.");
+      setPhase("publication");
+
+      expect(getPhase()).toBe("publication");
+    });
   });
 
   describe("research question (phase 1)", () => {

@@ -464,6 +464,40 @@ describe("tool execution", () => {
     expect(text).toContain("Get Test");
   });
 
+  it("analysis_set_phase rejects invalid lifecycle jumps", async () => {
+    const { api, tools } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+
+    await tools.get("analysis_plan_create")!.execute(
+      "call-1",
+      {
+        title: "Phase Test",
+        researchQuestion: "Q",
+        dataDescription: "D",
+        expectedOutcomes: [],
+        constraints: [],
+      },
+      undefined, undefined, {} as any,
+    );
+
+    await tools.get("analysis_set_phase")!.execute(
+      "call-2",
+      { phase: "data_acquisition" },
+      undefined, undefined, {} as any,
+    );
+
+    const result = await tools.get("analysis_set_phase")!.execute(
+      "call-3",
+      { phase: "analysis" },
+      undefined, undefined, {} as any,
+    );
+
+    expect((result.content[0] as { text: string }).text).toContain(
+      "Cannot move to analysis until data provenance is tracked or data is in Galaxy"
+    );
+    expect(result.details.error).toBe(true);
+  });
+
   it("full lifecycle: create plan → add step → update step → log decision", async () => {
     const { api, tools } = createFakeExtensionAPI();
     galaxyAnalystExtension(api);
