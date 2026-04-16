@@ -21,9 +21,11 @@ process.env.PI_SKIP_VERSION_CHECK = "1";
 const extensionPath = resolve(__dirname, "../extensions/loom");
 
 // pi-mcp-adapter is what teaches Pi how to use MCP servers from mcp.json
+// pi-web-access provides web_search, fetch_content, and code_search tools
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const mcpAdapterPath = dirname(require.resolve("pi-mcp-adapter/index.ts"));
+const webAccessPath = dirname(require.resolve("pi-web-access/index.ts"));
 const piEntryPointPath = fileURLToPath(import.meta.resolve("@mariozechner/pi-coding-agent"));
 const piPackageDir = dirname(dirname(piEntryPointPath));
 const piArgsModulePath = join(piPackageDir, "dist/cli/args.js");
@@ -406,8 +408,8 @@ if (!hasArg("--provider")) {
   }
 }
 
-// Build args: inject both extensions, pass through everything else
-const args = ["-e", mcpAdapterPath, "-e", extensionPath, ...providerArgs, ...userArgs];
+// Build args: inject extensions, pass through everything else
+const args = ["-e", mcpAdapterPath, "-e", webAccessPath, "-e", extensionPath, ...providerArgs, ...userArgs];
 
 if (await handleInformationalCommand()) {
   process.exit(0);
