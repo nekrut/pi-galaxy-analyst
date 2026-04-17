@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { registerIpcHandlers } from "./ipc-handlers.js";
+import { registerIpcHandlers, confirmCwdChange } from "./ipc-handlers.js";
 import { AgentManager } from "./agent.js";
 import { ProcMonitor } from "./proc-monitor.js";
 
@@ -205,6 +205,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+O",
           click: async () => {
             if (!agentManager || !mainWindow) return;
+            if (!(await confirmCwdChange(mainWindow))) return;
             const result = await dialog.showOpenDialog({
               title: "Choose analysis directory",
               defaultPath: agentManager.getCwd(),
