@@ -7,6 +7,25 @@ function log(...args: unknown[]): void {
   console.log("[ipc]", ...args);
 }
 
+/**
+ * Ask the user to confirm that switching analysis directories will start
+ * a fresh agent session and clear the current chat/plan/notebook view.
+ * Returns true if the user confirmed.
+ */
+export async function confirmCwdChange(window?: BrowserWindow): Promise<boolean> {
+  const result = await dialog.showMessageBox(window!, {
+    type: "warning",
+    buttons: ["Cancel", "Continue"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Change analysis directory?",
+    message: "Changing the analysis directory will start a new agent session.",
+    detail:
+      "The current chat, plan, and notebook view will be cleared from this window. The previous session remains on disk and can be resumed by opening that directory again.",
+  });
+  return result.response === 1;
+}
+
 export function registerIpcHandlers(agent: AgentManager): void {
   ipcMain.handle("agent:prompt", async (_e, message: string) => {
     log("prompt:", message.slice(0, 80));
@@ -58,7 +77,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle("dialog:select-directory", async () => {
+  ipcMain.handle("dialog:select-directory", async (e) => {
+    const window = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+    if (!(await confirmCwdChange(window))) return null;
     const result = await dialog.showOpenDialog({
       title: "Choose working directory",
       defaultPath: agent.getCwd(),
@@ -67,6 +88,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
     const dir = result.filePaths[0] ?? null;
     if (dir && agent.switchCwd(dir)) {
       log("directory changed to:", dir);
+      // Mirror the File > Open Analysis Directory path so the renderer
+      // resets its UI when the cwd changes via the top-bar "change" button.
+      window?.webContents.send("agent:cwd-changed", dir);
     }
     return dir;
   });
