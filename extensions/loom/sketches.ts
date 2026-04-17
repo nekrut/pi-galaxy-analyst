@@ -198,6 +198,12 @@ export function renderSketchForPrompt(sketch: MatchedSketch): string {
       lines.push(`- ${a}`);
     }
     lines.push("");
+    lines.push(
+      "Call `analysis_assertions_from_sketch` once the relevant step is on the plan " +
+      "to pre-populate these as pending drafts. Each later `analysis_assert` call " +
+      "with matching claim text will fill the draft in place with a real verdict.",
+    );
+    lines.push("");
   }
 
   lines.push(sketch.body);
