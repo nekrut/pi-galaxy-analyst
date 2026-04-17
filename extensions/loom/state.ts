@@ -54,6 +54,7 @@ import {
 } from "./notebook-writer";
 import { parseNotebook, notebookToPlan } from "./notebook-parser";
 import { commitNotebook, buildCommitMessage, COMMIT_CHANGE_TYPES } from "./git";
+import { loadSketchCorpus, matchSketchesForPlan } from "./sketches";
 
 // Generate simple UUIDs (avoiding external dependency for now)
 function generateId(): string {
@@ -1052,6 +1053,104 @@ export function recordAssertion(params: RecordAssertionParams): Assertion {
   notifyPlanChange();
 
   return assertion;
+}
+
+export interface DraftAssertionFromSketchParams {
+  claim: string;
+  source: string;
+  stepId?: string;
+}
+
+/**
+ * Create a pending-verdict assertion from a sketch-derived prose claim.
+ * The researcher fills in `expected` and `observed` later via analysis_assert;
+ * until then the draft stays at verdict="pending" so it shows up in the
+ * verification table as an unresolved item.
+ */
+export function draftAssertionFromSketch(params: DraftAssertionFromSketchParams): Assertion {
+  if (!state.currentPlan) {
+    throw new Error("No active plan");
+  }
+
+  if (!state.currentPlan.assertions) {
+    state.currentPlan.assertions = [];
+  }
+
+  const assertion: Assertion = {
+    id: `assertion-${state.currentPlan.assertions.length + 1}`,
+    stepId: params.stepId,
+    claim: params.claim,
+    kind: "categorical",
+    expected: "",
+    observed: "",
+    source: params.source,
+    verdict: "pending",
+    recordedAt: new Date().toISOString(),
+  };
+
+  state.currentPlan.assertions.push(assertion);
+  state.currentPlan.updated = assertion.recordedAt;
+  notifyPlanChange();
+
+  return assertion;
+}
+
+export interface SeedAssertionsResult {
+  added: number;
+  skipped: number;
+  assertions: Assertion[];
+}
+
+/**
+ * Load the sketch corpus, match it against the current plan, and pre-populate
+ * draft assertions from every matching sketch's expected_output[].assertions[].
+ *
+ * Existing claims (case-insensitive match on claim text) are left alone so
+ * calling this twice is idempotent and doesn't clobber analyst edits.
+ */
+export function seedAssertionsFromSketchCorpus(params: {
+  corpusPath: string;
+  stepId?: string;
+}): SeedAssertionsResult {
+  if (!state.currentPlan) {
+    throw new Error("No active plan");
+  }
+
+  const corpus = loadSketchCorpus(params.corpusPath);
+  if (corpus.length === 0) {
+    return { added: 0, skipped: 0, assertions: [] };
+  }
+
+  const matches = matchSketchesForPlan(state.currentPlan, corpus);
+  if (matches.length === 0) {
+    return { added: 0, skipped: 0, assertions: [] };
+  }
+
+  const existingClaims = new Set(
+    (state.currentPlan.assertions ?? []).map((a) => a.claim.toLowerCase().trim()),
+  );
+
+  const added: Assertion[] = [];
+  let skipped = 0;
+
+  for (const match of matches) {
+    const source = `sketch:${match.frontmatter.name}`;
+    const claims = (match.frontmatter.expected_output || [])
+      .flatMap((eo: { assertions?: string[] }) => eo.assertions || [])
+      .filter(Boolean) as string[];
+
+    for (const claim of claims) {
+      const key = claim.toLowerCase().trim();
+      if (existingClaims.has(key)) {
+        skipped++;
+        continue;
+      }
+      existingClaims.add(key);
+      added.push(draftAssertionFromSketch({ claim, source, stepId: params.stepId }));
+    }
+  }
+
+  return { added: added.length, skipped, assertions: added };
 }
 
 /**
