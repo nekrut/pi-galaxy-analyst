@@ -86,6 +86,16 @@ export function generateNotebook(plan: AnalysisPlan): string {
   // Research Context
   lines.push("## Research Context");
   lines.push("");
+
+  // Authoritative structured block for the parser (invisible extra fields).
+  // The markdown below is for humans and the existing *contains* tests.
+  if (plan.researchQuestion && hasResearchQuestionDetails(plan.researchQuestion)) {
+    lines.push("```yaml");
+    lines.push(`research_question_json: '${escapeJsonInYaml(plan.researchQuestion)}'`);
+    lines.push("```");
+    lines.push("");
+  }
+
   lines.push(`**Research Question**: ${plan.context.researchQuestion}`);
 
   // Hypothesis if refined (Phase 1)
@@ -137,6 +147,8 @@ export function generateNotebook(plan: AnalysisPlan): string {
   if (plan.dataProvenance) {
     lines.push("## Data Provenance");
     lines.push("");
+    renderDataProvenanceYaml(lines, plan.dataProvenance);
+
     const dp = plan.dataProvenance;
     lines.push(`**Source**: ${dp.source.toUpperCase()}`);
     if (dp.accession) lines.push(`**Accession**: ${dp.accession}`);
@@ -191,6 +203,9 @@ export function generateNotebook(plan: AnalysisPlan): string {
     lines.push(`  id: "${step.id}"`);
     lines.push(`  name: "${step.name}"`);
     lines.push(`  status: ${step.status}`);
+    if (step.description) {
+      lines.push(`  description: "${escapeYamlString(step.description)}"`);
+    }
     lines.push("  execution:");
     lines.push(`    type: ${step.execution.type}`);
     if (step.execution.toolId) {
@@ -201,6 +216,9 @@ export function generateNotebook(plan: AnalysisPlan): string {
     }
     if (step.execution.trsId) {
       lines.push(`    trs_id: "${step.execution.trsId}"`);
+    }
+    if (step.execution.parameters && Object.keys(step.execution.parameters).length > 0) {
+      lines.push(`    parameters: '${escapeJsonInYaml(step.execution.parameters)}'`);
     }
 
     if (step.workflowStructure) {
@@ -230,6 +248,15 @@ export function generateNotebook(plan: AnalysisPlan): string {
     }
     if (step.result?.invocationId) {
       lines.push(`  invocation_id: "${step.result.invocationId}"`);
+    }
+    if (step.result?.completedAt) {
+      lines.push(`  completed_at: "${step.result.completedAt}"`);
+    }
+    if (step.result?.summary) {
+      lines.push(`  summary: "${escapeYamlString(step.result.summary)}"`);
+    }
+    if (step.result && step.result.qcPassed !== null && step.result.qcPassed !== undefined) {
+      lines.push(`  qc_passed: ${step.result.qcPassed}`);
     }
 
     lines.push("```");
@@ -373,6 +400,12 @@ export function generateNotebook(plan: AnalysisPlan): string {
     lines.push("## Publication Materials");
     lines.push("");
 
+    // Authoritative structured block for the parser.
+    lines.push("```yaml");
+    lines.push(`publication_json: '${escapeJsonInYaml(plan.publication)}'`);
+    lines.push("```");
+    lines.push("");
+
     const pub = plan.publication;
     lines.push(`**Status**: ${pub.status.replace('_', ' ')}`);
     if (pub.targetJournal) {
@@ -484,6 +517,34 @@ export function renderBRCContextSection(brc: BRCContext): string {
 }
 
 /**
+ * True if a ResearchQuestion has any field worth persisting beyond
+ * context.researchQuestion (which is already rendered above).
+ */
+function hasResearchQuestionDetails(rq: ResearchQuestion): boolean {
+  return Boolean(
+    rq.hypothesis ||
+      rq.pico ||
+      (rq.literatureRefs && rq.literatureRefs.length > 0) ||
+      rq.refinedAt
+  );
+}
+
+/**
+ * Render a provenance YAML block. Authoritative for the parser;
+ * the markdown tables below it are display-only.
+ *
+ * The block uses a single JSON string value rather than native YAML
+ * nesting because our YAML parser can't handle multi-line array items.
+ * Treat it as structured data on disk; humans read the tables below.
+ */
+function renderDataProvenanceYaml(lines: string[], dp: DataProvenance): void {
+  lines.push("```yaml");
+  lines.push(`provenance_json: '${escapeJsonInYaml(dp)}'`);
+  lines.push("```");
+  lines.push("");
+}
+
+/**
  * Render workflow_structure block inside a step YAML block
  */
 function renderWorkflowStructureYaml(lines: string[], ws: WorkflowStructure): void {
@@ -514,6 +575,14 @@ function renderWorkflowStructureYaml(lines: string[], ws: WorkflowStructure): vo
  */
 function escapeYamlString(str: string): string {
   return str.replace(/"/g, '\\"').replace(/\n/g, "\\n");
+}
+
+/**
+ * Serialize an object to a JSON string safe to embed inside single-quoted YAML.
+ * Single quotes are escaped by doubling them (YAML convention).
+ */
+function escapeJsonInYaml(obj: unknown): string {
+  return JSON.stringify(obj).replace(/'/g, "''");
 }
 
 /**
@@ -747,6 +816,9 @@ export function addStepSection(content: string, step: AnalysisStep): string {
   lines.push(`  id: "${step.id}"`);
   lines.push(`  name: "${step.name}"`);
   lines.push(`  status: ${step.status}`);
+  if (step.description) {
+    lines.push(`  description: "${escapeYamlString(step.description)}"`);
+  }
   lines.push("  execution:");
   lines.push(`    type: ${step.execution.type}`);
   if (step.execution.toolId) {
@@ -757,6 +829,9 @@ export function addStepSection(content: string, step: AnalysisStep): string {
   }
   if (step.execution.trsId) {
     lines.push(`    trs_id: "${step.execution.trsId}"`);
+  }
+  if (step.execution.parameters && Object.keys(step.execution.parameters).length > 0) {
+    lines.push(`    parameters: '${escapeJsonInYaml(step.execution.parameters)}'`);
   }
 
   if (step.workflowStructure) {

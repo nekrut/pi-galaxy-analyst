@@ -20,6 +20,7 @@ import {
   setBRCOrganism,
   setBRCAssembly,
   setBRCWorkflow,
+  getCurrentPlan,
 } from "../extensions/loom/state";
 import { generateNotebook } from "../extensions/loom/notebook-writer";
 import { parseNotebook, notebookToPlan, parseFrontmatter } from "../extensions/loom/notebook-parser";
@@ -183,6 +184,70 @@ describe("notebook round-trip", () => {
     expect(restored.decisions).toHaveLength(0);
   });
 
+  it("preserves step.description through round-trip", () => {
+    const original = buildTestPlan();
+    const markdown = generateNotebook(original);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.steps[0].description).toBe(
+      "Run FastQC on all raw FASTQ files"
+    );
+    expect(restored.steps[1].description).toBe(
+      "Align reads to human reference genome with HISAT2"
+    );
+  });
+
+  it("preserves step.execution.parameters through round-trip", () => {
+    createPlan({
+      title: "Params Test",
+      researchQuestion: "Q",
+      dataDescription: "D",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+    addStep({
+      name: "Parameterized Tool",
+      description: "A tool with explicit parameters",
+      executionType: "tool",
+      toolId: "tool-x",
+      inputs: [],
+      expectedOutputs: [],
+      dependsOn: [],
+      parameters: {
+        threshold: 0.05,
+        mode: "strict",
+        enable: true,
+        tags: ["a", "b"],
+      },
+    });
+
+    const plan = getCurrentPlan()!;
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.steps[0].execution.parameters).toEqual({
+      threshold: 0.05,
+      mode: "strict",
+      enable: true,
+      tags: ["a", "b"],
+    });
+  });
+
+  it("preserves step.result.completedAt/summary/qcPassed through round-trip", () => {
+    const original = buildTestPlan();
+    const markdown = generateNotebook(original);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.steps[0].result?.completedAt).toBe("2026-02-06T10:30:00Z");
+    expect(restored.steps[0].result?.summary).toBe(
+      "All 6 samples pass quality thresholds"
+    );
+    expect(restored.steps[0].result?.qcPassed).toBe(true);
+  });
+
   it("preserves galaxy connection info", () => {
     const plan = createPlan({
       title: "Test",
@@ -292,6 +357,67 @@ describe("notebook with lifecycle phases", () => {
     expect(markdown).toContain("PICO Framework");
   });
 
+  it("round-trips hypothesis, PICO, and literature references", () => {
+    const plan = createPlan({
+      title: "Drug Study",
+      researchQuestion: "Does drug X work?",
+      dataDescription: "RNA-seq",
+      expectedOutcomes: ["DEGs"],
+      constraints: [],
+    });
+
+    setResearchQuestion({
+      rawQuestion: "Does drug X work?",
+      hypothesis: "Drug X reduces tumor gene expression",
+      pico: {
+        population: "HeLa cells",
+        intervention: "Drug X 10uM",
+        comparison: "DMSO vehicle",
+        outcome: "Gene expression changes",
+      },
+    });
+    addLiteratureRef({
+      title: "Foundational Paper",
+      pmid: "12345678",
+      year: 2024,
+      authors: ["Smith J", "Doe A"],
+      journal: "Nature",
+      relevance: "Established Drug X mechanism",
+    });
+    addLiteratureRef({
+      title: "Follow-up Study",
+      doi: "10.1234/example",
+      year: 2025,
+      relevance: "Characterized resistance pathways",
+    });
+
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.researchQuestion).toBeTruthy();
+    expect(restored.researchQuestion!.hypothesis).toBe(
+      "Drug X reduces tumor gene expression"
+    );
+    expect(restored.researchQuestion!.pico).toEqual({
+      population: "HeLa cells",
+      intervention: "Drug X 10uM",
+      comparison: "DMSO vehicle",
+      outcome: "Gene expression changes",
+    });
+    expect(restored.researchQuestion!.literatureRefs).toHaveLength(2);
+    expect(restored.researchQuestion!.literatureRefs[0]).toMatchObject({
+      title: "Foundational Paper",
+      pmid: "12345678",
+      year: 2024,
+      journal: "Nature",
+      relevance: "Established Drug X mechanism",
+    });
+    expect(restored.researchQuestion!.literatureRefs[1].doi).toBe(
+      "10.1234/example"
+    );
+  });
+
   it("includes literature references in notebook", () => {
     const plan = createPlan({
       title: "Test",
@@ -334,6 +460,81 @@ describe("notebook with lifecycle phases", () => {
     expect(markdown).toContain("GSE12345");
     expect(markdown).toContain("Control_1");
     expect(markdown).toContain("control_1_R1.fastq.gz");
+  });
+
+  it("round-trips data provenance through parse", () => {
+    const plan = createPlan({
+      title: "Provenance RT",
+      researchQuestion: "Q",
+      dataDescription: "D",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+
+    setDataProvenance({
+      source: "geo",
+      accession: "GSE12345",
+      downloadDate: "2026-02-01T00:00:00Z",
+      importHistory: "hist-import-42",
+    });
+    addSample({
+      id: "s1",
+      name: "Control_1",
+      condition: "control",
+      replicate: 1,
+      metadata: { tissue: "liver", donor: "A" },
+      files: ["f1", "f2"],
+    });
+    addSample({
+      id: "s2",
+      name: "Treated_1",
+      condition: "treated",
+      replicate: 1,
+      metadata: {},
+      files: ["f3"],
+    });
+    addDataFile({
+      id: "f1",
+      name: "control_1_R1.fastq.gz",
+      type: "fastq",
+      readType: "paired",
+      pairedWith: "f2",
+      galaxyDatasetId: "gx-f1",
+    });
+    addDataFile({ id: "f2", name: "control_1_R2.fastq.gz", type: "fastq", readType: "paired", pairedWith: "f1" });
+    addDataFile({ id: "f3", name: "treated_1.bam", type: "bam" });
+
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.dataProvenance).toBeTruthy();
+    expect(restored.dataProvenance!.source).toBe("geo");
+    expect(restored.dataProvenance!.accession).toBe("GSE12345");
+    expect(restored.dataProvenance!.downloadDate).toBe("2026-02-01T00:00:00Z");
+    expect(restored.dataProvenance!.importHistory).toBe("hist-import-42");
+
+    expect(restored.dataProvenance!.samples).toHaveLength(2);
+    expect(restored.dataProvenance!.samples[0]).toMatchObject({
+      id: "s1",
+      name: "Control_1",
+      condition: "control",
+      replicate: 1,
+      files: ["f1", "f2"],
+      metadata: { tissue: "liver", donor: "A" },
+    });
+    expect(restored.dataProvenance!.samples[1].files).toEqual(["f3"]);
+
+    expect(restored.dataProvenance!.originalFiles).toHaveLength(3);
+    expect(restored.dataProvenance!.originalFiles[0]).toMatchObject({
+      id: "f1",
+      name: "control_1_R1.fastq.gz",
+      type: "fastq",
+      readType: "paired",
+      pairedWith: "f2",
+      galaxyDatasetId: "gx-f1",
+    });
+    expect(restored.dataProvenance!.originalFiles[2].type).toBe("bam");
   });
 
   it("includes interpretation findings in notebook", () => {
@@ -433,6 +634,95 @@ describe("notebook with lifecycle phases", () => {
     expect(markdown).toContain("Publication");
     expect(markdown).toContain("Nature Methods");
     expect(markdown).toContain("Volcano Plot");
+  });
+
+  it("round-trips publication materials through parse", () => {
+    const plan = createPlan({
+      title: "Publication RT",
+      researchQuestion: "Q",
+      dataDescription: "D",
+      expectedOutcomes: [],
+      constraints: [],
+    });
+
+    initPublication("Nature Methods");
+    addFigure({
+      name: "Volcano Plot",
+      type: "volcano",
+      dataSource: "step-3",
+      status: "generated",
+      galaxyDatasetId: "gx-vol-1",
+      description: "Differentially expressed genes",
+      suggestedTool: "ggplot2",
+    });
+    addFigure({
+      name: "Heatmap",
+      type: "heatmap",
+      dataSource: "step-4",
+      status: "planned",
+    });
+
+    const publication = plan.publication!;
+    publication.methodsDraft = {
+      text: "Reads were aligned with HISAT2.",
+      toolVersions: [
+        {
+          toolId: "toolshed.g2.bx.psu.edu/repos/iuc/hisat2/hisat2/2.2.1",
+          toolName: "HISAT2",
+          version: "2.2.1",
+          stepId: "2",
+          parameters: { threads: 4 },
+        },
+      ],
+      generatedAt: "2026-03-01T00:00:00Z",
+      lastUpdated: "2026-03-01T00:00:00Z",
+    };
+    publication.supplementaryData.push({
+      id: "sup-1",
+      name: "DE gene list",
+      type: "table",
+      description: "Full DE results",
+      exportFormat: "tsv",
+    });
+    publication.dataSharing = {
+      repository: "zenodo",
+      accession: "10.5281/zenodo.example",
+      submissionDate: "2026-03-05",
+      status: "submitted",
+      preparedFiles: ["de-table.tsv", "methods.pdf"],
+    };
+    publication.status = "ready_for_review";
+
+    const markdown = generateNotebook(plan);
+    const parsed = parseNotebook(markdown);
+    const restored = notebookToPlan(parsed!);
+
+    expect(restored.publication).toBeTruthy();
+    expect(restored.publication!.status).toBe("ready_for_review");
+    expect(restored.publication!.targetJournal).toBe("Nature Methods");
+    expect(restored.publication!.figures).toHaveLength(2);
+    expect(restored.publication!.figures[0]).toMatchObject({
+      name: "Volcano Plot",
+      type: "volcano",
+      galaxyDatasetId: "gx-vol-1",
+      suggestedTool: "ggplot2",
+    });
+    expect(restored.publication!.methodsDraft?.text).toBe(
+      "Reads were aligned with HISAT2."
+    );
+    expect(restored.publication!.methodsDraft?.toolVersions[0].version).toBe(
+      "2.2.1"
+    );
+    expect(restored.publication!.methodsDraft?.toolVersions[0].parameters).toEqual({
+      threads: 4,
+    });
+    expect(restored.publication!.supplementaryData).toHaveLength(1);
+    expect(restored.publication!.supplementaryData[0].exportFormat).toBe("tsv");
+    expect(restored.publication!.dataSharing?.repository).toBe("zenodo");
+    expect(restored.publication!.dataSharing?.preparedFiles).toEqual([
+      "de-table.tsv",
+      "methods.pdf",
+    ]);
   });
 
   it("round-trips plan with BRC context", () => {
