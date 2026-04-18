@@ -142,6 +142,9 @@ const EXPECTED_TOOLS = [
   // Shell-facing tools (structured widget emitters)
   "report_result",
   "analyze_plan_parameters",
+
+  // Multi-agent team dispatch
+  "team_dispatch",
 ];
 
 const EXPECTED_COMMANDS = [
