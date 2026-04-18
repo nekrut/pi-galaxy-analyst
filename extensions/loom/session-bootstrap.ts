@@ -123,8 +123,8 @@ function sendStartupGreeting(pi: ExtensionAPI): void {
     pi.sendUserMessage(
       `Session started with an existing analysis plan loaded: "${plan.title}" (${completed}/${plan.steps.length} steps complete` +
       `${current ? `, currently on: ${current.name}` : ""}).${recapExtra}` +
-      ` Give a brief welcome, then recap where we left off — what's been done, what's next, and any open questions. ` +
-      `Keep it concise (a short paragraph, not a bulleted list).${connectInstr}`
+      ` Recap where we left off — what's been done, what's next, and any open questions. ` +
+      `Keep it concise (a short paragraph, not a bulleted list). Do not use emojis or product branding.${connectInstr}`
     );
     return;
   }
@@ -132,15 +132,15 @@ function sendStartupGreeting(pi: ExtensionAPI): void {
   if (hasCredentials) {
     pi.sendUserMessage(
       `Session started, no existing analysis in this directory. ` +
-      `Give a brief welcome to Loom, then ask what I'd like to work on — what research question or data do I have? ` +
-      `Keep the greeting to 2-3 sentences.${connectInstr}`
+      `Reply with exactly one short sentence: "What do you want to analyze?" ` +
+      `No greeting, no emojis, no product branding.${connectInstr}`
     );
     return;
   }
 
   pi.sendUserMessage(
     `Session started, no existing analysis in this directory and no Galaxy server configured. ` +
-    `Give a brief welcome to Loom, mention I can use /connect to set up a Galaxy server, ` +
-    `and ask what I'd like to work on. Keep it to 2-3 sentences.`
+    `Reply with two short sentences: mention I can use /connect to set up a Galaxy server, ` +
+    `then ask "What do you want to analyze?". No greeting, no emojis, no product branding.`
   );
 }
