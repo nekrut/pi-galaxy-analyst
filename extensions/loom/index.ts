@@ -13,6 +13,7 @@ import { setupUIBridge } from "./ui-bridge";
 import { registerSessionLifecycle } from "./session-bootstrap";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerTeamTools } from "./teams/tool";
+import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -44,7 +45,9 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // ─────────────────────────────────────────────────────────────────────────────
   registerPlanTools(pi);
   registerExecutionCommands(pi);
-  registerTeamTools(pi);
+  if (isTeamDispatchEnabled()) {
+    registerTeamTools(pi);
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Set up context injection

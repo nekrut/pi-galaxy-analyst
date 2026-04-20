@@ -142,9 +142,6 @@ const EXPECTED_TOOLS = [
   // Shell-facing tools (structured widget emitters)
   "report_result",
   "analyze_plan_parameters",
-
-  // Multi-agent team dispatch
-  "team_dispatch",
 ];
 
 const EXPECTED_COMMANDS = [
@@ -171,6 +168,15 @@ const EXPECTED_EVENTS = [
 ];
 
 describe("extension loading", () => {
+  // Defend the default-off contract against an ambient LOOM_TEAM_DISPATCH set
+  // by the developer's shell or CI. Restored in afterEach.
+  const originalTeamFlag = process.env.LOOM_TEAM_DISPATCH;
+  beforeEach(() => { delete process.env.LOOM_TEAM_DISPATCH; });
+  afterEach(() => {
+    if (originalTeamFlag === undefined) delete process.env.LOOM_TEAM_DISPATCH;
+    else process.env.LOOM_TEAM_DISPATCH = originalTeamFlag;
+  });
+
   it("loads without errors", () => {
     const { api } = createFakeExtensionAPI();
     expect(() => galaxyAnalystExtension(api)).not.toThrow();
@@ -232,6 +238,34 @@ describe("extension loading", () => {
         `Event handler for "${event}" should be registered`
       ).toContain(event);
     }
+  });
+
+  it("does NOT register team_dispatch by default (experiments flag off)", () => {
+    const { api, tools } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+    expect(Array.from(tools.keys())).not.toContain("team_dispatch");
+  });
+});
+
+describe("extension loading with experiments.teamDispatch on", () => {
+  const original = process.env.LOOM_TEAM_DISPATCH;
+
+  beforeEach(() => { process.env.LOOM_TEAM_DISPATCH = "1"; });
+  afterEach(() => {
+    if (original === undefined) delete process.env.LOOM_TEAM_DISPATCH;
+    else process.env.LOOM_TEAM_DISPATCH = original;
+  });
+
+  it("registers team_dispatch when LOOM_TEAM_DISPATCH=1", () => {
+    const { api, tools } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+    expect(Array.from(tools.keys())).toContain("team_dispatch");
+  });
+
+  it(`bumps registered tool count to ${EXPECTED_TOOLS.length + 1}`, () => {
+    const { api, tools } = createFakeExtensionAPI();
+    galaxyAnalystExtension(api);
+    expect(tools.size).toBe(EXPECTED_TOOLS.length + 1);
   });
 });
 
