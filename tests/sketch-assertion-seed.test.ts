@@ -433,7 +433,7 @@ describe("analysis_assert upgrades a seeded draft instead of duplicating it", ()
   });
 });
 
-describe("assertion_added sync path rewrites the verification section on disk", () => {
+describe("assertion_added sync path records a plan.mutation event", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -445,17 +445,15 @@ describe("assertion_added sync path rewrites the verification section on disk", 
     if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("regenerates the assertions block when syncToNotebook('assertion_added') runs", async () => {
+  it("appends a plan.mutation event when syncToNotebook('assertion_added') runs", async () => {
     makeAlphaGenomePlan();
     const notebookPath = path.join(tmpDir, "plan.md");
-    // Seed the file with an initial notebook (no assertions yet).
     await writeNotebook(notebookPath, generateNotebook(getCurrentPlan()!));
     setNotebookPath(notebookPath);
 
-    // Verify the starting file has no assertions_json.
-    expect(fs.readFileSync(notebookPath, "utf-8")).not.toContain("assertions_json");
+    const activityPath = path.join(tmpDir, "activity.jsonl");
+    expect(fs.existsSync(activityPath)).toBe(false);
 
-    // Record a real assertion and trigger the sync path the tool uses.
     const stored = recordAssertion({
       claim: "Top ISM position is above threshold",
       kind: "categorical",
@@ -469,11 +467,14 @@ describe("assertion_added sync path rewrites the verification section on disk", 
       kind: stored.kind,
     });
 
-    // The on-disk file now has the assertions_json block -- frontmatter-only
-    // sync would never have touched it.
-    const after = fs.readFileSync(notebookPath, "utf-8");
-    expect(after).toContain("assertions_json");
-    expect(after).toContain("Top ISM position is above threshold");
+    const raw = fs.readFileSync(activityPath, "utf-8");
+    const events = raw.trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toHaveLength(1);
+    const [ev] = events;
+    expect(ev.kind).toBe("plan.mutation");
+    expect(ev.source).toBe("syncToNotebook");
+    expect(ev.payload.changeType).toBe("assertion_added");
+    expect(ev.payload.data.claim).toBe("Top ISM position is above threshold");
   });
 });
 

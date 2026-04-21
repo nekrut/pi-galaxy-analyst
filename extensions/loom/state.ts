@@ -43,19 +43,16 @@ import {
   generateNotebook,
   writeNotebook,
   readNotebook,
-  updateFrontmatter,
-  updateStepBlock,
-  appendEvent,
-  addStepSection,
-  appendGalaxyReference,
   listNotebooks,
   getDefaultNotebookPath,
   fileExists,
 } from "./notebook-writer";
 import { parseNotebook, notebookToPlan } from "./notebook-parser";
-import { commitNotebook, buildCommitMessage, COMMIT_CHANGE_TYPES } from "./git";
+import { commitFile, buildCommitMessage, COMMIT_CHANGE_TYPES } from "./git";
+import { appendActivityEvent, loadActivityLog, resetActivity } from "./activity";
 import { loadSketchCorpus, matchSketchesForPlan } from "./sketches";
 import * as fs from "fs";
+import * as path from "path";
 
 // Generate simple UUIDs (avoiding external dependency for now)
 function generateId(): string {
@@ -134,6 +131,10 @@ function startWatchingNotebook(filePath: string): void {
           try {
             const content = fs.readFileSync(watcherPath, "utf-8");
             notifyNotebookChange(content);
+            // Commit on every write. Notebook is user-curated post-rewire --
+            // /summarize, plan approval, or manual edits -- so every change
+            // deserves a commit. commitFile no-ops when nothing staged.
+            commitFile(watcherPath, "Notebook updated");
           } catch (err) {
             console.error("notebook watcher read failed:", err);
           }
@@ -172,6 +173,7 @@ export function resetState(): void {
     notebookLoaded: false,
   };
   stopWatchingNotebook();
+  resetActivity();
 }
 
 /**
@@ -1525,10 +1527,16 @@ export function getNotebookPath(): string | null {
 /**
  * Set the notebook path
  */
-export function setNotebookPath(path: string | null): void {
-  state.notebookPath = path;
-  state.notebookLoaded = path !== null;
-  if (path) startWatchingNotebook(path); else stopWatchingNotebook();
+export function setNotebookPath(notebookFile: string | null): void {
+  state.notebookPath = notebookFile;
+  state.notebookLoaded = notebookFile !== null;
+  if (notebookFile) {
+    startWatchingNotebook(notebookFile);
+    loadActivityLog(path.dirname(notebookFile));
+  } else {
+    stopWatchingNotebook();
+    resetActivity();
+  }
 }
 
 /**
@@ -1555,6 +1563,7 @@ export async function loadNotebook(filePath: string): Promise<AnalysisPlan | nul
     state.notebookPath = filePath;
     state.notebookLoaded = true;
     startWatchingNotebook(filePath);
+    loadActivityLog(path.dirname(filePath));
 
     // Sync Galaxy state
     if (plan.galaxy.historyId) {
@@ -1582,11 +1591,12 @@ export async function createNotebook(
 
   const content = generateNotebook(targetPlan);
   await writeNotebook(filePath, content);
-  commitNotebook(filePath, "Create analysis notebook");
+  commitFile(filePath, "Create analysis notebook");
 
   state.notebookPath = filePath;
   state.notebookLoaded = true;
   startWatchingNotebook(filePath);
+  loadActivityLog(path.dirname(filePath));
 
   return filePath;
 }
@@ -1604,8 +1614,12 @@ export async function saveNotebook(): Promise<void> {
 }
 
 /**
- * Sync a specific change to the notebook file
- * This is more efficient than regenerating the entire notebook
+ * Record a plan mutation to the session's activity.jsonl log.
+ *
+ * Historically this also regenerated notebook.md; that behavior was removed
+ * in the notebook rewire so notebook.md stays user-curated. Now each call
+ * appends a generic {timestamp, kind, source, payload} event envelope and,
+ * for change types in COMMIT_CHANGE_TYPES, stages a git commit on the log.
  */
 export async function syncToNotebook(
   changeType:
@@ -1630,185 +1644,16 @@ export async function syncToNotebook(
     return;
   }
 
-  try {
-    let content = await readNotebook(state.notebookPath);
+  const sessionDir = path.dirname(state.notebookPath);
+  const activityPath = appendActivityEvent(sessionDir, {
+    timestamp: new Date().toISOString(),
+    kind: "plan.mutation",
+    source: "syncToNotebook",
+    payload: { changeType, data },
+  });
 
-    switch (changeType) {
-      case 'frontmatter':
-        for (const [field, value] of Object.entries(data)) {
-          content = updateFrontmatter(content, field, String(value));
-        }
-        break;
-
-      case 'step_added':
-        if (data.step) {
-          content = addStepSection(content, data.step as AnalysisStep);
-        }
-        break;
-
-      case 'step_updated':
-        if (data.stepId) {
-          content = updateStepBlock(content, String(data.stepId), {
-            status: data.status as string | undefined,
-            jobId: data.jobId as string | undefined,
-            invocationId: data.invocationId as string | undefined,
-            outputs: data.outputs as DatasetReference[] | undefined,
-          });
-        }
-        break;
-
-      case 'decision':
-        content = appendEvent(content, {
-          type: 'decision',
-          timestamp: String(data.timestamp || new Date().toISOString()),
-          data: {
-            step_id: data.stepId,
-            type: data.type,
-            description: data.description,
-            rationale: data.rationale,
-            researcher_approved: data.researcherApproved,
-          },
-        });
-        break;
-
-      case 'checkpoint':
-        content = appendEvent(content, {
-          type: 'checkpoint',
-          timestamp: String(data.reviewedAt || new Date().toISOString()),
-          data: {
-            id: data.id,
-            step_id: data.stepId,
-            name: data.name,
-            status: data.status,
-            criteria: data.criteria,
-            observations: data.observations,
-          },
-        });
-        break;
-
-      case 'galaxy_ref':
-        content = appendGalaxyReference(content, {
-          resource: String(data.resource),
-          id: String(data.id),
-          url: String(data.url),
-        });
-        break;
-
-      case 'phase_change':
-        content = updateFrontmatter(content, 'phase', String(data.phase));
-        content = appendEvent(content, {
-          type: 'event',
-          timestamp: new Date().toISOString(),
-          data: {
-            description: `Phase changed to ${data.phase}`,
-            previous_phase: data.previousPhase,
-            new_phase: data.phase,
-          },
-        });
-        break;
-
-      case 'literature_ref':
-        content = appendEvent(content, {
-          type: 'event',
-          timestamp: String(data.addedAt || new Date().toISOString()),
-          data: {
-            description: `Literature reference added: ${data.title}`,
-            pmid: data.pmid,
-            doi: data.doi,
-            relevance: data.relevance,
-          },
-        });
-        break;
-
-      case 'data_provenance':
-        if (state.currentPlan) {
-          content = generateNotebook(state.currentPlan);
-        }
-        content = appendEvent(content, {
-          type: 'event',
-          timestamp: new Date().toISOString(),
-          data: {
-            description: `Data provenance updated`,
-            source: data.source,
-            accession: data.accession,
-            sample_count: data.sampleCount,
-            file_count: data.fileCount,
-          },
-        });
-        break;
-
-      case 'publication_update':
-        content = appendEvent(content, {
-          type: 'event',
-          timestamp: new Date().toISOString(),
-          data: {
-            description: `Publication ${data.updateType}: ${data.description || ''}`,
-            status: data.status,
-            figure_id: data.figureId,
-          },
-        });
-        break;
-
-      case 'interpretation_finding': {
-        const finding = data.finding as BiologicalFinding;
-        content = appendEvent(content, {
-          type: 'event',
-          timestamp: finding.addedAt,
-          data: {
-            description: `Finding: ${finding.title}`,
-            category: finding.category,
-            confidence: finding.confidence,
-            evidence: finding.evidence,
-          },
-        });
-        break;
-      }
-
-      case 'interpretation_summary':
-        content = appendEvent(content, {
-          type: 'event',
-          timestamp: new Date().toISOString(),
-          data: {
-            description: `Interpretation summary set`,
-            summary: data.summary,
-          },
-        });
-        break;
-
-      case 'brc_context_updated':
-        if (state.currentPlan) {
-          content = generateNotebook(state.currentPlan);
-        }
-        break;
-
-      case 'result_reported':
-        // The result is already on state.currentPlan.results; regenerate the
-        // notebook so the new Results section appears under the right step
-        // (or in the plan-level Results bucket).
-        if (state.currentPlan) {
-          content = generateNotebook(state.currentPlan);
-        }
-        break;
-
-      case 'assertion_added':
-        // The assertion is already on state.currentPlan.assertions; regenerate
-        // the notebook so the verification section (assertions_json block) is
-        // rewritten from current plan state. Frontmatter-only sync wouldn't
-        // touch that section and the parser restores assertions from it.
-        if (state.currentPlan) {
-          content = generateNotebook(state.currentPlan);
-        }
-        break;
-    }
-
-    await writeNotebook(state.notebookPath, content);
-    notifyNotebookChange(content);
-
-    if (COMMIT_CHANGE_TYPES.has(changeType)) {
-      commitNotebook(state.notebookPath, buildCommitMessage(changeType, data));
-    }
-  } catch (error) {
-    console.error("Failed to sync to notebook:", error);
+  if (activityPath && COMMIT_CHANGE_TYPES.has(changeType)) {
+    commitFile(activityPath, buildCommitMessage(changeType, data));
   }
 }
 

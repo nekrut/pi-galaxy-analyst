@@ -8,12 +8,16 @@ import {
   isNotebookLoaded,
 } from "./state.js";
 import type { AnalysisPlan } from "./types.js";
+import * as fs from "fs";
+import * as path from "path";
 
 export function registerSessionLifecycle(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.setToolsExpanded(false);
 
     resetState();
+
+    syncSessionJsonlSymlink(ctx);
 
     const freshSession = process.env.LOOM_FRESH_SESSION === "1";
 
@@ -42,6 +46,32 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
       pi.appendEntry("galaxy_analyst_plan", plan);
     }
   });
+}
+
+/**
+ * Drop a `session.jsonl` symlink in the cwd pointing at pi's authoritative
+ * session file (which lives under ~/.pi/agent/sessions/<encoded-cwd>/).
+ * Gives the user a predictable place to read the session log alongside the
+ * notebook and activity.jsonl. Best-effort: swallows errors on platforms
+ * where symlinks aren't available or the target isn't known yet.
+ */
+function syncSessionJsonlSymlink(ctx: ExtensionContext): void {
+  try {
+    const target = ctx.sessionManager?.getSessionFile?.();
+    if (!target) return;
+    const linkPath = path.join(process.cwd(), "session.jsonl");
+    try {
+      const existing = fs.lstatSync(linkPath);
+      if (existing.isSymbolicLink() || existing.isFile()) {
+        fs.rmSync(linkPath);
+      }
+    } catch {
+      // link didn't exist -- fall through to create
+    }
+    fs.symlinkSync(target, linkPath);
+  } catch (err) {
+    console.error("session.jsonl symlink failed:", err);
+  }
 }
 
 async function restoreSessionState(ctx: ExtensionContext): Promise<void> {

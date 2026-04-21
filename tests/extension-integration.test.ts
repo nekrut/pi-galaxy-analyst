@@ -335,7 +335,7 @@ describe("provenance notebook sync", () => {
     resetState();
   });
 
-  it("persists data provenance section after sample and file updates", async () => {
+  it("logs plan.mutation events to activity.jsonl when provenance tools run", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "loom-provenance-"));
     process.chdir(tempDir);
 
@@ -371,16 +371,23 @@ describe("provenance notebook sync", () => {
       pairedWith: "mutant_R2",
     });
 
-    const notebookPath = path.join(tempDir, "provenance-sync-test-notebook.md");
-    const notebook = await readFile(notebookPath, "utf8");
+    const activityPath = path.join(tempDir, "activity.jsonl");
+    const raw = await readFile(activityPath, "utf8");
+    const events = raw.trim().split("\n").map((line) => JSON.parse(line));
 
-    expect(notebook).toContain("## Data Provenance");
-    expect(notebook).toContain("**Source**: OTHER");
-    expect(notebook).toContain("**Accession**: 582600");
-    expect(notebook).toContain("| mutant | mutant | mutant | - | 0 |");
-    expect(notebook).toContain("| mutant_R1 | mutant_R1.fastq | fastq | - |");
-    expect(notebook).toContain("sample_count: 1");
-    expect(notebook).toContain("file_count: 1");
+    for (const ev of events) {
+      expect(ev.kind).toBe("plan.mutation");
+      expect(ev.source).toBe("syncToNotebook");
+      expect(typeof ev.timestamp).toBe("string");
+    }
+    const changeTypes = events.map((ev) => ev.payload.changeType);
+    expect(changeTypes).toContain("data_provenance");
+
+    const plan = getCurrentPlan()!;
+    expect(plan.dataProvenance?.source).toBe("other");
+    expect(plan.dataProvenance?.accession).toBe("582600");
+    expect(plan.dataProvenance?.samples).toHaveLength(1);
+    expect(plan.dataProvenance?.originalFiles).toHaveLength(1);
   });
 });
 
@@ -408,7 +415,7 @@ describe("session restore precedence", () => {
       expectedOutcomes: [],
       constraints: [],
     });
-    const notebookPath = path.join(tempDir, "notebook-truth-notebook.md");
+    const notebookPath = path.join(tempDir, "notebook.md");
     await writeFile(notebookPath, generateNotebook(notebookPlan), "utf-8");
 
     resetState();

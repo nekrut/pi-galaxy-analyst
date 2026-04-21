@@ -12,6 +12,7 @@ import {
   getCurrentPlan,
   getNotebookPath,
 } from "./state.js";
+import { onActivityChange, getActivityEvents } from "./activity.js";
 import {
   LoomWidgetKey,
   encodeJsonWidget,
@@ -62,13 +63,23 @@ function emitPlanWidgets(
  */
 export function setupUIBridge(pi: ExtensionAPI): void {
   let latestCtx: ExtensionContext | null = null;
-  const last = { planMd: "", stepsJson: "", notebookMd: "" };
+  const last = { planMd: "", stepsJson: "", notebookMd: "", activityJson: "" };
 
   pi.on("before_agent_start", async (_event, ctx) => {
     latestCtx = ctx;
     const plan = getCurrentPlan();
     if (plan) {
       emitPlanWidgets(ctx, plan, last);
+    }
+    // Seed the Activity pane with whatever has already been loaded for this
+    // session -- either hydrated from disk or accumulated in the same process.
+    const events = getActivityEvents();
+    if (events.length > 0) {
+      const json = JSON.stringify(events);
+      if (json !== last.activityJson) {
+        last.activityJson = json;
+        ctx.ui.setWidget(LoomWidgetKey.Activity, encodeJsonWidget(events));
+      }
     }
   });
 
@@ -85,5 +96,13 @@ export function setupUIBridge(pi: ExtensionAPI): void {
     const path = getNotebookPath();
     const header = path ? `> \`${path}\`\n\n` : "";
     latestCtx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
+  });
+
+  onActivityChange((events) => {
+    if (!latestCtx) return;
+    const json = JSON.stringify(events);
+    if (json === last.activityJson) return;
+    last.activityJson = json;
+    latestCtx.ui.setWidget(LoomWidgetKey.Activity, encodeJsonWidget(events));
   });
 }

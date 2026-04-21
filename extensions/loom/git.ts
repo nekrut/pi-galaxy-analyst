@@ -94,18 +94,23 @@ export function ensureGitRepo(cwd: string): void {
 }
 
 /**
- * Stage the notebook file and commit with `message`.
+ * Stage a single file and commit with `message`.
  * No-ops if nothing changed (git commit exits non-zero, caught by try/catch).
  */
-export function commitNotebook(notebookPath: string, message: string): void {
+export function commitFile(filePath: string, message: string): void {
   try {
-    const cwd = path.dirname(notebookPath);
-    const filename = path.basename(notebookPath);
+    const cwd = path.dirname(filePath);
+    const filename = path.basename(filePath);
     git(`add "${filename}"`, cwd);
     git(`commit -m "${message.replace(/"/g, '\\"')}"`, cwd);
   } catch {
     // nothing to commit, or git not available
   }
+}
+
+/** Back-compat alias for callers that still commit the notebook file. */
+export function commitNotebook(notebookPath: string, message: string): void {
+  commitFile(notebookPath, message);
 }
 
 /**

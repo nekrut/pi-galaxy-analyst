@@ -237,9 +237,9 @@ describe("expectedFromPlan cross-reference", () => {
       qcPassed: true,
     };
     // Write the notebook to disk matching the naming convention the
-    // listNotebooks helper uses.
+    // listNotebooks helper uses (fixed filename post-rewire).
     const refContent = generateNotebook(getCurrentPlan()!);
-    const refPath = path.join(tmpDir, "reference-run-notebook.md");
+    const refPath = path.join(tmpDir, "notebook.md");
     fs.writeFileSync(refPath, refContent);
 
     resetState();

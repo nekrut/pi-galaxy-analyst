@@ -1014,23 +1014,26 @@ export async function fileExists(filePath: string): Promise<boolean> {
 }
 
 /**
- * List notebook files in a directory
+ * List notebook files in a directory.
+ *
+ * As of the notebook rewire each session dir has exactly one fixed-name file,
+ * `notebook.md`. We still return an array so callers that iterate stay working.
  */
 export async function listNotebooks(directory: string): Promise<string[]> {
+  const fixed = path.join(directory, "notebook.md");
   try {
-    const files = await fs.readdir(directory);
-    return files
-      .filter((f) => f.endsWith("-notebook.md"))
-      .map((f) => path.join(directory, f));
+    await fs.access(fixed);
+    return [fixed];
   } catch {
     return [];
   }
 }
 
 /**
- * Generate default notebook path from plan title
+ * Default notebook path for a session directory. `title` is kept in the
+ * signature for API stability but is no longer used — every session dir
+ * stores its notebook as `notebook.md`.
  */
-export function getDefaultNotebookPath(title: string, directory: string): string {
-  const slug = slugify(title);
-  return path.join(directory, `${slug}-notebook.md`);
+export function getDefaultNotebookPath(_title: string, directory: string): string {
+  return path.join(directory, "notebook.md");
 }
