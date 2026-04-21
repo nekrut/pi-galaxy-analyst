@@ -6,7 +6,15 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { getCurrentPlan, getState, formatPlanSummary, getWorkflowSteps, getBRCContext } from "./state";
+import * as fs from "fs";
+import {
+  getCurrentPlan,
+  getState,
+  formatPlanSummary,
+  getWorkflowSteps,
+  getBRCContext,
+  getNotebookPath,
+} from "./state";
 import { loadConfig } from "./config";
 import {
   loadSketchCorpus,
@@ -14,6 +22,7 @@ import {
   renderSketchForPrompt,
 } from "./sketches";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
+import { getRecentActivityEvents } from "./activity";
 
 /**
  * System-prompt block describing team_dispatch usage. Empty string when the
@@ -51,6 +60,116 @@ Confirmation heuristic: if the user's request gives concrete roles, task
 framing, and success criteria, dispatch without asking. If the request
 is vague (e.g. "use a team"), propose the TeamSpec in chat and ask the
 user to approve or edit it first.
+`;
+}
+
+/**
+ * Shared guidance telling the agent how to propose a plan for researcher
+ * review. Both the no-active-plan and active-plan system prompts include this
+ * block so plan drafts always render consistently in the chat pane.
+ */
+function planDraftFormatBlock(): string {
+  return `## Plan draft format
+
+When proposing a new plan OR a major revision to an existing plan, wrap the
+draft in a \`\`\`plan fenced code block. The shell renders fenced plan drafts
+as a distinct card so the researcher can review before approving.
+
+Structure inside the fence:
+- First line: \`# <plan title>\`
+- Optional second paragraph: one- or two-sentence rationale.
+- Then a numbered checkbox list of steps, one per line:
+  \`- [ ] 1. <step name> — <one-line purpose>\`
+
+After emitting the fenced draft, ask the researcher to approve, edit, or
+reject. Do NOT call \`analysis_plan_create\` (or update an existing plan)
+until the researcher approves the draft.`;
+}
+
+/**
+ * Execution-lifecycle guidance shared across system prompts. Covers the
+ * mechanics the agent must follow when moving a step through pending →
+ * in_progress → completed, including the notebook-checkbox flip that keeps
+ * the user-curated notebook in sync with the structured plan state.
+ */
+function executionLifecycleBlock(): string {
+  return `## Plan execution lifecycle
+
+Triggers that start or advance execution:
+- User types \`/execute\`, \`/run\`, or \`/test\` (slash commands dispatch here).
+- User types natural-language approval ("go", "execute step 2", "run the plan").
+- User clicks the Approve button on a plan draft card.
+
+For every step:
+1. Call \`analysis_plan_update_step\` with \`status: "in_progress"\` before running the work.
+2. Run the step (Galaxy tool, local command, workflow invocation — per the step's execution type).
+3. On success, call \`analysis_plan_update_step\` with \`status: "completed"\` and include a one-line \`result\` summary.
+4. Flip the step's notebook checkbox in \`notebook.md\` from \`- [ ]\` to \`- [x]\` using the Edit tool. Match the step by its id or name; if no matching checkbox exists, skip silently (the notebook is user-curated and may not mirror every step).
+
+Do NOT narrate progress in chat — the Plan and Activity tabs already show it.
+If a step fails, set \`status: "failed"\`, write one line in chat explaining what failed, and stop. Do not auto-advance past a failure.`;
+}
+
+const NOTEBOOK_EXCERPT_MAX_CHARS = 4000;
+const ACTIVITY_TAIL_COUNT = 10;
+
+/**
+ * Read the user-curated notebook.md from disk and return a tail-capped excerpt
+ * for context injection. We keep the tail because the most recent entries are
+ * likeliest to matter for the next turn; older content has already informed
+ * earlier turns and typically repeats in the structured plan state.
+ */
+function buildNotebookExcerptBlock(): string {
+  const nbPath = getNotebookPath();
+  if (!nbPath) return "";
+  let content: string;
+  try {
+    content = fs.readFileSync(nbPath, "utf-8");
+  } catch {
+    return "";
+  }
+  if (!content.trim()) return "";
+  let excerpt = content;
+  let truncated = false;
+  if (excerpt.length > NOTEBOOK_EXCERPT_MAX_CHARS) {
+    excerpt = excerpt.slice(-NOTEBOOK_EXCERPT_MAX_CHARS);
+    truncated = true;
+  }
+  return `
+## Notebook (user-curated notes)
+
+\`${nbPath}\` — this is the researcher's running log. Read it for rationale,
+decisions, and free-form notes that may not be reflected in the structured
+plan state. When the researcher asks you to update the notebook, use Edit/Write
+to append — do NOT regenerate it.
+
+${truncated ? "_(showing trailing excerpt; earlier content elided)_\n\n" : ""}\`\`\`markdown
+${excerpt}
+\`\`\`
+`;
+}
+
+/**
+ * Format the last few activity events as a compact list so the agent can pick
+ * up continuity across restarts — which step was touched, what was decided,
+ * which findings were recorded. Kept small (`ACTIVITY_TAIL_COUNT` items) to
+ * stay well under typical context budgets.
+ */
+function buildRecentActivityBlock(): string {
+  const events = getRecentActivityEvents(ACTIVITY_TAIL_COUNT);
+  if (events.length === 0) return "";
+  const lines = events.map((e) => {
+    const changeType = (e.payload?.changeType as string) || "";
+    const tag = changeType ? `${e.kind}:${changeType}` : e.kind;
+    return `- ${e.timestamp} · ${tag}`;
+  });
+  return `
+## Recent activity
+
+Last ${events.length} activity event(s) — use for continuity, not as a source
+of truth. Structured state (plan, steps, findings) is authoritative.
+
+${lines.join("\n")}
 `;
 }
 
@@ -138,15 +257,18 @@ parameters. When the researcher makes selections, record them with \`brc_set_con
 ## Loom Status
 No active analysis plan.
 
-**Start a plan immediately.** As soon as the researcher describes their question or data,
-use \`analysis_plan_create\` to create a structured plan. This also creates a persistent
-markdown notebook on disk that tracks the full analysis. Don't wait for multiple rounds
-of discussion — capture what you know now and refine the plan as you go.
+**Propose a plan for the researcher to review.** When the researcher describes their
+question or data, draft a plan in chat inside a \`\`\`plan fenced block (see "Plan draft
+format" below). Do NOT call \`analysis_plan_create\` yet — wait for explicit approval
+("yes", "go", "approve"). On approval, call \`analysis_plan_create\` with the drafted
+steps.
 
-Your first response should gather enough context to create the plan (research question,
-data description, expected outcomes), then call \`analysis_plan_create\` in the same turn.
-If the researcher's opening message already contains this information, create the plan
-right away without asking clarifying questions first.
+Your first response should gather just enough context to draft a plan (research question,
+data description, expected outcomes), then emit the draft. If the researcher's opening
+message already contains this information, draft the plan right away without asking
+clarifying questions first.
+
+${planDraftFormatBlock()}
 ${brcSection}
 ${galaxyContext}
 ${buildExecutionModeContext()}
@@ -236,6 +358,11 @@ ${planSummary}
 - One sentence when one sentence suffices. Never repeat what the user said.
 - Do NOT use exclamation marks, "Great!", "Excellent!", "Sure!", or similar.
 - Minimize emoji usage. Plain text is preferred.
+
+${planDraftFormatBlock()}
+${executionLifecycleBlock()}
+${buildNotebookExcerptBlock()}
+${buildRecentActivityBlock()}
 ${workflowContext}${brcSection}${sketchSection}
 ${galaxyContext}
 ${buildExecutionModeContext()}
