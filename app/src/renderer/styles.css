@@ -499,9 +499,7 @@ body:not(.artifact-collapsed) #artifact-toggle {
 }
 
 .message.assistant:not(.system-info) hr {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 14px 0;
+  display: none;
 }
 
 .message.assistant:not(.system-info) table {
