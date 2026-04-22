@@ -498,8 +498,8 @@ body:not(.artifact-collapsed) #artifact-toggle {
   font-style: italic;
 }
 
-.message.assistant:not(.system-info) hr {
-  display: none;
+#messages hr {
+  display: none !important;
 }
 
 .message.assistant:not(.system-info) table {
