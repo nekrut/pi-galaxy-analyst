@@ -6,6 +6,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, confirmCwdChange } from "./ipc-handlers.js";
 import { AgentManager } from "./agent.js";
+import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-handler.js";
 import { ProcMonitor } from "./proc-monitor.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
@@ -163,6 +164,8 @@ function createWindow(cwd: string): void {
 
   agentManager = new AgentManager(mainWindow, cwd);
   registerIpcHandlers(agentManager);
+  registerFilesIpc(() => agentManager?.getCwd() ?? cwd);
+  startFilesWatcher(mainWindow, cwd);
 
   procMonitor = new ProcMonitor(mainWindow, () => agentManager?.getPid() ?? null);
 
@@ -228,6 +231,7 @@ function buildMenu(): void {
             if (agentManager.switchCwd(dir)) {
               log("switched cwd to:", dir);
               mainWindow.webContents.send("agent:cwd-changed", dir);
+              startFilesWatcher(mainWindow, dir);
             }
           },
         },

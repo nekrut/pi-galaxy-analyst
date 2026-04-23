@@ -35,6 +35,14 @@ export interface ProcInfo {
   command: string;
 }
 
+export interface FileNode {
+  name: string;
+  relPath: string;
+  type: "file" | "directory";
+  size?: number;
+  children?: FileNode[];
+}
+
 export interface OrbitAPI {
   prompt(message: string): Promise<void>;
   abort(): Promise<void>;
@@ -42,6 +50,16 @@ export interface OrbitAPI {
   getState(): Promise<unknown>;
   getCwd(): Promise<string>;
   openFile(filePath: string): Promise<{ opened: boolean; error?: string }>;
+  listFiles(opts?: { includeHidden?: boolean }): Promise<
+    | { ok: true; root: FileNode; cwd: string }
+    | { ok: false; error: string }
+  >;
+  readFile(relPath: string): Promise<
+    | { ok: true; size: number; bytes: Uint8Array }
+    | { ok: false; error: string; size?: number }
+  >;
+  writeFile(relPath: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  onFilesChanged(callback: () => void): () => void;
   getConfig(): Promise<Record<string, unknown>>;
   saveConfig(config: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
   validateApiKey(provider: string, key: string): Promise<{ valid: boolean; error?: string }>;
@@ -71,6 +89,14 @@ const api: OrbitAPI = {
   getState: () => ipcRenderer.invoke("agent:get-state"),
   getCwd: () => ipcRenderer.invoke("agent:get-cwd"),
   openFile: (filePath) => ipcRenderer.invoke("file:open", filePath),
+  listFiles: (opts) => ipcRenderer.invoke("files:list", opts),
+  readFile: (relPath) => ipcRenderer.invoke("files:read", relPath),
+  writeFile: (relPath, content) => ipcRenderer.invoke("files:write", relPath, content),
+  onFilesChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("files:changed", handler);
+    return () => ipcRenderer.removeListener("files:changed", handler);
+  },
   getConfig: () => ipcRenderer.invoke("config:get"),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
   validateApiKey: (provider, key) => ipcRenderer.invoke("apiKey:validate", provider, key),

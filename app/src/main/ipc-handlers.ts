@@ -1,5 +1,6 @@
 import { ipcMain, dialog, BrowserWindow, shell } from "electron";
 import type { AgentManager } from "./agent.js";
+import { startFilesWatcher } from "./files-handler.js";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
@@ -93,6 +94,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
       // Mirror the File > Open Analysis Directory path so the renderer
       // resets its UI when the cwd changes via the top-bar "change" button.
       window?.webContents.send("agent:cwd-changed", dir);
+      if (window) startFilesWatcher(window, dir);
     }
     return dir;
   });
