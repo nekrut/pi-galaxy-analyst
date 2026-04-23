@@ -408,6 +408,7 @@ async function refreshCwd(): Promise<void> {
     const cwd = await window.orbit.getCwd();
     cwdPathEl.textContent = cwd;
     cwdPathEl.title = cwd;
+    chat.setCwd(cwd);
   } catch { /* getCwd not available yet */ }
 }
 
@@ -435,6 +436,7 @@ function resetUiForFreshContext(): void {
 
 function applyCwdChange(dir: string): void {
   resetUiForFreshContext();
+  chat.setCwd(dir);
   cwdPathEl.textContent = dir;
   cwdPathEl.title = dir;
   chat.addInfoMessage(`<i>Switched analysis directory to <code>${dir.replace(/</g, "&lt;")}</code>.</i>`);
@@ -458,9 +460,10 @@ window.orbit.onSessionHistory((history) => {
   if (history.length === 0) return;
   if (chat.hasContent()) return;
   chat.addInfoMessage("<i>— Resumed previous session —</i>");
+  let replayNum = 0;
   for (const seg of history) {
     if (seg.role === "user") {
-      chat.addUserMessage(seg.text);
+      chat.addReplayUserMessage(seg.text, ++replayNum);
       continue;
     }
     chat.startAssistantMessage();
@@ -865,7 +868,6 @@ function showNewSessionModal(): Promise<NewSessionChoice> {
   });
 }
 
-/** Wipe chat + artifacts + restart the agent without --continue (fresh Pi.dev session). */
 async function showCwdWelcome(): Promise<void> {
   let cwd = "~";
   try {
@@ -883,6 +885,7 @@ async function showCwdWelcome(): Promise<void> {
 }
 
 async function resetSession(): Promise<void> {
+  chat.resetCounter();
   resetUiForFreshContext();
 
   await window.orbit.resetSession();
