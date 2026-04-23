@@ -69,6 +69,9 @@ interface Usage {
 
 const sessionUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const turnUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+// Per-model cumulative usage so /cost can attribute tokens to the model that
+// produced them (the user can switch models mid-session).
+const perModelUsage = new Map<string, Usage>();
 let currentModel: string | null = null;
 
 /** Match a model ID against the pricing table (handles date suffixes). */
@@ -370,6 +373,14 @@ function commitTurnUsage(): void {
   sessionUsage.output += turnUsage.output;
   sessionUsage.cacheRead += turnUsage.cacheRead;
   sessionUsage.cacheWrite += turnUsage.cacheWrite;
+  if (currentModel) {
+    const m = perModelUsage.get(currentModel) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    m.input += turnUsage.input;
+    m.output += turnUsage.output;
+    m.cacheRead += turnUsage.cacheRead;
+    m.cacheWrite += turnUsage.cacheWrite;
+    perModelUsage.set(currentModel, m);
+  }
   turnUsage.input = 0;
   turnUsage.output = 0;
   turnUsage.cacheRead = 0;
@@ -412,6 +423,7 @@ function resetUiForFreshContext(): void {
   turnUsage.output = 0;
   turnUsage.cacheRead = 0;
   turnUsage.cacheWrite = 0;
+  perModelUsage.clear();
   renderUsage();
   streaming = false;
   sendBtn.classList.remove("hidden");
@@ -589,6 +601,7 @@ function slashCommandsHtml(): string {
     `<li><code>/status</code> — show Galaxy connection status</li>` +
     `<li><code>/notebook</code> — show notebook info</li>` +
     `<li><code>/summarize [N [M]]</code> — summarize prompts N–M into the notebook</li>` +
+    `<li><code>/cost</code> — append session token/cost breakdown to the notebook</li>` +
     `<li><code>/decisions</code> — show decision log</li>` +
     `<li><code>/connect</code> — open Galaxy connection settings</li>` +
     `<li><code>/help</code> — show this help</li>` +
@@ -634,6 +647,11 @@ function handleSlashCommand(text: string): boolean {
 
   if (cmd === "summarize" || cmd === "summary") {
     handleSummarize(text, rest.join(" "));
+    return true;
+  }
+
+  if (cmd === "cost") {
+    handleCost(text);
     return true;
   }
 
@@ -700,6 +718,70 @@ function handleSummarize(raw: string, argStr: string): void {
     `--- Chat transcript (${label}) ---\n` +
     transcript +
     `\n--- end transcript ---`;
+
+  chat.addUserMessage(raw);
+  chat.showThinking();
+  statusBadge.textContent = "thinking...";
+  statusBadge.className = "status-badge thinking";
+  window.orbit.prompt(prompt);
+}
+
+/**
+ * /cost — snapshot session token usage per model, price it against the renderer's
+ * pricing table, and ask the agent to append the breakdown to notebook.md.
+ * The renderer is the authoritative source for usage numbers; the agent just
+ * writes them out.
+ */
+function handleCost(raw: string): void {
+  if (perModelUsage.size === 0) {
+    chat.addUserMessage(raw);
+    chat.addErrorMessage("No billable assistant turns recorded yet in this renderer session.");
+    return;
+  }
+
+  const rows: string[] = [];
+  let totalCostKnown = true;
+  let grandCost = 0;
+  const totals: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+  for (const [model, u] of perModelUsage) {
+    totals.input += u.input;
+    totals.output += u.output;
+    totals.cacheRead += u.cacheRead;
+    totals.cacheWrite += u.cacheWrite;
+    const cost = computeCost(u, model);
+    const costStr = cost === null ? "unknown (no pricing entry)" : `$${cost.toFixed(4)}`;
+    if (cost === null) totalCostKnown = false; else grandCost += cost;
+    rows.push(
+      `| \`${model}\` | ${u.input.toLocaleString()} | ${u.output.toLocaleString()} | ` +
+      `${u.cacheRead.toLocaleString()} | ${u.cacheWrite.toLocaleString()} | ${costStr} |`
+    );
+  }
+
+  const totalCostStr = totalCostKnown ? `$${grandCost.toFixed(4)}` : `≥$${grandCost.toFixed(4)} (some models unpriced)`;
+  rows.push(
+    `| **Total** | **${totals.input.toLocaleString()}** | **${totals.output.toLocaleString()}** | ` +
+    `**${totals.cacheRead.toLocaleString()}** | **${totals.cacheWrite.toLocaleString()}** | **${totalCostStr}** |`
+  );
+
+  const table =
+    `| Model | Input tokens | Output tokens | Cache read | Cache write | Cost (USD) |\n` +
+    `|-------|-------------:|--------------:|-----------:|------------:|-----------:|\n` +
+    rows.join("\n");
+
+  const heading = "## Session cost";
+  const prompt =
+    `Append the following session cost breakdown verbatim to the notebook file ` +
+    `(notebook.md) in the current working directory. Use Edit or Write to append — ` +
+    `do NOT regenerate, reformat, or wrap the table. The numbers below are authoritative ` +
+    `(captured from the renderer's usage counters, same source as the masthead), so ` +
+    `use them as-is.\n\n` +
+    `Use exactly this heading (H2, verbatim) on its own line, followed by a blank line, ` +
+    `then the table:\n` +
+    `    ${heading}\n\n` +
+    `--- Cost table ---\n` +
+    table +
+    `\n--- end table ---`;
 
   chat.addUserMessage(raw);
   chat.showThinking();
@@ -1622,7 +1704,6 @@ interface ProcInfo {
   pmem: number;
   rss: number;
   etime: string;
-  nlwp: number;
   command: string;
 }
 
