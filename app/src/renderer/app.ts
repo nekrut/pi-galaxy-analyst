@@ -8,6 +8,7 @@ import {
   decodeMarkdownWidget,
   decodeJsonWidget,
   type ShellActivityEvent,
+  type ParameterFormPayload,
 } from "../../../shared/loom-shell-contract.js";
 
 declare global {
@@ -1416,9 +1417,8 @@ window.orbit.onUiRequest((request) => {
     const key = request.widgetKey as string;
     const lines = request.widgetLines as string[] | undefined;
 
-    // The brain still emits Plan/Steps/Results/PlanView/Parameters widgets,
-    // but the UI no longer surfaces them — only the notebook + activity
-    // tabs of the right pane remain.
+    // The brain still emits Plan/Steps/Results/PlanView widgets with no
+    // current UI surface. Notebook, Activity, and Parameters are rendered.
     if (key === LoomWidgetKey.Notebook && lines) {
       artifacts.setNotebookMarkdown(decodeMarkdownWidget(lines));
       setArtifactCollapsed(false);
@@ -1428,6 +1428,22 @@ window.orbit.onUiRequest((request) => {
         artifacts.setActivityEvents(events);
       } catch (err) {
         console.error("activity widget decode failed:", err);
+      }
+    } else if (key === LoomWidgetKey.Parameters && lines) {
+      try {
+        const payload = decodeJsonWidget<ParameterFormPayload>(lines);
+        chat.addParameterCard(payload, (values) => {
+          // Populate the chat input with an /execute call carrying the
+          // chosen values. Do NOT auto-send — give the user a chance to
+          // review the assembled command.
+          const savedParameters = values;
+          const args = JSON.stringify({ savedParameters });
+          inputEl.value = `/execute ${args}`;
+          inputEl.focus();
+          inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+        });
+      } catch (err) {
+        console.error("parameters widget decode failed:", err);
       }
     }
   }

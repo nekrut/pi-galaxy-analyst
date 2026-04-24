@@ -3050,8 +3050,46 @@ analyses in Galaxy.`,
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Guard: parameter forms only make sense when there's a plan with
+      // executable tool/workflow steps. Without this, the agent can call
+      // this tool in response to parameter-adjacent chit-chat and the
+      // user sees an empty form appear for no obvious reason.
+      const plan = getCurrentPlan();
+      if (!plan) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              error:
+                "No active analysis plan. Parameter review is scoped to plan-level tool/workflow steps. " +
+                "Create a plan with analysis_plan_create first (or have the user approve a drafted plan).",
+            }),
+          }],
+          details: { error: true },
+        };
+      }
+      const hasExecutable = plan.steps.some(
+        (s) => s.execution.type === "tool" || s.execution.type === "workflow",
+      );
+      if (!hasExecutable) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
+              error:
+                "Plan has no tool or workflow steps to review. Add steps whose execution.type is 'tool' " +
+                "or 'workflow' before calling analyze_plan_parameters, or answer the user's question in " +
+                "chat without invoking this tool.",
+            }),
+          }],
+          details: { error: true },
+        };
+      }
+
       const spec: ParameterFormPayload = {
-        planId: getCurrentPlan()?.id || "",
+        planId: plan.id,
         title: params.title,
         description: params.description,
         groups: params.groups,

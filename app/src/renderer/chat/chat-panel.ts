@@ -3,6 +3,11 @@ import {
   TEAM_DISPATCH_KIND,
   type TeamDispatchDetails,
 } from "../../../../shared/team-dispatch-contract.js";
+import type {
+  ParameterFormPayload,
+  ParameterGroup,
+  ParameterSpec,
+} from "../../../../shared/loom-shell-contract.js";
 
 export class ChatPanel {
   private container: HTMLElement;
@@ -292,6 +297,20 @@ export class ChatPanel {
     this.scrollToBottom();
   }
 
+  /**
+   * Render a parameter-review form card (from the `analyze_plan_parameters`
+   * tool). `onSubmit` receives the flattened `{name: value}` dict when the
+   * user clicks "Use these parameters".
+   */
+  addParameterCard(
+    payload: ParameterFormPayload,
+    onSubmit: (values: Record<string, string | number | boolean>) => void,
+  ): void {
+    const card = renderParameterCard(payload, onSubmit);
+    this.container.appendChild(card);
+    this.scrollToBottom();
+  }
+
   /** Add a system/info message with neutral styling and HTML support. */
   addInfoMessage(html: string): void {
     const el = document.createElement("div");
@@ -451,4 +470,180 @@ function renderTeamDispatchCard(details: TeamDispatchDetails): HTMLElement {
   wrapper.appendChild(header);
   wrapper.appendChild(body);
   return wrapper;
+}
+
+// ── Parameter form card ──────────────────────────────────────────────────────
+
+function renderParameterCard(
+  payload: ParameterFormPayload,
+  onSubmit: (values: Record<string, string | number | boolean>) => void,
+): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "param-form-card";
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "param-form-header";
+  const title = document.createElement("div");
+  title.className = "param-form-title";
+  title.textContent = payload.title || "Parameters";
+  const desc = document.createElement("div");
+  desc.className = "param-form-desc";
+  desc.textContent = payload.description || "";
+  header.appendChild(title);
+  if (payload.description) header.appendChild(desc);
+  card.appendChild(header);
+
+  // Groups + inputs — `inputs` maps param name → input element reading function
+  const readers = new Map<string, () => string | number | boolean>();
+
+  for (const group of payload.groups ?? []) {
+    card.appendChild(renderGroup(group, readers));
+  }
+
+  // Actions
+  const actions = document.createElement("div");
+  actions.className = "param-form-actions";
+  const useBtn = document.createElement("button");
+  useBtn.type = "button";
+  useBtn.className = "plan-btn execute param-form-submit";
+  useBtn.textContent = "Use these parameters";
+  useBtn.addEventListener("click", () => {
+    const values: Record<string, string | number | boolean> = {};
+    for (const [name, read] of readers) values[name] = read();
+    onSubmit(values);
+  });
+  actions.appendChild(useBtn);
+  card.appendChild(actions);
+
+  return card;
+}
+
+function renderGroup(
+  group: ParameterGroup,
+  readers: Map<string, () => string | number | boolean>,
+): HTMLElement {
+  const groupEl = document.createElement("div");
+  groupEl.className = "param-form-group";
+
+  const groupTitle = document.createElement("div");
+  groupTitle.className = "param-form-group-title";
+  groupTitle.textContent = group.title || "";
+  groupEl.appendChild(groupTitle);
+
+  if (group.description) {
+    const groupDesc = document.createElement("div");
+    groupDesc.className = "param-form-group-desc";
+    groupDesc.textContent = group.description;
+    groupEl.appendChild(groupDesc);
+  }
+
+  for (const p of group.params ?? []) {
+    groupEl.appendChild(renderParamRow(p, readers));
+  }
+  return groupEl;
+}
+
+function renderParamRow(
+  p: ParameterSpec,
+  readers: Map<string, () => string | number | boolean>,
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "param-form-row";
+
+  const labelWrap = document.createElement("div");
+  labelWrap.className = "param-form-label-wrap";
+  const label = document.createElement("label");
+  label.className = "param-form-label";
+  label.textContent = p.label || p.name;
+  label.htmlFor = `param-${cssEscape(p.name)}`;
+  labelWrap.appendChild(label);
+  if (p.usedBy && p.usedBy.length > 0) {
+    const usedBy = document.createElement("div");
+    usedBy.className = "param-form-used-by";
+    usedBy.textContent = `used by: ${p.usedBy.join(", ")}`;
+    labelWrap.appendChild(usedBy);
+  }
+  if (p.help) {
+    const help = document.createElement("div");
+    help.className = "param-form-help";
+    help.textContent = p.help;
+    labelWrap.appendChild(help);
+  }
+  row.appendChild(labelWrap);
+
+  const inputWrap = document.createElement("div");
+  inputWrap.className = "param-form-input-wrap";
+
+  switch (p.type) {
+    case "boolean": {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = label.htmlFor;
+      input.checked = Boolean(p.value);
+      readers.set(p.name, () => input.checked);
+      inputWrap.appendChild(input);
+      break;
+    }
+    case "select": {
+      const input = document.createElement("select");
+      input.id = label.htmlFor;
+      input.className = "param-form-input";
+      for (const opt of p.options ?? []) {
+        const optEl = document.createElement("option");
+        optEl.value = opt.value;
+        optEl.textContent = opt.label;
+        input.appendChild(optEl);
+      }
+      input.value = String(p.value);
+      readers.set(p.name, () => input.value);
+      inputWrap.appendChild(input);
+      break;
+    }
+    case "integer":
+    case "float": {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.id = label.htmlFor;
+      input.className = "param-form-input";
+      if (typeof p.min === "number") input.min = String(p.min);
+      if (typeof p.max === "number") input.max = String(p.max);
+      if (typeof p.step === "number") {
+        input.step = String(p.step);
+      } else if (p.type === "float") {
+        input.step = "any";
+      }
+      input.value = String(p.value ?? "");
+      readers.set(p.name, () => {
+        const raw = input.value.trim();
+        if (raw === "") return p.type === "integer" ? 0 : 0;
+        return p.type === "integer" ? parseInt(raw, 10) : parseFloat(raw);
+      });
+      inputWrap.appendChild(input);
+      break;
+    }
+    case "file":
+    case "text":
+    default: {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.id = label.htmlFor;
+      input.className = "param-form-input";
+      input.value = String(p.value ?? "");
+      if (p.type === "file" && p.fileFilter) {
+        input.placeholder = `path (filter: ${p.fileFilter})`;
+      }
+      readers.set(p.name, () => input.value);
+      inputWrap.appendChild(input);
+      break;
+    }
+  }
+
+  row.appendChild(inputWrap);
+  return row;
+}
+
+/** Cheap id-safe escape — we only use this for element ids, not CSS selectors. */
+function cssEscape(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
