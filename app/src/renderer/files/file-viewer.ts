@@ -113,6 +113,111 @@ export class FileViewer {
     return true;
   }
 
+  /**
+   * Check whether the currently-open file has changed on disk, and update
+   * the viewer if so. Safe to call on every files:changed event — no-ops
+   * when there is no file open or the bytes are unchanged.
+   *
+   * - Text, clean: silent reload. Preserves scroll position and caret.
+   * - Text, dirty: shows a non-destructive "file changed on disk" banner
+   *   with Reload / Keep buttons so unsaved edits are never clobbered.
+   * - Image: reloads the `<img>` source.
+   * - Binary: no-op (nothing useful to refresh).
+   */
+  async refreshFromDisk(): Promise<void> {
+    if (!this.currentPath || !this.currentKind) return;
+    let res;
+    try {
+      res = await window.orbit.readFile(this.currentPath);
+    } catch {
+      return;
+    }
+    if (!res.ok) return;
+
+    if (this.currentKind === "text") {
+      if (!this.editor) return;
+      const newText = new TextDecoder("utf-8").decode(res.bytes);
+      if (this.editor.value === newText) return;
+      if (this.dirty) {
+        this.showStaleBanner(newText);
+      } else {
+        const scrollTop = this.editor.scrollTop;
+        const selStart = this.editor.selectionStart;
+        const selEnd = this.editor.selectionEnd;
+        this.editor.value = newText;
+        this.editor.scrollTop = scrollTop;
+        const cap = newText.length;
+        this.editor.setSelectionRange(Math.min(selStart, cap), Math.min(selEnd, cap));
+        // Re-render markdown preview if it's the currently visible pane.
+        if (this.preview && !this.preview.classList.contains("hidden")) {
+          this.preview.innerHTML = marked.parse(newText, { async: false }) as string;
+        }
+      }
+    } else if (this.currentKind === "image") {
+      this.reloadImage(res.bytes);
+    }
+  }
+
+  private showStaleBanner(newText: string): void {
+    // Replace any existing banner (subsequent external writes before the
+    // user acts on the first one should just update the pending content).
+    const existing = this.container.querySelector(".file-viewer-stale-banner");
+    if (existing) existing.remove();
+
+    const banner = document.createElement("div");
+    banner.className = "file-viewer-stale-banner";
+
+    const msg = document.createElement("span");
+    msg.textContent = "This file changed on disk. Your unsaved edits are preserved.";
+    banner.appendChild(msg);
+
+    const reloadBtn = document.createElement("button");
+    reloadBtn.type = "button";
+    reloadBtn.className = "file-viewer-btn";
+    reloadBtn.textContent = "Reload (discard my edits)";
+    reloadBtn.addEventListener("click", () => {
+      if (!this.editor) return;
+      this.editor.value = newText;
+      this.dirty = false;
+      if (this.saveBtn) this.saveBtn.disabled = true;
+      if (this.statusEl) {
+        this.statusEl.textContent = "Saved";
+        this.statusEl.className = "file-viewer-status saved";
+      }
+      if (this.preview && !this.preview.classList.contains("hidden")) {
+        this.preview.innerHTML = marked.parse(newText, { async: false }) as string;
+      }
+      banner.remove();
+    });
+
+    const keepBtn = document.createElement("button");
+    keepBtn.type = "button";
+    keepBtn.className = "file-viewer-btn";
+    keepBtn.textContent = "Keep my edits";
+    keepBtn.addEventListener("click", () => banner.remove());
+
+    banner.appendChild(reloadBtn);
+    banner.appendChild(keepBtn);
+
+    // Insert at the very top, before the toolbar.
+    const root = this.container.querySelector(".file-viewer-root");
+    if (root) {
+      root.insertBefore(banner, root.firstChild);
+    }
+  }
+
+  private reloadImage(bytes: Uint8Array): void {
+    const img = this.container.querySelector<HTMLImageElement>("img.file-viewer-image");
+    if (!img) return;
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const blob = new Blob([buf]);
+    const nextUrl = URL.createObjectURL(blob);
+    const prev = this.currentImageUrl;
+    this.currentImageUrl = nextUrl;
+    img.src = nextUrl;
+    if (prev) URL.revokeObjectURL(prev);
+  }
+
   /** Clear the viewer (e.g. when the cwd changes). */
   close(): void {
     this.teardownImage();
@@ -310,6 +415,7 @@ export class FileViewer {
     this.currentImageUrl = url;
 
     const img = document.createElement("img");
+    img.className = "file-viewer-image";
     img.src = url;
     img.alt = relPath;
     wrap.appendChild(img);

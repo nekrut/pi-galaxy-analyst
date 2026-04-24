@@ -2099,3 +2099,23 @@ body:not(.artifact-collapsed) #artifact-toggle {
 .param-form-submit {
   white-space: nowrap;
 }
+
+/* Stale banner — file viewer sees external change but user has unsaved edits */
+.file-viewer-stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 215, 0, 0.12);
+  border-bottom: 1px solid var(--accent);
+  font-size: 11px;
+  color: var(--text-bright);
+  flex-shrink: 0;
+}
+.file-viewer-stale-banner span {
+  flex: 1;
+}
+.file-viewer-stale-banner .file-viewer-btn {
+  font-size: 10px;
+  padding: 2px 8px;
+}

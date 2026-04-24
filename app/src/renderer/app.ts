@@ -301,6 +301,7 @@ document.addEventListener("mouseup", () => {
 void filesPanel.refresh();
 window.orbit.onFilesChanged(() => {
   void filesPanel.refresh();
+  void fileViewer.refreshFromDisk();
 });
 
 // ── Execution mode toggle (Local / Remote) ───────────────────────────────────
