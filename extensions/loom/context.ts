@@ -220,6 +220,54 @@ ${lines.join("\n")}
 `;
 }
 
+/**
+ * Local-tool environment convention — per-analysis conda env rooted in the
+ * analysis cwd. Injected in both Local and Remote modes (Remote uses it as
+ * fallback when a Galaxy tool isn't available).
+ */
+function buildLocalEnvContext(): string {
+  return `
+## Local-tool environment (per-analysis conda env)
+
+When running any bioinformatics tool locally — in Local mode, or as a
+fallback in Remote mode when no Galaxy tool exists — use a **per-analysis
+conda environment** rooted at \`.loom/env/\` inside the current analysis
+directory. This isolates tool versions between analyses and keeps each
+notebook's reproducibility record self-contained.
+
+Conventions:
+
+- **Env path:** \`.loom/env/\` (prefix style: \`-p .loom/env\`, not \`-n name\`).
+  Never create conda envs at global paths or modify the base environment.
+- **Channel priority:** \`-c bioconda -c conda-forge\`, in that order. Most
+  bioinformatics tools ship on bioconda; conda-forge covers Python / numeric
+  dependencies.
+- **Prefer \`mamba\`** if available (\`which mamba\`) — much faster solves.
+  Fall back to \`conda\` if mamba is absent. Same flags either way.
+
+Lifecycle (create lazily, not proactively):
+
+1. When a tool is first needed, check \`test -d .loom/env\`. If missing:
+   \`conda create -p .loom/env -c bioconda -c conda-forge -y python=3.11\`
+   (or \`mamba create ...\`). Python 3.11 is a safe baseline; individual
+   tools will pin their own runtime if they need to.
+2. **Install tools in batches** when you know what the step needs:
+   \`conda install -p .loom/env -c bioconda -c conda-forge -y bwa samtools lofreq\`
+   One solve for N tools is much faster than N solves.
+3. **Run tools** via \`conda run\` or by full path:
+   \`conda run -p .loom/env bwa mem ...\`
+   or  \`.loom/env/bin/bwa mem ...\`.
+4. **Record installs** in \`notebook.md\` under a \`## Environment\` heading —
+   a table of tool + version (\`conda list -p .loom/env | grep <tool>\`) so
+   the analysis is reproducible from the notebook alone.
+
+If neither conda nor mamba is installed, tell the user once ("conda/mamba
+not found — per-analysis env convention cannot be used") and ask whether to
+fall back to system tools (non-reproducible) or abort. Do not silently use
+system tools.
+`;
+}
+
 /** Build the execution-mode block injected into every system prompt. */
 function buildExecutionModeContext(): string {
   const cfg = loadConfig();
@@ -230,14 +278,18 @@ function buildExecutionModeContext(): string {
     return `
 ## Execution mode: Local
 
-Galaxy MCP tools are not registered in this session. Run work locally using
-whatever local execution primitives are available. Plan management, notebook
-updates, and non-Galaxy reasoning all still work normally.
+Galaxy MCP tools are not registered in this session. Run work locally. Plan
+management, notebook updates, and non-Galaxy reasoning all still work
+normally.
 
-If the user wants reproducibility or large-scale compute, suggest switching
-to Remote mode in the masthead toggle so Galaxy user-defined tools become
+All local tool execution MUST go through the per-analysis conda env
+convention below.
+
+If the user wants reproducibility at Galaxy-grade (job provenance, history
+objects, shareable records) or large-scale compute, suggest switching to
+Remote mode in the masthead toggle so Galaxy user-defined tools become
 available.
-`;
+${buildLocalEnvContext()}`;
   }
 
   return `
@@ -251,12 +303,13 @@ Both execution paths are available, with a clear default:
   default.
 - **Local execution** is fine for quick, exploratory, or ad-hoc work that
   doesn't merit a Galaxy tool wrapper. Use it when the user explicitly asks
-  or when Galaxy has no equivalent tool.
+  or when Galaxy has no equivalent tool. When falling back to local, use the
+  per-analysis conda env convention below.
 
 When a custom step has no Galaxy equivalent but is likely to be reused,
 suggest wrapping it as a Galaxy tool rather than leaving it as a one-off
 local script.
-`;
+${buildLocalEnvContext()}`;
 }
 
 export function setupContextInjection(pi: ExtensionAPI): void {

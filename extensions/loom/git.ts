@@ -60,6 +60,10 @@ __pycache__/
 .idea/
 *.swp
 *~
+
+# Loom per-analysis conda env (large, reproducible from the notebook's
+# Environment table rather than committed bytes)
+.loom/env/
 `;
 
 function git(args: string, cwd: string): void {
