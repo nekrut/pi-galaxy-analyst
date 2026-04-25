@@ -8,7 +8,6 @@ import {
   decodeMarkdownWidget,
   decodeJsonWidget,
   type ShellActivityEvent,
-  type ParameterFormPayload,
 } from "../../../shared/loom-shell-contract.js";
 
 declare global {
@@ -323,45 +322,32 @@ window.orbit.onFilesChanged(() => {
   void fileViewer.refreshFromDisk();
 });
 
-// ── Execution mode toggle (Local / Remote) ───────────────────────────────────
+// ── Galaxy connection indicator ──────────────────────────────────────────────
 
-const execModeToggle = document.getElementById("exec-mode-toggle")!;
-const execModeButtons = execModeToggle.querySelectorAll<HTMLButtonElement>("button");
+const galaxyStatus = document.getElementById("galaxy-status")!;
 
-function applyExecModeUI(mode: "local" | "remote", galaxyConfigured: boolean): void {
-  execModeButtons.forEach((b) => {
-    b.classList.toggle("active", b.dataset.mode === mode);
-    if (b.dataset.mode === "remote") {
-      b.disabled = !galaxyConfigured;
-      b.title = galaxyConfigured ? "Remote: agent can use Galaxy" : "Configure Galaxy in Preferences to enable Remote mode";
-    } else {
-      b.title = "Local: all jobs run locally";
-    }
-  });
-}
-
-async function loadExecModeFromConfig(): Promise<void> {
+async function refreshGalaxyStatus(): Promise<void> {
   const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
-  const mode = (cfg.executionMode as "local" | "remote") || "remote";
-  const galaxy = cfg.galaxy as { active?: string; profiles?: Record<string, unknown> } | undefined;
-  const galaxyConfigured = !!(galaxy?.active && galaxy?.profiles?.[galaxy.active]);
-  applyExecModeUI(mode, galaxyConfigured);
+  const galaxy = cfg.galaxy as { active?: string; profiles?: Record<string, { url?: string; apiKey?: string }> } | undefined;
+  const active = galaxy?.active;
+  const profile = active ? galaxy?.profiles?.[active] : undefined;
+  const connected = !!(profile?.url && profile?.apiKey);
+
+  if (connected) {
+    galaxyStatus.classList.add("status-dot-connected");
+    galaxyStatus.classList.remove("status-dot-disconnected");
+    galaxyStatus.title = `Galaxy: ${profile.url}`;
+  } else {
+    galaxyStatus.classList.add("status-dot-disconnected");
+    galaxyStatus.classList.remove("status-dot-connected");
+    galaxyStatus.title = "Galaxy: not configured (open Preferences to add a profile)";
+  }
 }
-void loadExecModeFromConfig();
 
-execModeButtons.forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    if (btn.disabled) return;
-    const mode = btn.dataset.mode as "local" | "remote";
-    if (btn.classList.contains("active")) return;
+void refreshGalaxyStatus();
 
-    // Save mode to config and restart agent
-    const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
-    cfg.executionMode = mode;
-    await window.orbit.saveConfig(cfg);
-    chat.addInfoMessage(`<i>Execution mode → <b>${mode}</b>. Agent restarting…</i>`);
-    await loadExecModeFromConfig();
-  });
+galaxyStatus.addEventListener("click", () => {
+  void openPreferences();
 });
 
 // ── First-run welcome screen ─────────────────────────────────────────────────
@@ -448,7 +434,6 @@ welcomeSave.addEventListener("click", async () => {
       model: welcomeModel.value,
       apiKey,
     },
-    executionMode: "remote",
   };
 
   const galaxyUrl = welcomeGalaxyUrl.value.trim();
@@ -465,7 +450,7 @@ welcomeSave.addEventListener("click", async () => {
 
   await window.orbit.saveConfig(cfg);
   welcomeOverlay.classList.add("hidden");
-  await loadExecModeFromConfig();
+  await refreshGalaxyStatus();
 });
 
 async function checkFirstRun(): Promise<void> {
@@ -1486,28 +1471,6 @@ window.orbit.onUiRequest((request) => {
         artifacts.setActivityEvents(events);
       } catch (err) {
         console.error("activity widget decode failed:", err);
-      }
-    } else if (key === LoomWidgetKey.Parameters && lines) {
-      try {
-        const payload = decodeJsonWidget<ParameterFormPayload>(lines);
-        chat.addParameterCard(payload, (values) => {
-          // Submit destination adapts to context:
-          //   - A plan is committed (planId is non-empty) → the user is
-          //     reviewing parameters before running: populate /execute
-          //     with the values so the slash handler dispatches.
-          //   - No plan yet (drafting) → drop the values back into chat
-          //     as a plain message so the agent can read them and fold
-          //     them into the drafted plan.
-          const json = JSON.stringify(values, null, 2);
-          const hasCommittedPlan = typeof payload.planId === "string" && payload.planId.length > 0;
-          inputEl.value = hasCommittedPlan
-            ? `/execute ${JSON.stringify({ savedParameters: values })}`
-            : `Use these parameter values:\n\`\`\`json\n${json}\n\`\`\``;
-          inputEl.focus();
-          inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
-        });
-      } catch (err) {
-        console.error("parameters widget decode failed:", err);
       }
     }
   }

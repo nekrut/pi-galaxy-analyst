@@ -444,37 +444,47 @@ body:not(.files-collapsed) #files-toggle {
   color: var(--error);
 }
 
-/* Segmented control (Local | Remote) */
-.seg-control {
+/* Galaxy connection indicator (replaces Local|Remote toggle) */
+.status-dot {
   display: flex;
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  font-size: 11px;
-}
-.seg-control button {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
+  align-items: center;
+  gap: 6px;
   padding: 4px 10px;
-  cursor: pointer;
+  border-radius: var(--radius);
+  font-size: 11px;
   font-family: var(--font-sans);
   font-weight: 600;
-  white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
 }
-.seg-control button:hover:not(:disabled) {
+.status-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot-connected {
   color: var(--text);
+}
+.status-dot-connected::before {
+  background: var(--success, #4ade80);
+  box-shadow: 0 0 4px var(--success, #4ade80);
+}
+.status-dot-disconnected {
+  color: var(--text-dim);
+}
+.status-dot-disconnected::before {
+  background: var(--error, #f87171);
+}
+.status-dot:hover {
   background: var(--bg-hover);
 }
-.seg-control button.active {
-  background: var(--accent);
-  color: var(--galaxy-dark);
-}
-.seg-control button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.status-dot-label {
+  white-space: nowrap;
 }
 
 /* Artifact toggle button in masthead */

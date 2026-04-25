@@ -8,14 +8,7 @@ export interface LoomConfig {
     active: string | null;
     profiles: Record<string, { url: string; apiKey: string }>;
   };
-  executionMode?: "local" | "remote";
   defaultCwd?: string;
-  /**
-   * Absolute path to a gxy-sketches checkout. When set, Loom scans the
-   * corpus for sketches matching the active plan (by tool IDs, workflow
-   * ID, or tags) and injects the content into the system prompt.
-   */
-  sketchCorpusPath?: string;
   /**
    * Opt-in flags for experimental subsystems. Off by default; set the
    * matching env var (e.g. LOOM_TEAM_DISPATCH=1) to override per-session.

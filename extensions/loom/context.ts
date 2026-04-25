@@ -1,125 +1,26 @@
 /**
- * Context injection for Galaxy analysis plans
+ * Context injection for the Loom session.
  *
- * Injects current plan state into the LLM context via the before_agent_start event.
- * Uses tiered injection: compact summary always, full details on demand via tools.
+ * Notebook is the durable record. State is just connection + path. The agent
+ * gets the notebook content (tail-capped excerpt + recent activity tail) and
+ * Galaxy connection status injected at session start, plus tool-usage
+ * guidance for the new markdown-and-invocation-block model.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import * as fs from "fs";
-import {
-  getCurrentPlan,
-  getState,
-  formatPlanSummary,
-  getWorkflowSteps,
-  getBRCContext,
-  getNotebookPath,
-} from "./state";
-import { loadConfig } from "./config";
-import {
-  loadSketchCorpus,
-  matchSketchesForPlan,
-  renderSketchForPrompt,
-} from "./sketches";
+import { getState, getNotebookPath } from "./state";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { getRecentActivityEvents } from "./activity";
 
-/**
- * System-prompt block describing team_dispatch usage. Empty string when the
- * experimental flag is off, so default sessions never see the guidance for a
- * tool that isn't registered.
- */
-function buildTeamDispatchContext(): string {
-  if (!isTeamDispatchEnabled()) return "";
-  return `
-## Team dispatch (for specialist sub-tasks)
-
-When the user asks for a short-lived specialist team (e.g. "start a team
-for literature review — one finds papers, one validates"), call the
-\`team_dispatch\` tool. It runs a two-role critic loop (proposer → critic)
-and returns the converged output. You — not the team — write to the
-plan/notebook; after the tool returns, persist anything useful via the
-appropriate existing tool (e.g. \`interpretation_add_finding\`,
-\`analysis_plan_log_decision\`).
-
-MVP limitation: team roles have NO tool access. Any external data the
-team needs (search results, file contents, notebook excerpts) MUST be
-gathered by you first with your own tools, then included verbatim in
-the TeamSpec.description before dispatching.
-
-Composing the TeamSpec:
-- Exactly two roles. The first proposes; the second critiques.
-- The critic must end its turn with a JSON line:
-  {"approved": boolean, "critique": string}. The team_dispatch tool
-  already injects this instruction into the critic's system preamble —
-  you can leave the critic's \`system_prompt\` focused on domain criteria.
-- \`max_rounds\` defaults to 5 if omitted.
-- \`model\` (per-role or team-wide) is optional; default is the session model.
-
-Confirmation heuristic: if the user's request gives concrete roles, task
-framing, and success criteria, dispatch without asking. If the request
-is vague (e.g. "use a team"), propose the TeamSpec in chat and ask the
-user to approve or edit it first.
-`;
-}
-
-/**
- * Shared guidance telling the agent how to propose a plan for researcher
- * review. Both the no-active-plan and active-plan system prompts include this
- * block so plan drafts always render consistently in the chat pane.
- */
-function planDraftFormatBlock(): string {
-  return `## Plan draft format
-
-When proposing a new plan OR a major revision to an existing plan, wrap the
-draft in a \`\`\`plan fenced code block. The shell renders fenced plan drafts
-as a distinct card so the researcher can review before approving.
-
-Structure inside the fence:
-- First line: \`# <plan title>\`
-- Optional second paragraph: one- or two-sentence rationale.
-- Then a numbered checkbox list of steps, one per line:
-  \`- [ ] 1. <step name> — <one-line purpose>\`
-
-After emitting the fenced draft, ask the researcher to approve, edit, or
-reject. Do NOT call \`analysis_plan_create\` (or update an existing plan)
-until the researcher approves the draft.`;
-}
-
-/**
- * Execution-lifecycle guidance shared across system prompts. Covers the
- * mechanics the agent must follow when moving a step through pending →
- * in_progress → completed, including the notebook-checkbox flip that keeps
- * the user-curated notebook in sync with the structured plan state.
- */
-function executionLifecycleBlock(): string {
-  return `## Plan execution lifecycle
-
-Triggers that start or advance execution:
-- User types \`/execute\`, \`/run\`, or \`/test\` (slash commands dispatch here).
-- User types natural-language approval ("go", "execute step 2", "run the plan").
-- User clicks the Approve button on a plan draft card.
-
-**Before invoking ANY Galaxy tool**, verify Galaxy is connected (the "Galaxy:" line injected at the top of this context). If execution mode is Remote and Galaxy is not connected, **do not silently skip** — instead send one short message asking the user: "Galaxy is not connected. Do you want to connect via \`/connect\`, switch to Local mode in the masthead, or cancel?" Wait for their choice. This rule applies whether execution was triggered by a slash command, an approval button, or natural-language prompt.
-
-For every step:
-1. Call \`analysis_plan_update_step\` with \`status: "in_progress"\` before running the work.
-2. Run the step (Galaxy tool, local command, workflow invocation — per the step's execution type).
-3. On success, call \`analysis_plan_update_step\` with \`status: "completed"\` and include a one-line \`result\` summary.
-4. Flip the step's notebook checkbox in \`notebook.md\` from \`- [ ]\` to \`- [x]\` using the Edit tool. Match the step by its id or name; if no matching checkbox exists, skip silently (the notebook is user-curated and may not mirror every step).
-
-Do NOT narrate progress in chat — the Plan and Activity tabs already show it.
-If a step fails, set \`status: "failed"\`, write one line in chat explaining what failed, and stop. Do not auto-advance past a failure.`;
-}
-
-const NOTEBOOK_EXCERPT_MAX_CHARS = 4000;
+const NOTEBOOK_HEAD_MAX_CHARS = 2000;
+const NOTEBOOK_TAIL_MAX_CHARS = 4000;
 const ACTIVITY_TAIL_COUNT = 10;
 
 /**
- * Read the user-curated notebook.md from disk and return a tail-capped excerpt
- * for context injection. We keep the tail because the most recent entries are
- * likeliest to matter for the next turn; older content has already informed
- * earlier turns and typically repeats in the structured plan state.
+ * Read the user-curated notebook.md from disk and return a head + tail
+ * excerpt for context injection. Head gives project intent + early plans;
+ * tail gives the most recent activity.
  */
 function buildNotebookExcerptBlock(): string {
   const nbPath = getNotebookPath();
@@ -130,435 +31,316 @@ function buildNotebookExcerptBlock(): string {
   } catch {
     return "";
   }
-  if (!content.trim()) return "";
+  if (!content.trim()) {
+    return `
+## Notebook (project log)
+
+\`${nbPath}\` — empty. The session just started; you'll be writing project
+context, plans, and progress notes into this file via Edit/Write.
+`;
+  }
+
   let excerpt = content;
   let truncated = false;
-  if (excerpt.length > NOTEBOOK_EXCERPT_MAX_CHARS) {
-    excerpt = excerpt.slice(-NOTEBOOK_EXCERPT_MAX_CHARS);
+  if (content.length > NOTEBOOK_HEAD_MAX_CHARS + NOTEBOOK_TAIL_MAX_CHARS + 100) {
+    const head = content.slice(0, NOTEBOOK_HEAD_MAX_CHARS);
+    const tail = content.slice(-NOTEBOOK_TAIL_MAX_CHARS);
+    excerpt = `${head}\n\n_(... middle elided ...)_\n\n${tail}`;
     truncated = true;
   }
+
   return `
-## Notebook (user-curated notes)
+## Notebook (project log)
 
-\`${nbPath}\` — this is the researcher's running log. It is **a plain
-markdown file that already exists** (auto-initialized on session start).
-Read it for rationale, decisions, and free-form notes that may not be
-reflected in the structured plan state.
+\`${nbPath}\` — the durable project record. **Markdown the user (and you)
+maintain via Edit/Write tools.** It accumulates over the project's lifetime:
+ad-hoc exploration notes, plan sections, executed steps, interpretations,
+new plans, and so on.
 
-### When the researcher asks you to "add / append / write something to the notebook"
-
-This request is **exclusively a file-edit operation on \`${nbPath}\`**.
-Use the **Edit** (or **Write**) tool to append the content. No other tool
-call is needed. The sentence the user wrote — whether it says "datasets",
-"samples", "references", "findings", "decisions", "a table", "a summary"
-— does not change the workflow: it goes into \`notebook.md\` via Edit.
-
-**Tools you MUST NOT call for notebook writes, even if the user's wording
-sounds like it:**
-
-- \`analysis_plan_create\`, \`analysis_plan_add_step\`,
-  \`analysis_plan_update_step\`, \`analysis_plan_log_decision\`,
-  \`analysis_checkpoint\` — these mutate structured plan state, not the
-  notebook file.
-- \`analysis_notebook_create\` — legacy tool that requires a plan; the
-  notebook file is already auto-initialized and does not need creating.
-- \`data_file_add\`, \`data_sample_add\`, \`data_provenance_set\`,
-  \`data_provenance_*\` — these register items in the plan's data
-  section and write to \`activity.jsonl\`. They do **not** write prose or
-  tables into the notebook. If the user asked "add a sample table to the
-  notebook", that means **render a markdown table and Edit it into the
-  notebook file** — not call \`data_sample_add\`.
-- \`interpretation_add_finding\`, \`interpretation_summarize\` — structured
-  findings, not notebook prose.
-- \`report_result\` — displays a typed block in the Results tab; not a
-  substitute for writing into the notebook.
-
-**How to recognize which path the user actually wants:**
-
-- "add X to the notebook" / "write X in the notebook" / "include X in the
-  notebook" → **Edit \`${nbPath}\`**. Nothing else.
-- "register the samples / files / reference" (no notebook mentioned) →
-  structured \`data_*\` tools are fine.
-- "record a decision" (no notebook mentioned) → \`analysis_plan_log_decision\`.
-- "create a plan" / "draft a plan" → produce a \`\`\`plan\`\`\` fenced draft
-  in chat (see Plan draft format), wait for approval.
-
-Create a plan only when the researcher explicitly asks for one or approves
-a \`\`\`plan\`\`\` draft (see the Plan draft format / Plan execution
-lifecycle sections). Notebook content is independent of plan existence.
-If a plan was **auto-restored** from a prior session, you may reference
-its status but do not start mutating it unless the user's current message
-asks you to.
-
-${truncated ? "_(showing trailing excerpt; earlier content elided)_\n\n" : ""}\`\`\`markdown
+${truncated ? "_(showing head + tail; middle elided)_\n\n" : ""}\`\`\`markdown
 ${excerpt}
 \`\`\`
 `;
 }
 
 /**
- * Format the last few activity events as a compact list so the agent can pick
- * up continuity across restarts — which step was touched, what was decided,
- * which findings were recorded. Kept small (`ACTIVITY_TAIL_COUNT` items) to
- * stay well under typical context budgets.
+ * Last few activity events for continuity across restarts.
  */
 function buildRecentActivityBlock(): string {
   const events = getRecentActivityEvents(ACTIVITY_TAIL_COUNT);
   if (events.length === 0) return "";
-  const lines = events.map((e) => {
-    const changeType = (e.payload?.changeType as string) || "";
-    const tag = changeType ? `${e.kind}:${changeType}` : e.kind;
-    return `- ${e.timestamp} · ${tag}`;
-  });
+  const lines = events.map((e) => `- ${e.timestamp} · ${e.kind}`);
   return `
 ## Recent activity
 
-Last ${events.length} activity event(s) — use for continuity, not as a source
-of truth. Structured state (plan, steps, findings) is authoritative.
+Last ${events.length} event(s):
 
 ${lines.join("\n")}
 `;
 }
 
 /**
- * Local-tool environment convention — per-analysis conda env rooted in the
- * analysis cwd. Injected in both Local and Remote modes (Remote uses it as
- * fallback when a Galaxy tool isn't available).
+ * Galaxy connection status block — replaces the old Local|Remote toggle
+ * with agent-side per-plan routing decisions.
+ */
+function buildGalaxyContextBlock(): string {
+  const galaxyUrl = process.env.GALAXY_URL;
+  const apiKey = process.env.GALAXY_API_KEY;
+  const connected = Boolean(galaxyUrl && apiKey);
+
+  if (!connected) {
+    return `
+## Galaxy connection: NOT CONNECTED
+
+No Galaxy credentials configured (\`GALAXY_URL\` / \`GALAXY_API_KEY\`).
+All execution is local. If the user asks for an analysis that would
+benefit from Galaxy-scale compute, suggest connecting via \`/connect\`
+once — don't badger.
+`;
+  }
+
+  return `
+## Galaxy connection: ${galaxyUrl}
+
+Galaxy is connected. When drafting a plan, **first** consult Galaxy
+resources before deciding what runs where:
+
+1. Search the IWC workflow registry for matching workflows
+   (\`galaxy_search_iwc\` / similar Galaxy MCP tool). If a full match
+   exists, propose running the plan as a single Galaxy invocation
+   (mode: **remote**).
+2. Otherwise, draft step-by-step. Per step:
+   - Heavy compute (alignment, large variant calling, big assemblies,
+     long-running BLAST, etc.) → check Galaxy tool availability
+     (\`galaxy_search_tools_by_name\`); if installed, mark step Galaxy.
+   - Light/exploratory (parsing, summarization, awk/sed/jq/small
+     scripts) → mark step local.
+3. Document routing in the plan section header and inline per-step:
+   \`## Plan A: chrM Variant Calling [hybrid]\`
+   \`Step 3: BWA alignment (Galaxy: bwa-mem2/2.2.1)\`
+   \`Step 4: VCF filter (local awk)\`
+
+The three operating modes are an *outcome* of the plan you draft, not a
+mode setting:
+- **local** — every step runs locally
+- **hybrid** — some local, some Galaxy
+- **remote** — entire plan is a Galaxy workflow invocation
+
+### Executing a Galaxy step
+
+After invoking via Galaxy MCP and getting an \`invocationId\` back:
+1. Call \`galaxy_invocation_record({ invocationId, notebookAnchor, label })\`.
+   The \`notebookAnchor\` is a stable id like \`plan-1-step-3\` that
+   matches an anchor you wrote in the markdown plan section.
+2. Periodically call \`galaxy_invocation_check_all\` to advance in-flight
+   invocations. The tool auto-transitions YAML status (all-jobs-ok →
+   completed, any-error → failed) and writes results back to the
+   notebook. After a transition, edit the markdown checkbox for the step
+   from \`- [ ]\` to \`- [x]\` (or \`- [!]\` for failures).
+`;
+}
+
+/**
+ * Local-tool environment convention — per-analysis conda env rooted in
+ * the analysis cwd. Always relevant; no longer mode-gated.
  */
 function buildLocalEnvContext(): string {
   return `
 ## Local-tool environment (per-analysis conda env)
 
-When running any bioinformatics tool locally — in Local mode, or as a
-fallback in Remote mode when no Galaxy tool exists — use a **per-analysis
-conda environment** rooted at \`.loom/env/\` inside the current analysis
-directory. This isolates tool versions between analyses and keeps each
+When running any bioinformatics tool locally, use a **per-analysis conda
+environment** rooted at \`.loom/env/\` inside the current analysis
+directory. Isolates tool versions between analyses and keeps each
 notebook's reproducibility record self-contained.
 
 Conventions:
 
 - **Env path:** \`.loom/env/\` (prefix style: \`-p .loom/env\`, not \`-n name\`).
-  Never create conda envs at global paths or modify the base environment.
-- **Channel priority:** \`-c bioconda -c conda-forge\`, in that order. Most
-  bioinformatics tools ship on bioconda; conda-forge covers Python / numeric
-  dependencies.
+- **Channel priority:** \`-c bioconda -c conda-forge\`, in that order.
 - **Prefer \`mamba\`** if available (\`which mamba\`) — much faster solves.
-  Fall back to \`conda\` if mamba is absent. Same flags either way.
+  Fall back to \`conda\` if absent. Same flags either way.
 
-Lifecycle (create lazily, not proactively):
+Lifecycle (lazy):
 
-1. When a tool is first needed, check \`test -d .loom/env\`. If missing:
+1. First tool needed: \`test -d .loom/env\`. If missing:
    \`conda create -p .loom/env -c bioconda -c conda-forge -y python=3.11\`
-   (or \`mamba create ...\`). Python 3.11 is a safe baseline; individual
-   tools will pin their own runtime if they need to.
-2. **Install tools in batches** when you know what the step needs:
-   \`conda install -p .loom/env -c bioconda -c conda-forge -y bwa samtools lofreq\`
-   One solve for N tools is much faster than N solves.
-3. **Run tools** via \`conda run\` or by full path:
-   \`conda run -p .loom/env bwa mem ...\`
-   or  \`.loom/env/bin/bwa mem ...\`.
-4. **Record installs** in \`notebook.md\` under a \`## Environment\` heading —
-   a table of tool + version (\`conda list -p .loom/env | grep <tool>\`) so
-   the analysis is reproducible from the notebook alone.
+2. Install in batches: \`conda install -p .loom/env -c bioconda -c conda-forge -y bwa samtools lofreq\`
+3. Run via \`conda run -p .loom/env <cmd>\` or full path \`.loom/env/bin/<cmd>\`.
+4. Record installs under a \`## Environment\` heading in \`notebook.md\` for
+   reproducibility.
 
-If neither conda nor mamba is installed, tell the user once ("conda/mamba
-not found — per-analysis env convention cannot be used") and ask whether to
-fall back to system tools (non-reproducible) or abort. Do not silently use
-system tools.
+If neither conda nor mamba is installed, tell the user once and ask
+whether to fall back to system tools (non-reproducible) or abort.
 
 ### Bash timeouts on long-running tools
 
-Pi's \`bash\` tool's \`timeout\` argument is **optional** and in **seconds**.
-When omitted, the command runs to completion — that is the correct default
-for bioinformatics pipelines whose runtime you cannot reliably predict:
+Pi's \`bash\` tool's \`timeout\` is **optional** and in **seconds**. When
+omitted, the command runs to completion — correct default for
+bioinformatics pipelines whose runtime you cannot reliably predict
+(PGGB / assembly / minimap2 / bwa-on-WGS / long variant calling, conda
+solves on fresh envs).
 
-- PGGB / assembly / minimap2 / bwa on WGS / long variant-calling.
-- Conda solves on a fresh env with many bioconda packages.
-
-**Do not guess-cap these at 3600 s** (1 h). A real PGGB pangenome build or
-whole-genome alignment will cross an hour and be killed partway, and you
-will see a truncated result that misleads the interpretation.
-
-When you do need a bound (sanity timeouts on short commands, watchdog on a
-step that should never hang), pick a value generously — at least 4× your
-best estimate of the expected runtime. Anchors: 300 s for quick commands,
-3600 s for short pipelines, 86400 s for overnight pipelines. Prefer
-**omitting \`timeout\` entirely** over capping a pipeline too low.
+**Do not guess-cap at 3600 s.** Real pangenome builds will cross an hour
+and be killed partway. When you do need a bound, pick generously: 300 s
+for quick commands, 3600 s for short pipelines, 86400 s for overnight.
+Prefer **omitting \`timeout\` entirely** over capping too low.
 `;
 }
 
-/** Build the execution-mode block injected into every system prompt. */
-function buildExecutionModeContext(): string {
-  const cfg = loadConfig();
-  const mode = cfg.executionMode || "remote";
-  const galaxyUrl = process.env.GALAXY_URL || cfg.galaxy?.profiles?.[cfg.galaxy.active || ""]?.url;
+/**
+ * Plan-section convention block. Plans live as markdown sections, not
+ * structured state. This guidance shapes how the agent writes them.
+ */
+function buildPlanConventionBlock(): string {
+  return `## Project model and plan sections
 
-  if (mode === "local") {
-    return `
-## Execution mode: Local
+The project is the directory you're working in. \`notebook.md\` is its
+durable log — chronological, accumulates over the project's lifetime:
+ad-hoc exploration, plan drafts, plan execution, interpretations, new
+plans based on interpretations, and so on. Multiple plans coexist.
 
-Galaxy MCP tools are not registered in this session. Run work locally. Plan
-management, notebook updates, and non-Galaxy reasoning all still work
-normally.
+**Plans are markdown sections.** When the user asks for one, write a
+section using the Edit/Write tool:
 
-All local tool execution MUST go through the per-analysis conda env
-convention below.
+\`\`\`markdown
+## Plan A: <Title> [local|hybrid|remote]
 
-If the user wants reproducibility at Galaxy-grade (job provenance, history
-objects, shareable records) or large-scale compute, suggest switching to
-Remote mode in the masthead toggle so Galaxy user-defined tools become
-available.
-${buildLocalEnvContext()}`;
-  }
+<one or two sentences of rationale + research question>
 
+### Steps
+
+- [ ] 1. **<Step name>** {#plan-a-step-1} — <one-line purpose>
+       Routing: local | Galaxy: <tool-id>
+- [ ] 2. **<Step name>** {#plan-a-step-2} — ...
+- ...
+
+### Parameters
+
+| Step | Parameter | Value |
+| --- | --- | --- |
+| 1   | ...       | ...   |
+\`\`\`
+
+Conventions:
+
+- Use \`{#plan-X-step-N}\` anchors so invocation YAML blocks can reference
+  individual steps unambiguously.
+- Routing tag in the section header: \`[local]\`, \`[hybrid]\`, or
+  \`[remote]\`. Tag literal so future tooling can grep.
+- Mark step status by editing the checkbox: \`- [ ]\` (pending),
+  \`- [x]\` (completed), \`- [!]\` (failed).
+- Multiple plans coexist; append new plan sections at the bottom of the
+  notebook. Don't delete old plans.
+
+**Don't propose a plan unless asked.** Most user requests are questions,
+explorations, summaries, ad-hoc edits — answer those directly. A plan
+is for multi-step pipeline orchestration the user explicitly wants
+driven (e.g. "draft a plan for variant calling on this data", "set up
+the geographic distribution analysis").
+`;
+}
+
+/**
+ * Notebook-write discipline. The notebook is the source of truth; many
+ * user requests boil down to "write this in the notebook."
+ */
+function buildNotebookWriteBlock(): string {
+  const nbPath = getNotebookPath() || "notebook.md";
+  return `## Notebook writes
+
+When the user says "add / append / write something to the notebook", or
+asks for a summary, table, decision, finding, plan section, or anything
+durable — that is **a file edit on \`${nbPath}\`**. Use **Edit** or
+**Write**. No structured tool needed; there are no \`analysis_*\` plan
+tools anymore.
+
+Free-form chat continues to be fine for clarifying questions, quick
+answers, and turn-by-turn dialogue that doesn't need persistence.
+`;
+}
+
+/**
+ * System-prompt block describing team_dispatch usage. Empty when the
+ * experimental flag is off so default sessions never see guidance for a
+ * tool that isn't registered.
+ */
+function buildTeamDispatchContext(): string {
+  if (!isTeamDispatchEnabled()) return "";
   return `
-## Execution mode: Remote (Galaxy: ${galaxyUrl || "configured"})
+## Team dispatch (for specialist sub-tasks)
 
-Both execution paths are available, with a clear default:
+When the user asks for a short-lived specialist team (e.g. "start a team
+for literature review — one finds papers, one validates"), call the
+\`team_dispatch\` tool. It runs a two-role critic loop (proposer → critic)
+and returns the converged output.
 
-- **Preferred: Galaxy user-defined tools.** Search Galaxy first; run real
-  computation via \`galaxy_run_tool\` / \`galaxy_invoke_workflow\`.
-  Reproducibility and provenance live in Galaxy -- that's why it's the
-  default.
-- **Local execution** is fine for quick, exploratory, or ad-hoc work that
-  doesn't merit a Galaxy tool wrapper. Use it when the user explicitly asks
-  or when Galaxy has no equivalent tool. When falling back to local, use the
-  per-analysis conda env convention below.
+MVP limitation: team roles have NO tool access. Any external data the
+team needs (search results, file contents, notebook excerpts) MUST be
+gathered by you first with your own tools, then included verbatim in
+the TeamSpec.description before dispatching.
 
-When a custom step has no Galaxy equivalent but is likely to be reused,
-suggest wrapping it as a Galaxy tool rather than leaving it as a one-off
-local script.
-${buildLocalEnvContext()}`;
+Composing the TeamSpec:
+- Exactly two roles. The first proposes; the second critiques.
+- The critic must end its turn with a JSON line:
+  \`{"approved": boolean, "critique": string}\`. The team_dispatch tool
+  injects this into the critic's system preamble — leave the critic's
+  \`system_prompt\` focused on domain criteria.
+- \`max_rounds\` defaults to 5 if omitted.
+- \`model\` (per-role or team-wide) is optional; default is the session model.
+
+Confirmation heuristic: if the user's request gives concrete roles, task
+framing, and success criteria, dispatch without asking. If vague (e.g.
+"use a team"), propose the TeamSpec in chat and ask for approval first.
+`;
 }
 
 export function setupContextInjection(pi: ExtensionAPI): void {
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Inject plan context before agent starts processing
-  // ─────────────────────────────────────────────────────────────────────────────
   pi.on("before_agent_start", async (_event, ctx) => {
-    const plan = getCurrentPlan();
-    const state = getState();
+    const systemPrompt = [
+      buildPlanConventionBlock(),
+      buildNotebookWriteBlock(),
+      buildGalaxyContextBlock(),
+      buildLocalEnvContext(),
+      buildNotebookExcerptBlock(),
+      buildRecentActivityBlock(),
+      buildTeamDispatchContext(),
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-    // Build Galaxy connection context
-    const hasCredentials = process.env.GALAXY_URL && process.env.GALAXY_API_KEY;
-    let galaxyContext: string;
-    if (state.galaxyConnected) {
-      galaxyContext = `Galaxy: Connected to ${process.env.GALAXY_URL || 'unknown'}`;
-      if (state.currentHistoryId) {
-        galaxyContext += `\nCurrent history: ${state.currentHistoryId}`;
-      }
-    } else if (hasCredentials) {
-      galaxyContext = `Galaxy: Credentials configured for ${process.env.GALAXY_URL}. Call galaxy_connect() to establish the connection -- do this before calling any other Galaxy tools.`;
-    } else {
-      galaxyContext = 'Galaxy: Not connected. The researcher can use /connect to set up credentials.';
-    }
-
-    // Detect BRC MCP server availability
-    const brcMcpAvailable = hasBRCMcp(pi);
-
-    if (!plan) {
-      // No active plan - provide minimal guidance
-      let brcSection = '';
-      if (brcMcpAvailable) {
-        brcSection = `
-## BRC Catalog
-
-A BRC Analytics MCP server is connected with organism, assembly, and workflow
-catalog data. Use \`search_organisms\` to find organisms, \`get_compatible_workflows\`
-to discover analysis workflows, and \`resolve_workflow_inputs\` to pre-fill
-parameters. When the researcher makes selections, record them with \`brc_set_context\`.
-`;
-      }
-
-      return {
-        systemPrompt: `
-## Loom Status
-No active analysis plan.
-
-**Do not invent a plan proactively.** Plans are only for **multi-step pipeline
-orchestration** that the researcher explicitly wants driven — e.g. "run an RNA-seq
-analysis", "execute the MRSA workflow", "set up the full pipeline". Most requests are
-not that. They are questions, summaries, notebook edits, one-off tool calls,
-exploratory lookups — and those should be answered directly with the appropriate
-tool or chat response. No plan, no data registration, no notebook creation.
-
-**Only propose a plan** when:
-- The researcher explicitly asks for one ("plan this", "draft a plan", "what would the
-  steps be"), OR
-- The researcher's request unambiguously describes a multi-step executable pipeline
-  the agent is expected to orchestrate end-to-end.
-
-When you do propose, draft in chat inside a \`\`\`plan fenced block (see "Plan draft
-format" below). Do NOT call \`analysis_plan_create\` yet — wait for explicit approval
-("yes", "go", "approve"). On approval, call \`analysis_plan_create\` with the drafted
-steps.
-
-For everything else (questions, notebook edits, file reads, explaining data, producing
-summaries or tables), respond directly. No plan prerequisite. In particular: if the
-user asks you to write/save/add/include anything in the notebook, open \`notebook.md\`
-with Edit and append — see the "Notebook (user-curated notes)" section below for the
-exhaustive list of tools NOT to call in that case.
-
-${planDraftFormatBlock()}
-${brcSection}
-${galaxyContext}
-${buildExecutionModeContext()}
-${buildTeamDispatchContext()}`
-      };
-    }
-
-    // Active plan - inject summary
-    const planSummary = formatPlanSummary(plan);
-
-    // Sketch corpus matching (gxy-sketches analysis scaffolding)
-    let sketchSection = "";
-    try {
-      const cfg = loadConfig();
-      if (cfg.sketchCorpusPath) {
-        const corpus = loadSketchCorpus(cfg.sketchCorpusPath);
-        const matches = matchSketchesForPlan(plan, corpus).slice(0, 2);
-        if (matches.length > 0) {
-          sketchSection =
-            "\n" +
-            matches.map((m) => renderSketchForPrompt(m)).join("\n---\n\n") +
-            "\n";
-        }
-      }
-    } catch (err) {
-      console.warn("[sketches] context injection failed:", err);
-    }
-
-    // Workflow guidance if plan has workflow steps
-    const workflowSteps = plan.steps.filter(s => s.execution.type === 'workflow');
-    const activeInvocations = getWorkflowSteps();
-    let workflowContext = '';
-    if (workflowSteps.length > 0 || activeInvocations.length > 0) {
-      workflowContext = '\n## Workflow Integration\n';
-      workflowContext += '- Use `workflow_to_plan` to add Galaxy workflows as plan steps\n';
-      workflowContext += '- Use `workflow_invocation_link` after invoking a workflow via Galaxy MCP\n';
-      workflowContext += '- Use `workflow_invocation_check` to poll invocation status\n';
-      workflowContext += '- Use `workflow_set_overrides` to record per-step parameter deviations from defaults. When invoking via galaxy-mcp `invoke_workflow`, pass the step\'s `parameterOverrides` as the `params` argument so the deviation actually flows to Galaxy.\n';
-      if (activeInvocations.length > 0) {
-        workflowContext += `\n**${activeInvocations.length} active workflow invocation(s)** — check status with \`workflow_invocation_check\`\n`;
-      }
-    }
-
-    // BRC context section
-    let brcSection = '';
-    if (brcMcpAvailable) {
-      const brcCtx = getBRCContext();
-      if (brcCtx && (brcCtx.organism || brcCtx.assembly || brcCtx.workflowIwcId)) {
-        const parts: string[] = [];
-        if (brcCtx.organism) parts.push(`Organism: ${brcCtx.organism.species} (${brcCtx.organism.taxonomyId})`);
-        if (brcCtx.assembly) parts.push(`Assembly: ${brcCtx.assembly.accession}`);
-        if (brcCtx.workflowName) parts.push(`Workflow: ${brcCtx.workflowName}`);
-        brcSection = `\n## BRC Context\n\n${parts.join('\n')}\nUse \`brc_set_context\` to update if selections change.\n`;
-      } else {
-        brcSection = `\n## BRC Catalog\n\nBRC catalog tools are available. If the researcher is working with a cataloged\norganism, use BRC tools to find compatible workflows and resolve inputs.\n`;
-      }
-    }
-
-    return {
-      systemPrompt: `
-## Current Analysis Plan
-
-${planSummary}
-
-## Analysis Protocol
-- Get researcher approval before each step
-- Log decisions with \`analysis_step_log\`
-- Update step status with \`analysis_plan_update_step\`
-- Create QC checkpoints with \`analysis_checkpoint\`
-- Record biological findings with \`interpretation_add_finding\`
-- Use \`analysis_plan_get\` for full plan details
-- Use \`report_result\` for tables, plots, files, and markdown summaries
-- Use \`analyze_plan_parameters\` when the user requests parameter review
-
-## Execution Rules
-- Default tool execution is Galaxy user-defined tools. Search Galaxy for existing tools first.
-- DO NOT narrate plan execution in chat. The shell renders progress from structured events.
-- Use tools — NOT chat prose — to communicate during execution:
-  - \`analysis_plan_update_step\` → step progress (visible in the DAG)
-  - \`report_result\` → output tables, plots, files (visible in Results tab)
-- Chat is for questions, conclusions, and user-visible reasoning only.
-- After calling \`analysis_plan_create\`, do NOT write a plan summary in chat — the Plan tab already shows it.
-
-## Response Style
-- Be extremely concise. No filler, no chatter, no pleasantries.
-- Lead with the answer or action. Skip preamble and transitions.
-- One sentence when one sentence suffices. Never repeat what the user said.
-- Do NOT use exclamation marks, "Great!", "Excellent!", "Sure!", or similar.
-- Minimize emoji usage. Plain text is preferred.
-
-${planDraftFormatBlock()}
-${executionLifecycleBlock()}
-${buildNotebookExcerptBlock()}
-${buildRecentActivityBlock()}
-${workflowContext}${brcSection}${sketchSection}
-${galaxyContext}
-${buildExecutionModeContext()}
-${buildTeamDispatchContext()}`
-    };
+    return { systemPrompt };
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Update status bar after each turn
-  // ─────────────────────────────────────────────────────────────────────────────
+  // Reflect Galaxy connection state in the status bar after each turn.
   pi.on("turn_end", async (_event, ctx) => {
-    const plan = getCurrentPlan();
-
-    if (plan) {
-      const currentStep = plan.steps.find(s => s.status === 'in_progress');
-      const completed = plan.steps.filter(s => s.status === 'completed').length;
-      const total = plan.steps.length;
-
-      const statusText = [
-        `📋 ${plan.title}`,
-        `[${completed}/${total}]`,
-        currentStep ? `→ ${currentStep.name}` : plan.status === 'draft' ? '(draft)' : '',
-      ].filter(Boolean).join(' ');
-
-      ctx.ui.setStatus("galaxy-plan", statusText);
-    } else {
-      ctx.ui.setStatus("galaxy-plan", "Ready");
-    }
+    const state = getState();
+    const galaxyUrl = process.env.GALAXY_URL;
+    const apiKey = process.env.GALAXY_API_KEY;
+    const connected = Boolean(galaxyUrl && apiKey) || state.galaxyConnected;
+    const text = connected ? `🟢 Galaxy: ${galaxyUrl || "connected"}` : "⚪ Local-only";
+    ctx.ui.setStatus("galaxy-plan", text);
   });
 }
 
 /**
- * Check if the BRC Analytics MCP server is available.
- * Looks for the search_organisms tool in the active tool list,
- * falling back to the BRC_MCP_AVAILABLE env var.
+ * Connection status as a list of lines, suitable for /status output.
  */
-function hasBRCMcp(pi: ExtensionAPI): boolean {
-  try {
-    const tools = pi.getAllTools();
-    if (Array.isArray(tools) && tools.some((t: any) => t.name === 'search_organisms' || t === 'search_organisms')) {
-      return true;
-    }
-  } catch {
-    // getAllTools may not be available in all contexts
-  }
-  return process.env.BRC_MCP_AVAILABLE === '1';
-}
-
-/**
- * Format connection status for display
- */
-export function formatConnectionStatus(ctx: ExtensionContext): string[] {
+export function formatConnectionStatus(_ctx: ExtensionContext): string[] {
   const state = getState();
-  const lines: string[] = [];
+  const galaxyUrl = process.env.GALAXY_URL;
+  const apiKey = process.env.GALAXY_API_KEY;
+  const connected = Boolean(galaxyUrl && apiKey) || state.galaxyConnected;
 
-  if (state.galaxyConnected) {
-    lines.push("🟢 Connected to Galaxy");
+  const lines: string[] = [];
+  if (connected) {
+    lines.push(`🟢 Galaxy: ${galaxyUrl || "connected"}`);
     if (state.currentHistoryId) {
       lines.push(`   History: ${state.currentHistoryId}`);
     }
   } else {
-    lines.push("⚪ Not connected to Galaxy");
-    lines.push("   Use galaxy_connect to connect");
+    lines.push("⚪ Galaxy: not connected");
+    lines.push("   Use /connect to set up credentials");
   }
-
   return lines;
 }
