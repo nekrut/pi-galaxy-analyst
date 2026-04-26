@@ -1071,68 +1071,38 @@ body:not(.artifact-collapsed) #artifact-toggle {
   font-size: 10px;
 }
 
-#agent-shell-toggle {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-dim);
-  font-family: var(--font);
-  font-size: 10px;
-  padding: 2px 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
+/* ── Activity tab — split into Shell (top) + Processes (bottom) ──────────── */
 
-#agent-shell-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-#agent-shell-toggle.active {
-  background: var(--bg-deep);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* Share the same styling for the process monitor toggle */
-#proc-monitor-toggle {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-dim);
-  font-family: var(--font);
-  font-size: 10px;
-  padding: 2px 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-#proc-monitor-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-#proc-monitor-toggle.active {
-  background: var(--bg-deep);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* ── Process monitor ──────────────────────────────────────────────────────── */
-
-#proc-monitor {
+#activity-view {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  max-height: 220px;
-  background: var(--masthead);
-  color: var(--text);
-  border-top: 2px solid var(--border-strong);
+  height: 100%;
+  padding: 0;
   overflow: hidden;
 }
-#proc-monitor.hidden { display: none; }
 
-#proc-monitor-header {
+#activity-shell-section {
+  flex: 0 0 60%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 2px solid var(--border-strong);
+  background: var(--masthead);
+  color: #d4d4d4;
+  overflow: hidden;
+}
+
+#activity-proc-section {
+  flex: 1 1 40%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--masthead);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.activity-section-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1144,7 +1114,25 @@ body:not(.artifact-collapsed) #artifact-toggle {
   letter-spacing: 0.5px;
   flex-shrink: 0;
 }
-#proc-monitor-header > span { flex: 1; }
+.activity-section-header > span { flex: 1; }
+.activity-section-header button {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.activity-section-header button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--masthead-hover);
+  border-color: var(--masthead-hover);
+}
+
+/* ── Process monitor ──────────────────────────────────────────────────────── */
+
 #proc-monitor-count {
   background: var(--accent);
   color: var(--galaxy-dark);
@@ -1152,21 +1140,6 @@ body:not(.artifact-collapsed) #artifact-toggle {
   border-radius: 8px;
   font-weight: 700;
   margin-left: 4px;
-}
-#proc-monitor-close {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.6);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  padding: 0 6px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-#proc-monitor-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--accent);
-  border-color: var(--accent);
 }
 #proc-monitor-body {
   flex: 1;
@@ -1212,58 +1185,7 @@ body:not(.artifact-collapsed) #artifact-toggle {
   font-style: italic;
 }
 
-/* ── Agent shell ──────────────────────────────────────────────────────────── */
-
-#agent-shell {
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  height: 180px;
-  background: var(--masthead);
-  color: #d4d4d4;
-  border-top: 2px solid var(--border-strong);
-  font-family: var(--font);
-  font-size: 11px;
-  overflow: hidden;
-}
-
-#agent-shell.hidden {
-  display: none;
-}
-
-#agent-shell-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
-}
-
-#agent-shell-header > span {
-  flex: 1;
-}
-
-#agent-shell-header button {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.6);
-  font-family: var(--font-sans);
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-#agent-shell-header button:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--masthead-hover);
-  border-color: var(--masthead-hover);
-}
+/* ── Agent shell (now lives in Activity tab top section) ────────────────── */
 
 #agent-shell-body {
   flex: 1;
@@ -1272,6 +1194,8 @@ body:not(.artifact-collapsed) #artifact-toggle {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.45;
+  font-family: var(--font);
+  font-size: 11px;
 }
 
 #agent-shell-body::-webkit-scrollbar {

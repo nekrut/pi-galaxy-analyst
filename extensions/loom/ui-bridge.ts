@@ -1,34 +1,25 @@
 /**
- * UI bridge — translates state and notebook changes into shell widgets.
+ * UI bridge — emits the Notebook widget when notebook.md changes.
  *
- * Notebook tab is fed by notebook.md file changes. Activity tab is fed by
- * activity.jsonl events. No plan widgets — plans live as markdown sections
- * inside the notebook itself.
+ * The Activity tab in shells is now driven directly by the renderer's
+ * own shell + proc-monitor streams (Orbit) or terminal output (Loom CLI),
+ * so no Activity widget is emitted from here. activity.jsonl is still
+ * written on disk by the activity-hooks module for debug.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { onNotebookChange, getNotebookPath } from "./state.js";
-import { onActivityChange, getActivityEvents } from "./activity.js";
 import {
   LoomWidgetKey,
-  encodeJsonWidget,
   encodeMarkdownWidget,
 } from "../../shared/loom-shell-contract.js";
 
 export function setupUIBridge(pi: ExtensionAPI): void {
   let latestCtx: ExtensionContext | null = null;
-  const last = { notebookMd: "", activityJson: "" };
+  const last = { notebookMd: "" };
 
   pi.on("before_agent_start", async (_event, ctx) => {
     latestCtx = ctx;
-    const events = getActivityEvents();
-    if (events.length > 0) {
-      const json = JSON.stringify(events);
-      if (json !== last.activityJson) {
-        last.activityJson = json;
-        ctx.ui.setWidget(LoomWidgetKey.Activity, encodeJsonWidget(events));
-      }
-    }
   });
 
   onNotebookChange((content) => {
@@ -38,13 +29,5 @@ export function setupUIBridge(pi: ExtensionAPI): void {
     const nbPath = getNotebookPath();
     const header = nbPath ? `> \`${nbPath}\`\n\n` : "";
     latestCtx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
-  });
-
-  onActivityChange((events) => {
-    if (!latestCtx) return;
-    const json = JSON.stringify(events);
-    if (json === last.activityJson) return;
-    last.activityJson = json;
-    latestCtx.ui.setWidget(LoomWidgetKey.Activity, encodeJsonWidget(events));
   });
 }

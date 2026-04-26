@@ -42,39 +42,6 @@
       <div class="pane-title" id="chat-title">Chat</div>
       <div id="messages"></div>
 
-      <!-- Process monitor — collapsible strip showing live stats for local subprocesses -->
-      <div id="proc-monitor" class="hidden">
-        <div id="proc-monitor-header">
-          <span>Running processes <span id="proc-monitor-count">0</span></span>
-          <button id="proc-monitor-close" title="Hide">×</button>
-        </div>
-        <div id="proc-monitor-body">
-          <table id="proc-monitor-table">
-            <thead>
-              <tr>
-                <th>PID</th>
-                <th>CPU%</th>
-                <th>MEM%</th>
-                <th>RSS</th>
-                <th>Time</th>
-                <th>Command</th>
-              </tr>
-            </thead>
-            <tbody id="proc-monitor-rows"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Agent shell — collapsible activity log at the bottom of the chat pane -->
-      <div id="agent-shell" class="hidden">
-        <div id="agent-shell-header">
-          <span>Agent shell</span>
-          <button id="agent-shell-clear" title="Clear">clear</button>
-          <button id="agent-shell-close" title="Hide">×</button>
-        </div>
-        <div id="agent-shell-body"></div>
-      </div>
-
       <div id="input-area">
         <span id="queued-indicator" class="hidden" title="Queued — will send when agent is ready">queued ↓</span>
         <textarea
@@ -95,8 +62,6 @@
       </div>
       <div id="input-hint">
         <span>Tip: <code>/help</code> for commands · <code>/model sonnet</code> to switch LLM · <code>/new</code> for a fresh session</span>
-        <button id="proc-monitor-toggle" title="Toggle process monitor">▸ procs</button>
-        <button id="agent-shell-toggle" title="Toggle agent shell">▸ shell</button>
       </div>
     </div>
 
@@ -118,9 +83,32 @@
           </div>
         </div>
         <div id="activity-view" class="pane-body hidden">
-          <div class="empty-state">
-            <p>The activity log records every plan mutation and session event — a machine-readable timeline backing the notebook.</p>
-            <p>Events will appear here as you work.</p>
+          <div id="activity-shell-section">
+            <div class="activity-section-header">
+              <span>Shell</span>
+              <button id="agent-shell-clear" title="Clear shell">clear</button>
+            </div>
+            <div id="agent-shell-body"></div>
+          </div>
+          <div id="activity-proc-section">
+            <div class="activity-section-header">
+              <span>Processes <span id="proc-monitor-count">0</span></span>
+            </div>
+            <div id="proc-monitor-body">
+              <table id="proc-monitor-table">
+                <thead>
+                  <tr>
+                    <th>PID</th>
+                    <th>CPU%</th>
+                    <th>MEM%</th>
+                    <th>RSS</th>
+                    <th>Time</th>
+                    <th>Command</th>
+                  </tr>
+                </thead>
+                <tbody id="proc-monitor-rows"></tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div id="file-view" class="pane-body hidden"></div>

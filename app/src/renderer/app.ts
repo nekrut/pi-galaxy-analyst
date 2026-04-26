@@ -6,8 +6,6 @@ import { FileViewer } from "./files/file-viewer.js";
 import {
   LoomWidgetKey,
   decodeMarkdownWidget,
-  decodeJsonWidget,
-  type ShellActivityEvent,
 } from "../../../shared/loom-shell-contract.js";
 
 declare global {
@@ -1283,6 +1281,7 @@ window.orbit.onAgentEvent((event) => {
       // Safety: clear any stuck button busy states if the turn ends without the
       // expected completion event arriving
       flushPendingMessage();
+      hasRevealedActivityThisTurn = false;
       break;
 
     case "error": {
@@ -1460,18 +1459,13 @@ window.orbit.onUiRequest((request) => {
     const key = request.widgetKey as string;
     const lines = request.widgetLines as string[] | undefined;
 
-    // The brain still emits Plan/Steps/Results/PlanView widgets with no
-    // current UI surface. Notebook, Activity, and Parameters are rendered.
+    // Notebook is the only widget the right pane consumes. The Activity
+    // tab now mirrors the live shell + proc-monitor streams (see below);
+    // the brain-side activity.jsonl is still written for debug but no
+    // longer pushed as a widget.
     if (key === LoomWidgetKey.Notebook && lines) {
       artifacts.setNotebookMarkdown(decodeMarkdownWidget(lines));
       setArtifactCollapsed(false);
-    } else if (key === LoomWidgetKey.Activity && lines) {
-      try {
-        const events = decodeJsonWidget<ShellActivityEvent[]>(lines);
-        artifacts.setActivityEvents(events);
-      } catch (err) {
-        console.error("activity widget decode failed:", err);
-      }
     }
   }
 });
@@ -1722,6 +1716,7 @@ function feedShell(event: Record<string, unknown>): void {
   switch (type) {
     case "agent_start": {
       shell.append("─── agent turn start ───", "info");
+      revealActivityForTurn();
       break;
     }
     case "turn_start": {
@@ -1837,23 +1832,18 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n - 1) + "…";
 }
 
-// ── Agent shell toggle ────────────────────────────────────────────────────────
+// ── Agent shell ──────────────────────────────────────────────────────────────
 
-const shellEl = document.getElementById("agent-shell")!;
-const shellToggleBtn = document.getElementById("agent-shell-toggle")!;
-const shellCloseBtn = document.getElementById("agent-shell-close")!;
 const shellClearBtn = document.getElementById("agent-shell-clear")!;
-
-function toggleShell(show?: boolean): void {
-  const willShow = show ?? shellEl.classList.contains("hidden");
-  shellEl.classList.toggle("hidden", !willShow);
-  shellToggleBtn.classList.toggle("active", willShow);
-  shellToggleBtn.textContent = willShow ? "▾ shell" : "▸ shell";
-}
-
-shellToggleBtn.addEventListener("click", () => toggleShell());
-shellCloseBtn.addEventListener("click", () => toggleShell(false));
 shellClearBtn.addEventListener("click", () => shell.clear());
+
+let hasRevealedActivityThisTurn = false;
+function revealActivityForTurn(): void {
+  if (hasRevealedActivityThisTurn) return;
+  hasRevealedActivityThisTurn = true;
+  setArtifactCollapsed(false);
+  artifacts.selectTab("activity");
+}
 
 // ── Process monitor ──────────────────────────────────────────────────────────
 
@@ -1867,21 +1857,8 @@ interface ProcInfo {
   command: string;
 }
 
-const procMonitorEl = document.getElementById("proc-monitor")!;
-const procMonitorToggleBtn = document.getElementById("proc-monitor-toggle")!;
-const procMonitorCloseBtn = document.getElementById("proc-monitor-close")!;
 const procMonitorCountEl = document.getElementById("proc-monitor-count")!;
 const procMonitorRowsEl = document.getElementById("proc-monitor-rows")!;
-
-function toggleProcMonitor(show?: boolean): void {
-  const willShow = show ?? procMonitorEl.classList.contains("hidden");
-  procMonitorEl.classList.toggle("hidden", !willShow);
-  procMonitorToggleBtn.classList.toggle("active", willShow);
-  procMonitorToggleBtn.textContent = willShow ? "▾ procs" : "▸ procs";
-}
-
-procMonitorToggleBtn.addEventListener("click", () => toggleProcMonitor());
-procMonitorCloseBtn.addEventListener("click", () => toggleProcMonitor(false));
 
 function formatRss(kb: number): string {
   if (kb < 1024) return `${kb}K`;
@@ -1892,17 +1869,11 @@ function formatRss(kb: number): string {
 function renderProcs(procs: ProcInfo[]): void {
   procMonitorCountEl.textContent = String(procs.length);
 
-  // Auto-show the panel when a process appears, if it was hidden at zero
-  if (procs.length > 0 && procMonitorEl.classList.contains("hidden") && !procMonitorUserHidden) {
-    toggleProcMonitor(true);
-  }
-
   if (procs.length === 0) {
     procMonitorRowsEl.innerHTML = '<tr><td colspan="6" class="empty-procs">No subprocesses running</td></tr>';
     return;
   }
 
-  // Sort by CPU descending
   const sorted = [...procs].sort((a, b) => b.pcpu - a.pcpu);
   procMonitorRowsEl.innerHTML = sorted.map((p) => `
     <tr>
@@ -1922,12 +1893,6 @@ function escapeHtml(s: string): string {
 function escapeAttr(s: string): string {
   return escapeHtml(s).replace(/"/g, "&quot;");
 }
-
-// Remember if user explicitly closed the panel so we don't keep re-opening it
-let procMonitorUserHidden = false;
-procMonitorCloseBtn.addEventListener("click", () => { procMonitorUserHidden = true; });
-procMonitorToggleBtn.addEventListener("click", () => { procMonitorUserHidden = procMonitorEl.classList.contains("hidden"); });
-
 window.orbit.onProcUpdate((procs) => {
   renderProcs(procs as ProcInfo[]);
 });
