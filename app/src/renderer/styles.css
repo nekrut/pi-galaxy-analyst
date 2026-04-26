@@ -724,9 +724,9 @@ body:not(.artifact-collapsed) #artifact-toggle {
 
 .prompt-num {
   flex: 0 0 auto;
-  min-width: 24px;
+  min-width: 28px;
   height: 22px;
-  padding: 0 7px;
+  padding: 0 6px;
   border-radius: 6px;
   background: var(--bg-surface);
   border: 1px solid var(--border-strong);
@@ -1205,6 +1205,12 @@ body:not(.artifact-collapsed) #artifact-toggle {
   border-radius: 8px;
   font-weight: 700;
   margin-left: 4px;
+}
+/* At zero, the badge becomes ambient — same shape, dimmer colors so it
+   doesn't compete for attention when nothing is running. */
+#proc-monitor-count.zero {
+  background: var(--bg-deep);
+  color: var(--text-dim);
 }
 #proc-monitor-body {
   flex: 1;
@@ -1735,11 +1741,12 @@ body:not(.artifact-collapsed) #artifact-toggle {
 
 /* Tab bar replacing the plain pane-title in the right pane. */
 .pane-tabs {
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4px;
-  padding: 0 8px;
+  padding: 0 16px;
   text-transform: none;
   letter-spacing: normal;
+  overflow: hidden;
 }
 
 .pane-tab {
@@ -1758,6 +1765,10 @@ body:not(.artifact-collapsed) #artifact-toggle {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pane-tab:hover {
@@ -1784,10 +1795,10 @@ body:not(.artifact-collapsed) #artifact-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.6);
@@ -1861,13 +1872,18 @@ body:not(.artifact-collapsed) #artifact-toggle {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  height: 100%;
+  /* Use min-height + box-sizing so the .empty-state can sit inside a
+     padded parent (#notebook-view has padding: 16px) without pushing
+     itself off-center. Was: \`height: 100%\` + \`padding: 40px\` which
+     compounded the parent padding and clipped the content. */
+  box-sizing: border-box;
+  min-height: 100%;
   max-width: 520px;
   margin: 0 auto;
   color: var(--text-dim);
   font-size: 14px;
   text-align: center;
-  padding: 40px;
+  padding: 24px 16px;
   line-height: 1.5;
 }
 

@@ -220,8 +220,13 @@ modelIndicatorEl.addEventListener("click", () => {
 const ARTIFACT_COLLAPSED_KEY = "orbit.artifactCollapsed";
 const artifactToggleBtn = document.getElementById("artifact-toggle")!;
 
-function setArtifactCollapsed(collapsed: boolean): void {
+// Apply visual state without persisting; used by responsive auto-collapse.
+function applyArtifactCollapsed(collapsed: boolean): void {
   document.body.classList.toggle("artifact-collapsed", collapsed);
+}
+// User-initiated toggle; persists to localStorage.
+function setArtifactCollapsed(collapsed: boolean): void {
+  applyArtifactCollapsed(collapsed);
   localStorage.setItem(ARTIFACT_COLLAPSED_KEY, collapsed ? "1" : "0");
 }
 
@@ -251,8 +256,11 @@ const filesDivider = document.getElementById("files-divider")!;
 const filesRefreshBtn = document.getElementById("files-refresh")!;
 const filesShowHiddenBtn = document.getElementById("files-show-hidden")!;
 
-function setFilesCollapsed(collapsed: boolean): void {
+function applyFilesCollapsed(collapsed: boolean): void {
   document.body.classList.toggle("files-collapsed", collapsed);
+}
+function setFilesCollapsed(collapsed: boolean): void {
+  applyFilesCollapsed(collapsed);
   localStorage.setItem(FILES_COLLAPSED_KEY, collapsed ? "1" : "0");
 }
 
@@ -282,6 +290,48 @@ document.addEventListener("keydown", (e) => {
     setFilesCollapsed(!document.body.classList.contains("files-collapsed"));
   }
 });
+
+// ── Responsive auto-collapse ────────────────────────────────────────────────
+//
+// Pane min-widths sum to ~748 px; below that the layout would force a
+// horizontal scrollbar. Auto-collapse on tier crossings (not every resize),
+// and use the apply* (non-persisting) helpers so the user's saved
+// preference is restored when the window widens again.
+const FILES_BREAKPOINT = 900;
+const ARTIFACT_BREAKPOINT = 700;
+let lastFilesNarrow = window.innerWidth < FILES_BREAKPOINT;
+let lastArtifactNarrow = window.innerWidth < ARTIFACT_BREAKPOINT;
+
+function applyResponsiveLayout(): void {
+  const w = window.innerWidth;
+  const filesNarrow = w < FILES_BREAKPOINT;
+  const artifactNarrow = w < ARTIFACT_BREAKPOINT;
+
+  if (filesNarrow !== lastFilesNarrow) {
+    if (filesNarrow) {
+      applyFilesCollapsed(true);
+    } else {
+      const saved = localStorage.getItem(FILES_COLLAPSED_KEY);
+      applyFilesCollapsed(saved === "1");
+    }
+    lastFilesNarrow = filesNarrow;
+  }
+
+  if (artifactNarrow !== lastArtifactNarrow) {
+    if (artifactNarrow) {
+      applyArtifactCollapsed(true);
+    } else {
+      const saved = localStorage.getItem(ARTIFACT_COLLAPSED_KEY);
+      applyArtifactCollapsed(saved === null ? true : saved === "1");
+    }
+    lastArtifactNarrow = artifactNarrow;
+  }
+}
+
+// Apply current viewport on first render (covers cold start in a small window).
+if (lastFilesNarrow) applyFilesCollapsed(true);
+if (lastArtifactNarrow) applyArtifactCollapsed(true);
+window.addEventListener("resize", applyResponsiveLayout);
 
 filesRefreshBtn.addEventListener("click", () => {
   void filesPanel.refresh();
@@ -2298,6 +2348,7 @@ function formatRss(kb: number): string {
 
 function renderProcs(procs: ProcInfo[]): void {
   procMonitorCountEl.textContent = String(procs.length);
+  procMonitorCountEl.classList.toggle("zero", procs.length === 0);
 
   if (procs.length === 0) {
     procMonitorRowsEl.innerHTML = '<tr><td colspan="6" class="empty-procs">No subprocesses running</td></tr>';
