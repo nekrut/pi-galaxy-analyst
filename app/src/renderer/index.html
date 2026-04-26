@@ -47,7 +47,7 @@
         <span id="queued-indicator" class="hidden" title="Queued — will send when agent is ready">queued ↓</span>
         <textarea
           id="input"
-          placeholder="Describe your analysis..."
+          placeholder="Ask for a plan, drop a file path, or type / for commands"
           rows="1"
         ></textarea>
         <button id="send-btn" title="Send">
@@ -110,7 +110,9 @@
                     <th>Command</th>
                   </tr>
                 </thead>
-                <tbody id="proc-monitor-rows"></tbody>
+                <tbody id="proc-monitor-rows">
+                  <tr><td colspan="6" class="empty-procs">No subprocesses running</td></tr>
+                </tbody>
               </table>
             </div>
           </div>

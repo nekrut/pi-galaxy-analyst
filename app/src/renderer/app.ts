@@ -932,6 +932,9 @@ function handleSummarize(raw: string, argStr: string): void {
     `\n--- end transcript ---`;
 
   chat.addUserMessage(raw);
+  chat.addInfoMessage(
+    `<i>Asking the agent to append a summary of ${label} to <code>notebook.md</code>…</i>`,
+  );
   chat.showThinking();
   statusBadge.textContent = "thinking...";
   statusBadge.className = "status-badge thinking";
@@ -996,6 +999,10 @@ function handleCost(raw: string): void {
     `\n--- end table ---`;
 
   chat.addUserMessage(raw);
+  chat.addInfoMessage(
+    `<i>Asking the agent to append the session cost breakdown to ` +
+    `<code>notebook.md</code>…</i>`,
+  );
   chat.showThinking();
   statusBadge.textContent = "thinking...";
   statusBadge.className = "status-badge thinking";
@@ -1077,21 +1084,33 @@ function showNewSessionModal(): Promise<NewSessionChoice> {
   });
 }
 
-async function showCwdWelcome(): Promise<void> {
+async function showCwdWelcome(prefix?: string): Promise<void> {
   let cwd = "~";
   try {
     cwd = await window.orbit.getCwd();
   } catch { /* getCwd unavailable */ }
+  // Optional prefix lets callers (e.g. resetSession) merge their own
+  // "Started fresh session" line into the same info card so the user
+  // doesn't see a stack of three near-identical messages on /new.
+  const prefixHtml = prefix ? `<i>${prefix}</i><br>` : "";
   chat.addInfoMessage(
+    prefixHtml +
     `<b>Current working directory:</b> <code>${cwd.replace(/</g, "&lt;")}</code><br>` +
-    `For a new project you may want to <a href="#" id="switch-dir-link">switch to a new directory</a> to keep everything clean.`
+    // Class instead of id so multiple cwd-welcome cards don't all share
+    // an id, and so the delegated listener wired once below works on
+    // every link regardless of how many welcomes have been shown.
+    `For a new project you may want to <a href="#" class="switch-dir-link">switch to a new directory</a> to keep everything clean.`
   );
-  // Wire the link to the existing cwd-change button handler
-  document.getElementById("switch-dir-link")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    (document.getElementById("cwd-change") as HTMLButtonElement | null)?.click();
-  });
 }
+
+// Single delegated listener for every "switch to a new directory" link
+// rendered by showCwdWelcome. Avoids per-call addEventListener stacking.
+messagesEl.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement | null;
+  if (!target?.classList.contains("switch-dir-link")) return;
+  e.preventDefault();
+  (document.getElementById("cwd-change") as HTMLButtonElement | null)?.click();
+});
 
 async function resetSession(): Promise<void> {
   chat.resetCounter();
@@ -1099,15 +1118,13 @@ async function resetSession(): Promise<void> {
 
   await window.orbit.resetSession();
 
-  // Fresh session has no greeting turn, so agent_end never fires.
-  // Clear streaming state explicitly so the input is usable immediately.
-  chat.addInfoMessage("<i>Started fresh session.</i>");
-
   // Reset startup-welcome flag so the onAgentStatus handler re-runs
   // the cwd welcome when the new agent reports "running".
   hasShownStartupWelcome = false;
 
-  await showCwdWelcome();
+  // Merge the "fresh session started" line with the cwd welcome so the
+  // user sees one info card, not two.
+  await showCwdWelcome("Started fresh session.");
 }
 
 /** Resolve a model alias across ALL providers and switch + restart agent. */
@@ -2239,11 +2256,23 @@ const shellClearBtn = document.getElementById("agent-shell-clear")!;
 shellClearBtn.addEventListener("click", () => shell.clear());
 
 let hasRevealedActivityThisTurn = false;
+/**
+ * Once per turn, surface the agent shell so the user can watch.
+ * If the artifact pane is **collapsed**, expand it AND switch to
+ * Activity. If it's already **expanded** with a non-default tab
+ * active (Notebook / File), don't yank the user away — they're
+ * reading something and the live shell would clobber that. The
+ * agent_start case where this matters most is mid-read on the
+ * Notebook tab.
+ */
 function revealActivityForTurn(): void {
   if (hasRevealedActivityThisTurn) return;
   hasRevealedActivityThisTurn = true;
+  const wasCollapsed = document.body.classList.contains("artifact-collapsed");
   setArtifactCollapsed(false);
-  artifacts.selectTab("activity");
+  if (wasCollapsed) {
+    artifacts.selectTab("activity");
+  }
 }
 
 // ── Process monitor ──────────────────────────────────────────────────────────
