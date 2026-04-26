@@ -12,6 +12,7 @@ import * as fs from "fs";
 import { getState, getNotebookPath } from "./state";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { getRecentActivityEvents } from "./activity";
+import { loadConfig } from "./config";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -368,33 +369,61 @@ answers, and turn-by-turn dialogue that doesn't need persistence.
 }
 
 /**
- * Router for the curated galaxyproject/galaxy-skills repo. The agent
- * fetches a specific SKILL.md or reference doc on demand via
- * \`galaxy_skills_fetch\`. This block names the canonical paths and when
- * to use each — the upstream AGENTS.md condensed.
+ * Router for configured skills repos. The agent fetches SKILL.md / reference
+ * docs on demand via \`skills_fetch({ repo?, path })\`. galaxy-skills ships
+ * by default (seeded into config); users add repos in Preferences → Skills.
+ *
+ * The galaxy-skills section here is hardcoded because it's the default and
+ * we want first-class guidance. For other configured repos we just list
+ * them and tell the agent to start at \`AGENTS.md\` or \`README.md\`.
  */
-function buildGalaxySkillsContext(): string {
-  return `## Galaxy skills (operational know-how)
+function buildSkillsContext(): string {
+  const cfg = loadConfig();
+  const repos = (cfg.skills?.repos ?? []).filter(
+    (r) => r && typeof r.name === "string" && r.url && r.enabled !== false,
+  );
+  if (repos.length === 0) return "";
 
-Curated upstream at \`galaxyproject/galaxy-skills\`. Use the
-\`galaxy_skills_fetch(path)\` tool to load a skill on demand. **Don't
-guess Galaxy operational patterns from training data — fetch the
-relevant skill first.** Each fetch is cached locally for 24h.
+  const sections: string[] = [];
+  sections.push(`## Skills repositories (operational know-how)`);
+  sections.push("");
+  sections.push(
+    `Use the \`skills_fetch({ repo, path })\` tool to load a skill on demand. ` +
+    `**Don't guess operational patterns from training data — fetch the ` +
+    `relevant skill first.** Each fetch is cached locally for 24h. ` +
+    `When \`repo\` is omitted, the first enabled repo is used.`,
+  );
+  sections.push("");
 
-### When to fetch which skill
+  // Configured repos (one-line each).
+  sections.push(`### Configured repos`);
+  sections.push("");
+  for (const r of repos) {
+    sections.push(`- **${r.name}** — ${r.url} (branch: ${r.branch || "main"})`);
+  }
+  sections.push("");
 
-- **Manipulating dataset collections** (filter, sort, relabel, restructure,
+  // Hardcoded galaxy-skills router if it's enabled, mirroring upstream
+  // AGENTS.md so the agent doesn't have to fetch the router itself.
+  if (repos.some((r) => r.name === "galaxy-skills")) {
+    sections.push(`### When to fetch which galaxy-skills skill`);
+    sections.push("");
+    sections.push(
+      `Always pass \`repo: "galaxy-skills"\` (or omit if it's the default).`,
+    );
+    sections.push("");
+    sections.push(`- **Manipulating dataset collections** (filter, sort, relabel, restructure,
   flatten, nest, merge; building paired collections from PE FASTQ; mapping
   a tool over a collection) →
-  \`galaxy_skills_fetch("collection-manipulation/SKILL.md")\`. Deep
+  \`skills_fetch({ path: "collection-manipulation/SKILL.md" })\`. Deep
   references when you need them:
   - \`collection-manipulation/references/tools.md\` — catalog of 26
     collection-operation tools with IDs and parameter shapes.
   - \`collection-manipulation/references/apply-rules.md\` — Apply Rules
     DSL deep-dive.
   - \`collection-manipulation/references/api-patterns.md\` — Galaxy Tools
-    API patterns (the \`{"src": "hdca", "id": ...}\` shape and the
-    \`values\` wrapper, etc.).
+    API patterns (the \`{"src": "hdca", "id": ...}\` shape, the \`values\`
+    wrapper, etc.).
   - \`collection-manipulation/references/test-patterns.md\` — real test
     patterns from the Galaxy test suite.
 
@@ -405,20 +434,20 @@ relevant skill first.** Each fetch is cached locally for 24h.
   per file).
 
 - **Galaxy MCP tool usage / common gotchas** →
-  \`galaxy_skills_fetch("galaxy-integration/mcp-reference/SKILL.md")\` and
-  \`galaxy_skills_fetch("galaxy-integration/mcp-reference/gotchas.md")\`.
+  \`skills_fetch({ path: "galaxy-integration/mcp-reference/SKILL.md" })\`
+  and \`skills_fetch({ path: "galaxy-integration/mcp-reference/gotchas.md" })\`.
   Other refs: \`galaxy-integration/galaxy-integration.md\` (BioBlend
   patterns), \`galaxy-integration/mcp-reference/history-access.md\`.
 
 - **Workflow report templates** (Workflow Editor's Report tab,
   markdown directives) →
-  \`galaxy_skills_fetch("workflow-reports/SKILL.md")\`. References:
+  \`skills_fetch({ path: "workflow-reports/SKILL.md" })\`. References:
   \`workflow-reports/references/directives.md\`, plus worked examples
   under \`workflow-reports/examples/\`.
 
 - **Nextflow → Galaxy conversion** (pipelines / modules / processes →
   Galaxy tools / workflows) →
-  \`galaxy_skills_fetch("nf-to-galaxy/SKILL.md")\` (router). Sub-skills:
+  \`skills_fetch({ path: "nf-to-galaxy/SKILL.md" })\` (router). Sub-skills:
   \`nf-to-galaxy/nf-process-to-galaxy-tool/SKILL.md\`,
   \`nf-to-galaxy/nf-subworkflow-to-galaxy-workflow/SKILL.md\`,
   \`nf-to-galaxy/nf-pipeline-to-galaxy-workflow/SKILL.md\`. Shared:
@@ -427,18 +456,39 @@ relevant skill first.** Each fetch is cached locally for 24h.
   \`tool-dev/references/testing.md\` (Planemo).
 
 - **Galaxy tool development** (XML wrappers, packaging, testing, where to
-  put tools) → \`galaxy_skills_fetch("tool-dev/SKILL.md")\`. Sub-skill:
+  put tools) → \`skills_fetch({ path: "tool-dev/SKILL.md" })\`. Sub-skill:
   \`tool-dev/tool-selection-diagram/SKILL.md\` for selection-diagram
   generation.
 
 - **Updating ToolShed tool revisions in usegalaxy-tools** →
-  \`galaxy_skills_fetch("update-usegalaxy-tool/SKILL.md")\`.
+  \`skills_fetch({ path: "update-usegalaxy-tool/SKILL.md" })\`.
 
-- **Hub news posts** → \`galaxy_skills_fetch("hub-news-posts/SKILL.md")\`.
+- **Hub news posts** → \`skills_fetch({ path: "hub-news-posts/SKILL.md" })\`.
 
 Skills follow planning/approval checkpoints internally — read the SKILL.md
-fully before acting on what it teaches.
-`;
+fully before acting on what it teaches.`);
+    sections.push("");
+  }
+
+  // For non-default repos, instruct the agent to discover paths via AGENTS.md.
+  const otherRepos = repos.filter((r) => r.name !== "galaxy-skills");
+  if (otherRepos.length > 0) {
+    sections.push(`### Other configured repos`);
+    sections.push("");
+    sections.push(
+      `For repos other than galaxy-skills, fetch \`AGENTS.md\` (or \`README.md\` ` +
+      `if AGENTS.md is missing) first to discover the available skill paths:`,
+    );
+    sections.push("");
+    for (const r of otherRepos) {
+      sections.push(
+        `- \`skills_fetch({ repo: "${r.name}", path: "AGENTS.md" })\``,
+      );
+    }
+    sections.push("");
+  }
+
+  return sections.join("\n");
 }
 
 /**
@@ -485,7 +535,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildChatFormattingBlock(),
       buildNotebookWriteBlock(),
       buildGalaxyContextBlock(),
-      buildGalaxySkillsContext(),
+      buildSkillsContext(),
       buildLocalEnvContext(),
       buildNotebookExcerptBlock(),
       buildRecentActivityBlock(),

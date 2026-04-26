@@ -10,6 +10,16 @@ export interface LoomConfig {
   };
   defaultCwd?: string;
   /**
+   * Skill repositories. Each entry points at a GitHub repo following the
+   * Claude-Code skills convention (top-level AGENTS.md router + nested
+   * SKILL.md files). The agent fetches them on demand via the
+   * \`skills_fetch\` tool. The list is seeded with \`galaxy-skills\` if
+   * absent. Set \`enabled: false\` to keep an entry without using it.
+   */
+  skills?: {
+    repos: Array<SkillRepo>;
+  };
+  /**
    * Opt-in flags for experimental subsystems. Off by default; set the
    * matching env var (e.g. LOOM_TEAM_DISPATCH=1) to override per-session.
    */
@@ -17,6 +27,17 @@ export interface LoomConfig {
     /** Register the experimental team_dispatch tool and its prompt guidance. */
     teamDispatch?: boolean;
   };
+}
+
+export interface SkillRepo {
+  /** Stable identifier used by the agent in \`skills_fetch({ repo: "..." })\`. */
+  name: string;
+  /** GitHub repo URL, e.g. \`https://github.com/galaxyproject/galaxy-skills\`. */
+  url: string;
+  /** Branch / ref to fetch from. Defaults to \`main\`. */
+  branch?: string;
+  /** When false the repo is kept in config but not advertised to the agent. */
+  enabled?: boolean;
 }
 
 export function getConfigDir(): string;

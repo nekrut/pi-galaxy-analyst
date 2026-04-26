@@ -25,9 +25,69 @@ import {
   galaxyGet,
   type GalaxyInvocationResponse,
 } from "./galaxy-api";
+import { loadConfig } from "./config";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+
+interface ConfiguredSkillRepo {
+  name: string;
+  url: string;
+  branch: string;
+}
+
+/**
+ * Resolve a GitHub repo URL like
+ * \`https://github.com/galaxyproject/galaxy-skills\`
+ * into the matching raw.githubusercontent.com base URL plus a branch.
+ * Returns null if the URL doesn't match the expected GitHub shape — callers
+ * surface the error to the agent instead of attempting an arbitrary fetch.
+ */
+function githubRawBase(repoUrl: string, branch: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(repoUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== "github.com") return null;
+  const segs = parsed.pathname.replace(/^\/+|\/+$/g, "").split("/");
+  if (segs.length < 2) return null;
+  const [owner, repo] = segs;
+  if (!owner || !repo) return null;
+  const cleanRepo = repo.replace(/\.git$/i, "");
+  const cleanBranch = (branch || "main").replace(/^\/+|\/+$/g, "");
+  return `https://raw.githubusercontent.com/${owner}/${cleanRepo}/${cleanBranch}`;
+}
+
+function listEnabledSkillRepos(): ConfiguredSkillRepo[] {
+  const cfg = loadConfig();
+  const repos = (cfg.skills?.repos ?? []) as Array<{
+    name?: string;
+    url?: string;
+    branch?: string;
+    enabled?: boolean;
+  }>;
+  const enabled: ConfiguredSkillRepo[] = [];
+  for (const r of repos) {
+    if (r?.enabled === false) continue;
+    if (typeof r?.name !== "string" || typeof r?.url !== "string") continue;
+    enabled.push({
+      name: r.name,
+      url: r.url,
+      branch: typeof r.branch === "string" && r.branch ? r.branch : "main",
+    });
+  }
+  return enabled;
+}
+
+function findSkillRepo(name: string | undefined): ConfiguredSkillRepo | null {
+  const enabled = listEnabledSkillRepos();
+  if (enabled.length === 0) return null;
+  if (!name) return enabled[0];
+  const match = enabled.find((r) => r.name === name);
+  return match || null;
+}
 
 export function registerPlanTools(pi: ExtensionAPI): void {
 
@@ -265,25 +325,43 @@ analyses in Galaxy.`,
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Tool: Fetch a galaxy-skills SKILL.md or reference doc
+  // Tool: Fetch a SKILL.md or reference doc from a configured skills repo
   // ─────────────────────────────────────────────────────────────────────────────
   pi.registerTool({
-    name: "galaxy_skills_fetch",
-    label: "Fetch Galaxy Skill",
-    description: `Fetch operational know-how from the curated galaxyproject/galaxy-skills
-repo. Pass a relative path inside the repo, e.g. \`collection-manipulation/SKILL.md\` or
-\`galaxy-integration/mcp-reference/gotchas.md\`. The system prompt's "Galaxy skills" section
-lists the available skill paths and when to use each. Results are cached locally for 24h.`,
+    name: "skills_fetch",
+    label: "Fetch Skill",
+    description: `Fetch operational know-how from a configured skills repo. The
+system prompt's "Skills repositories" section lists the available repos and the
+canonical paths inside each. Results are cached locally for 24h. If \`repo\` is
+omitted, the first enabled repo is used (typically \`galaxy-skills\`).`,
     parameters: Type.Object({
+      repo: Type.Optional(Type.String({
+        description:
+          "Name of the skills repo to fetch from (e.g. 'galaxy-skills'). " +
+          "Omit to use the default (first enabled repo).",
+      })),
       path: Type.String({
         description:
-          "Relative path inside galaxy-skills, e.g. 'collection-manipulation/SKILL.md', " +
-          "'galaxy-integration/mcp-reference/SKILL.md', 'galaxy-integration/mcp-reference/gotchas.md'.",
+          "Relative path inside the repo, e.g. 'collection-manipulation/SKILL.md', " +
+          "'galaxy-integration/mcp-reference/gotchas.md'.",
       }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const repo = findSkillRepo(params.repo);
+      if (!repo) {
+        const enabled = listEnabledSkillRepos().map((r) => r.name).join(", ") || "(none)";
+        return {
+          content: [{
+            type: "text",
+            text: params.repo
+              ? `Error: Skills repo "${params.repo}" is not configured or is disabled. Enabled: ${enabled}.`
+              : `Error: No skills repos are enabled. Configure one in Preferences → Skills.`,
+          }],
+          details: { error: true },
+        };
+      }
+
       const cleanPath = params.path.replace(/^\/+/, "").replace(/\\/g, "/");
-      // Reject path traversal so a malformed path can't escape the repo / cache.
       if (cleanPath.includes("..") || cleanPath === "") {
         return {
           content: [{ type: "text", text: `Error: Invalid skill path "${params.path}"` }],
@@ -291,7 +369,18 @@ lists the available skill paths and when to use each. Results are cached locally
         };
       }
 
-      const cacheDir = path.join(os.homedir(), ".loom", "cache", "galaxy-skills");
+      const rawBase = githubRawBase(repo.url, repo.branch);
+      if (!rawBase) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Repo URL "${repo.url}" must be a GitHub repo (https://github.com/<owner>/<repo>).`,
+          }],
+          details: { error: true },
+        };
+      }
+
+      const cacheDir = path.join(os.homedir(), ".loom", "cache", "skills", repo.name);
       const cachePath = path.join(cacheDir, cleanPath);
       const ttlMs = 24 * 60 * 60 * 1000;
       try {
@@ -300,24 +389,24 @@ lists the available skill paths and when to use each. Results are cached locally
           const cached = fs.readFileSync(cachePath, "utf-8");
           return {
             content: [{ type: "text", text: cached }],
-            details: { path: cleanPath, length: cached.length, cached: true },
+            details: { repo: repo.name, path: cleanPath, length: cached.length, cached: true },
           };
         }
       } catch {
-        // No cache hit (file missing or stat failed) — fall through to fetch.
+        // No cache hit — fall through to fetch.
       }
 
-      const url = `https://raw.githubusercontent.com/galaxyproject/galaxy-skills/main/${cleanPath}`;
+      const url = `${rawBase}/${cleanPath}`;
       try {
         const response = await fetch(url, { signal });
         if (!response.ok) {
           return {
             content: [{
               type: "text",
-              text: `Error: Failed to fetch "${cleanPath}" (HTTP ${response.status}). ` +
-                `Check the path against the galaxy-skills router in the system prompt.`,
+              text: `Error: Failed to fetch "${cleanPath}" from ${repo.name} (HTTP ${response.status}). ` +
+                `Check the path against the skills router in the system prompt.`,
             }],
-            details: { error: true, path: cleanPath },
+            details: { error: true, repo: repo.name, path: cleanPath },
           };
         }
         const text = await response.text();
@@ -326,26 +415,26 @@ lists the available skill paths and when to use each. Results are cached locally
           fs.mkdirSync(path.dirname(cachePath), { recursive: true });
           fs.writeFileSync(cachePath, text, "utf-8");
         } catch (err) {
-          console.error("[galaxy_skills_fetch] cache write failed:", err);
+          console.error("[skills_fetch] cache write failed:", err);
         }
 
         return {
           content: [{ type: "text", text }],
-          details: { path: cleanPath, length: text.length, cached: false },
+          details: { repo: repo.name, path: cleanPath, length: text.length, cached: false },
         };
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `Error fetching skill: ${msg}` }],
-          details: { error: true, path: cleanPath },
+          details: { error: true, repo: repo.name, path: cleanPath },
         };
       }
     },
     renderResult: (result) => {
-      const d = result.details as { path?: string; length?: number; cached?: boolean; error?: boolean } | undefined;
-      if (d?.error) return new Text("❌ Galaxy skill fetch failed");
+      const d = result.details as { repo?: string; path?: string; length?: number; cached?: boolean; error?: boolean } | undefined;
+      if (d?.error) return new Text("❌ Skill fetch failed");
       const tag = d?.cached ? "(cached)" : "(fetched)";
-      return new Text(`📘 ${d?.path} ${tag} (${d?.length || 0} chars)`);
+      return new Text(`📘 ${d?.repo}/${d?.path} ${tag} (${d?.length || 0} chars)`);
     },
   });
 

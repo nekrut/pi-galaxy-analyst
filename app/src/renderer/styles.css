@@ -1471,6 +1471,79 @@ body:not(.artifact-collapsed) #artifact-toggle {
   font-size: 12px;
 }
 
+.prefs-help {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.prefs-help code {
+  font-family: var(--font);
+  background: var(--bg-deep);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.prefs-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.prefs-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 6px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.prefs-table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+
+.prefs-table input[type="text"] {
+  width: 100%;
+  background: var(--bg-deep);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.prefs-table input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent-light);
+}
+
+.prefs-table .prefs-skills-name { width: 18%; }
+.prefs-table .prefs-skills-url { width: 50%; }
+.prefs-table .prefs-skills-branch { width: 12%; }
+.prefs-table .prefs-skills-enabled { width: 8%; text-align: center; }
+.prefs-table .prefs-skills-actions { width: 12%; text-align: right; }
+
+.prefs-skills-actions .plan-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.prefs-skills-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 16px 8px;
+  font-size: 12px;
+}
+
 .prefs-hint {
   margin-top: -4px;
   align-items: flex-start;

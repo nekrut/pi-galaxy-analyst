@@ -1614,6 +1614,88 @@ const prefsGalaxyUrl = document.getElementById("prefs-galaxy-url") as HTMLInputE
 const prefsGalaxyKey = document.getElementById("prefs-galaxy-key") as HTMLInputElement;
 const prefsDefaultCwd = document.getElementById("prefs-default-cwd") as HTMLInputElement;
 const prefsCondaBin = document.getElementById("prefs-conda-bin") as HTMLSelectElement;
+const prefsSkillsRows = document.getElementById("prefs-skills-rows")!;
+const prefsSkillsAddBtn = document.getElementById("prefs-skills-add")!;
+
+interface PrefsSkillRepo {
+  name: string;
+  url: string;
+  branch: string;
+  enabled: boolean;
+}
+
+let prefsSkillsState: PrefsSkillRepo[] = [];
+
+function renderSkillsRows(): void {
+  prefsSkillsRows.innerHTML = "";
+  if (prefsSkillsState.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "prefs-skills-empty";
+    td.textContent = "No skill repos. Removing all entries re-seeds galaxy-skills on save.";
+    tr.appendChild(td);
+    prefsSkillsRows.appendChild(tr);
+    return;
+  }
+  prefsSkillsState.forEach((repo, idx) => {
+    const tr = document.createElement("tr");
+    tr.appendChild(makeSkillCell(repo, idx, "name", "text"));
+    tr.appendChild(makeSkillCell(repo, idx, "url", "text"));
+    tr.appendChild(makeSkillCell(repo, idx, "branch", "text"));
+
+    const enabledTd = document.createElement("td");
+    enabledTd.className = "prefs-skills-enabled";
+    const enabledBox = document.createElement("input");
+    enabledBox.type = "checkbox";
+    enabledBox.checked = repo.enabled;
+    enabledBox.addEventListener("change", () => {
+      prefsSkillsState[idx].enabled = enabledBox.checked;
+    });
+    enabledTd.appendChild(enabledBox);
+    tr.appendChild(enabledTd);
+
+    const actionsTd = document.createElement("td");
+    actionsTd.className = "prefs-skills-actions";
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "plan-btn";
+    removeBtn.textContent = "Remove";
+    removeBtn.title = "Remove this skill repo";
+    removeBtn.addEventListener("click", () => {
+      prefsSkillsState.splice(idx, 1);
+      renderSkillsRows();
+    });
+    actionsTd.appendChild(removeBtn);
+    tr.appendChild(actionsTd);
+
+    prefsSkillsRows.appendChild(tr);
+  });
+}
+
+function makeSkillCell(
+  repo: PrefsSkillRepo,
+  idx: number,
+  field: "name" | "url" | "branch",
+  inputType: "text",
+): HTMLTableCellElement {
+  const td = document.createElement("td");
+  td.className = `prefs-skills-${field}`;
+  const input = document.createElement("input");
+  input.type = inputType;
+  input.value = repo[field];
+  if (field === "url") input.placeholder = "https://github.com/owner/repo";
+  if (field === "branch") input.placeholder = "main";
+  input.addEventListener("input", () => {
+    prefsSkillsState[idx][field] = input.value.trim();
+  });
+  td.appendChild(input);
+  return td;
+}
+
+prefsSkillsAddBtn.addEventListener("click", () => {
+  prefsSkillsState.push({ name: "", url: "", branch: "main", enabled: true });
+  renderSkillsRows();
+});
 
 async function openPreferences(): Promise<void> {
   const config = await window.orbit.getConfig() as {
@@ -1621,6 +1703,7 @@ async function openPreferences(): Promise<void> {
     galaxy?: { active: string | null; profiles: Record<string, { url: string; apiKey: string }> };
     defaultCwd?: string;
     condaBin?: string;
+    skills?: { repos?: Array<{ name?: string; url?: string; branch?: string; enabled?: boolean }> };
   };
 
   prefsProvider.value = config.llm?.provider || "anthropic";
@@ -1641,6 +1724,18 @@ async function openPreferences(): Promise<void> {
   prefsDefaultCwd.value = config.defaultCwd || "";
   prefsCondaBin.value = config.condaBin || "auto";
 
+  // Skills: hydrate the editable table from config. The brain seeds
+  // galaxy-skills if absent, but we hydrate from whatever's in config so
+  // an admin who explicitly removed it doesn't see it re-appear here
+  // until they hit Save (which triggers re-seed if the list ends up empty).
+  prefsSkillsState = (config.skills?.repos ?? []).map((r) => ({
+    name: typeof r?.name === "string" ? r.name : "",
+    url: typeof r?.url === "string" ? r.url : "",
+    branch: typeof r?.branch === "string" && r.branch ? r.branch : "main",
+    enabled: r?.enabled !== false,
+  }));
+  renderSkillsRows();
+
   prefsOverlay.classList.remove("hidden");
 }
 
@@ -1655,6 +1750,7 @@ async function savePreferences(): Promise<void> {
     galaxy?: { active: string | null; profiles: Record<string, { url: string; apiKey: string }> };
     defaultCwd?: string;
     condaBin?: string;
+    skills?: { repos?: Array<{ name?: string; url?: string; branch?: string; enabled?: boolean }> };
   };
 
   const config: typeof current = { ...current };
@@ -1683,6 +1779,20 @@ async function savePreferences(): Promise<void> {
 
   config.defaultCwd = prefsDefaultCwd.value.trim() || undefined;
   config.condaBin = (prefsCondaBin.value as "auto" | "mamba" | "conda") || undefined;
+
+  // Skills: persist whatever's in the table, dropping incomplete rows. If the
+  // user emptied the list entirely, the brain's loadConfig will lazy-seed
+  // galaxy-skills on next read — we don't re-seed here so a deliberate
+  // \"none\" state survives at least until next session start.
+  const cleaned = prefsSkillsState
+    .filter((r) => r.name.trim() && r.url.trim())
+    .map((r) => ({
+      name: r.name.trim(),
+      url: r.url.trim(),
+      branch: r.branch.trim() || "main",
+      enabled: r.enabled,
+    }));
+  config.skills = { repos: cleaned };
 
   const result = await window.orbit.saveConfig(config as Record<string, unknown>);
   if (result.success) {

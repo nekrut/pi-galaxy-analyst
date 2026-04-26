@@ -224,6 +224,33 @@
             </select>
           </div>
         </section>
+
+        <section class="prefs-section">
+          <h3>Skills</h3>
+          <p class="prefs-help">
+            GitHub repos with Claude-Code-style skills (top-level
+            <code>AGENTS.md</code> + nested <code>SKILL.md</code> files). The
+            agent fetches them on demand via the <code>skills_fetch</code>
+            tool. <code>galaxy-skills</code> is the default and ships with
+            Loom; you can disable or remove it, but a default is re-seeded
+            if all repos are removed.
+          </p>
+          <table id="prefs-skills-table" class="prefs-table">
+            <thead>
+              <tr>
+                <th class="prefs-skills-name">Name</th>
+                <th class="prefs-skills-url">GitHub URL</th>
+                <th class="prefs-skills-branch">Branch</th>
+                <th class="prefs-skills-enabled">Enabled</th>
+                <th class="prefs-skills-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="prefs-skills-rows"></tbody>
+          </table>
+          <div class="prefs-row">
+            <button id="prefs-skills-add" class="plan-btn">+ Add repo</button>
+          </div>
+        </section>
       </div>
       <div class="modal-footer">
         <span id="prefs-restart-note">Changes will restart the agent session.</span>
