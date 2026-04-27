@@ -20,6 +20,73 @@ function log(...args: unknown[]): void {
   console.log("[agent]", ...args);
 }
 
+/**
+ * Variables explicitly forwarded from Orbit's launch env to the brain
+ * subprocess. Forwarding `process.env` wholesale would leak unrelated
+ * secrets (AWS_*, GITHUB_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, etc.)
+ * to every spawned MCP subprocess too; the brain only needs the small
+ * set below plus its own LOOM_ / GALAXY_ / PI_ prefix vars (forwarded
+ * by prefix in buildBrainEnv).
+ */
+const BRAIN_ENV_PASSTHROUGH = new Set<string>([
+  // Process basics
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "TERM",
+  "PWD",
+  // Locale
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  // Display (rarely needed by the brain itself but tools spawned by
+  // the brain — e.g. matplotlib via the bash tool — sometimes need it)
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  // Node
+  "NODE_OPTIONS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  // Conda / mamba (per-analysis env activation in tools)
+  "CONDA_EXE",
+  "CONDA_PREFIX",
+  "CONDA_DEFAULT_ENV",
+  "MAMBA_EXE",
+  "MAMBA_ROOT_PREFIX",
+  // CA bundles (corporate proxies)
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+]);
+
+function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of BRAIN_ENV_PASSTHROUGH) {
+    const v = process.env[key];
+    if (v !== undefined) env[key] = v;
+  }
+  // Forward any LOOM_*/GALAXY_*/PI_* vars by prefix — these are the brain's
+  // own knobs (provider keys, MCP config dir, feature flags).
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    if (k.startsWith("LOOM_") || k.startsWith("GALAXY_") || k.startsWith("PI_")) {
+      env[k] = v;
+    }
+  }
+  // Set the shell-kind marker the extension reads, plus the optional
+  // fresh-session sentinel for /new flows.
+  env.LOOM_SHELL_KIND = "orbit";
+  if (fresh) env.LOOM_FRESH_SESSION = "1";
+  return env;
+}
+
 export class AgentManager {
   private process: ChildProcess | null = null;
   private window: BrowserWindow;
@@ -127,7 +194,7 @@ export class AgentManager {
       this.process = spawn("node", args, {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: this.cwd,
-        env: { ...process.env, LOOM_SHELL_KIND: "orbit", ...(fresh ? { LOOM_FRESH_SESSION: "1" } : {}) },
+        env: buildBrainEnv(fresh),
       });
     } catch (err) {
       log("spawn failed:", err);
