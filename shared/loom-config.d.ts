@@ -10,6 +10,16 @@ export interface LoomConfig {
   };
   defaultCwd?: string;
   /**
+   * Execution mode gate. Independent of whether Galaxy credentials are
+   * configured.
+   * - \`cloud\` (default): agent decides per-plan whether each step runs
+   *   locally or on Galaxy. Plan routing tags (\`[local]\`/\`[hybrid]\`/\`[remote]\`)
+   *   describe the resulting mix.
+   * - \`local\`: project is sandboxed to local execution. The agent must not
+   *   propose Galaxy steps even if Galaxy MCP is registered.
+   */
+  executionMode?: "local" | "cloud";
+  /**
    * Skill repositories. Each entry points at a GitHub repo following the
    * Claude-Code skills convention (top-level AGENTS.md router + nested
    * SKILL.md files). The agent fetches them on demand via the

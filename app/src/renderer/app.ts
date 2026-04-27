@@ -404,6 +404,52 @@ galaxyStatus.addEventListener("click", () => {
   void openPreferences();
 });
 
+// ── Execution mode toggle (Local | Cloud) ───────────────────────────────────
+//
+// Local sandboxes the project to local-only execution even if Galaxy is
+// configured. Cloud (default) lets the agent decide per-plan whether each
+// step routes locally or to Galaxy. The gate is enforced in the brain via
+// system-prompt injection (see extensions/loom/context.ts), not by
+// unregistering Galaxy MCP — flipping the toggle restarts the agent so the
+// new mode reaches the prompt.
+
+const execLocalBtn = document.getElementById("exec-mode-local") as HTMLButtonElement;
+const execCloudBtn = document.getElementById("exec-mode-cloud") as HTMLButtonElement;
+
+function applyExecModeUi(mode: "local" | "cloud"): void {
+  for (const [btn, btnMode] of [[execLocalBtn, "local"], [execCloudBtn, "cloud"]] as const) {
+    const active = btnMode === mode;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-checked", active ? "true" : "false");
+  }
+}
+
+async function loadExecMode(): Promise<void> {
+  const cfg = (await window.orbit.getConfig()) as { executionMode?: string };
+  const mode: "local" | "cloud" = cfg.executionMode === "local" ? "local" : "cloud";
+  applyExecModeUi(mode);
+}
+
+async function setExecMode(mode: "local" | "cloud"): Promise<void> {
+  applyExecModeUi(mode);
+  const cfg = (await window.orbit.getConfig()) as Record<string, unknown>;
+  cfg.executionMode = mode;
+  const result = await window.orbit.saveConfig(cfg);
+  if (!result.success) {
+    chat.addErrorMessage(`Failed to save execution mode: ${result.error}`);
+    return;
+  }
+  chat.addInfoMessage(
+    mode === "local"
+      ? "<i>Execution mode set to <strong>Local</strong> — Galaxy steps disabled this session. Agent restarted.</i>"
+      : "<i>Execution mode set to <strong>Cloud</strong> — agent may route steps to Galaxy. Agent restarted.</i>",
+  );
+}
+
+execLocalBtn.addEventListener("click", () => void setExecMode("local"));
+execCloudBtn.addEventListener("click", () => void setExecMode("cloud"));
+void loadExecMode();
+
 // ── First-run welcome screen ─────────────────────────────────────────────────
 
 const welcomeOverlay = document.getElementById("welcome-overlay")!;
@@ -648,7 +694,7 @@ function resetUiForFreshContext(): void {
   sendBtn.classList.remove("hidden");
   abortBtn.classList.add("hidden");
   statusBadge.textContent = "Ready";
-  statusBadge.className = "status-badge";
+  statusBadge.className = "footer-control status-badge";
   setArtifactCollapsed(false);
 }
 
@@ -761,7 +807,7 @@ function submit(): void {
   chat.addUserMessage(text);
   chat.showThinking();
   statusBadge.textContent = "thinking...";
-  statusBadge.className = "status-badge thinking";
+  statusBadge.className = "footer-control status-badge thinking";
   window.orbit.prompt(text);
   inputEl.value = "";
   inputEl.style.height = "auto";
@@ -797,7 +843,7 @@ function flushPendingMessage(): void {
     chat.addUserMessage(text);
     chat.showThinking();
     statusBadge.textContent = "thinking...";
-    statusBadge.className = "status-badge thinking";
+    statusBadge.className = "footer-control status-badge thinking";
     window.orbit.prompt(text);
   });
 }
@@ -987,7 +1033,7 @@ function handleSummarize(raw: string, argStr: string): void {
   );
   chat.showThinking();
   statusBadge.textContent = "thinking...";
-  statusBadge.className = "status-badge thinking";
+  statusBadge.className = "footer-control status-badge thinking";
   window.orbit.prompt(prompt);
 }
 
@@ -1055,7 +1101,7 @@ function handleCost(raw: string): void {
   );
   chat.showThinking();
   statusBadge.textContent = "thinking...";
-  statusBadge.className = "status-badge thinking";
+  statusBadge.className = "footer-control status-badge thinking";
   window.orbit.prompt(prompt);
 }
 
@@ -1531,7 +1577,7 @@ window.orbit.onAgentEvent((event) => {
       if (ameType === "text_start") {
         chat.hideThinking();
         statusBadge.textContent = "responding...";
-        statusBadge.className = "status-badge running";
+        statusBadge.className = "footer-control status-badge running";
         if (!streaming) {
           streaming = true;
           sendBtn.classList.add("hidden");
@@ -1571,7 +1617,7 @@ window.orbit.onAgentEvent((event) => {
           chat.hideThinking();
           chat.addErrorMessage(msg.errorMessage);
           statusBadge.textContent = "error";
-          statusBadge.className = "status-badge error";
+          statusBadge.className = "footer-control status-badge error";
         }
       }
       break;
@@ -1592,7 +1638,7 @@ window.orbit.onAgentEvent((event) => {
         chat.addToolCard(id, name);
       }
       statusBadge.textContent = `running: ${name}`;
-      statusBadge.className = "status-badge running";
+      statusBadge.className = "footer-control status-badge running";
       break;
     }
 
@@ -1622,7 +1668,7 @@ window.orbit.onAgentEvent((event) => {
       chat.hideThinking();
       streaming = false;
       statusBadge.textContent = "Ready";
-      statusBadge.className = "status-badge";
+      statusBadge.className = "footer-control status-badge";
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
       chat.finishAssistantMessage();
@@ -1638,7 +1684,7 @@ window.orbit.onAgentEvent((event) => {
       chat.addErrorMessage(msg);
       streaming = false;
       statusBadge.textContent = "error";
-      statusBadge.className = "status-badge error";
+      statusBadge.className = "footer-control status-badge error";
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
       // Clear any queued message on error so the indicator doesn't get stuck
@@ -1857,7 +1903,7 @@ statusBadge.addEventListener("click", () => {
 
 window.orbit.onAgentStatus((status, msg) => {
   statusBadge.textContent = msg || status;
-  statusBadge.className = "status-badge " + status;
+  statusBadge.className = "footer-control status-badge " + status;
 
   statusBadgeIsStuck = STUCK_STATUS.has(status);
   statusBadge.style.cursor = statusBadgeIsStuck ? "pointer" : "default";

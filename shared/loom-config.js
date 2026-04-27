@@ -35,6 +35,11 @@ export function loadConfig() {
   if (!raw.skills || !Array.isArray(raw.skills.repos) || raw.skills.repos.length === 0) {
     raw.skills = { repos: [...DEFAULT_SKILLS] };
   }
+  // Default execution mode: cloud (agent decides per-plan). Local sandboxes
+  // the project to local-only execution regardless of Galaxy credentials.
+  if (raw.executionMode !== "local" && raw.executionMode !== "cloud") {
+    raw.executionMode = "cloud";
+  }
   return raw;
 }
 

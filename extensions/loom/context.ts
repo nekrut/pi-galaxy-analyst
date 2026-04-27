@@ -81,10 +81,34 @@ ${lines.join("\n")}
 }
 
 /**
+ * Execution mode gate. When the user has set executionMode=local in
+ * config (footer toggle), the agent must not propose Galaxy steps even
+ * if Galaxy MCP is registered. Cloud mode is the default and the
+ * unrestricted, per-plan-routing behavior.
+ */
+function buildExecutionModeBlock(): string {
+  const cfg = loadConfig();
+  if (cfg.executionMode !== "local") return "";
+  return `## Execution mode: LOCAL
+
+The user has set this project to local-only for this session. **Do NOT
+propose Galaxy steps even if Galaxy MCP is registered.** All step
+routing must be \`[local]\`. When drafting a plan, mention this
+constraint so the user understands the sandbox is intentional and can
+flip the toggle to Cloud if they want Galaxy back.
+`;
+}
+
+/**
  * Galaxy connection status block — replaces the old Local|Remote toggle
  * with agent-side per-plan routing decisions.
  */
 function buildGalaxyContextBlock(): string {
+  const cfg = loadConfig();
+  // Local mode short-circuits — no Galaxy guidance, even if connected.
+  if (cfg.executionMode === "local") {
+    return "";
+  }
   const galaxyUrl = process.env.GALAXY_URL;
   const apiKey = process.env.GALAXY_API_KEY;
   const connected = Boolean(galaxyUrl && apiKey);
@@ -534,6 +558,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildParameterReviewBlock(),
       buildChatFormattingBlock(),
       buildNotebookWriteBlock(),
+      buildExecutionModeBlock(),
       buildGalaxyContextBlock(),
       buildSkillsContext(),
       buildLocalEnvContext(),
