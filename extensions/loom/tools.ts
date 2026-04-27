@@ -25,16 +25,14 @@ import {
   galaxyGet,
   type GalaxyInvocationResponse,
 } from "./galaxy-api";
-import { loadConfig } from "./config";
+import {
+  type ConfiguredSkillRepo,
+  listEnabledSkillRepos,
+  findSkillRepo,
+} from "./skills";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-
-interface ConfiguredSkillRepo {
-  name: string;
-  url: string;
-  branch: string;
-}
 
 /**
  * Resolve a GitHub repo URL like
@@ -58,35 +56,6 @@ function githubRawBase(repoUrl: string, branch: string): string | null {
   const cleanRepo = repo.replace(/\.git$/i, "");
   const cleanBranch = (branch || "main").replace(/^\/+|\/+$/g, "");
   return `https://raw.githubusercontent.com/${owner}/${cleanRepo}/${cleanBranch}`;
-}
-
-function listEnabledSkillRepos(): ConfiguredSkillRepo[] {
-  const cfg = loadConfig();
-  const repos = (cfg.skills?.repos ?? []) as Array<{
-    name?: string;
-    url?: string;
-    branch?: string;
-    enabled?: boolean;
-  }>;
-  const enabled: ConfiguredSkillRepo[] = [];
-  for (const r of repos) {
-    if (r?.enabled === false) continue;
-    if (typeof r?.name !== "string" || typeof r?.url !== "string") continue;
-    enabled.push({
-      name: r.name,
-      url: r.url,
-      branch: typeof r.branch === "string" && r.branch ? r.branch : "main",
-    });
-  }
-  return enabled;
-}
-
-function findSkillRepo(name: string | undefined): ConfiguredSkillRepo | null {
-  const enabled = listEnabledSkillRepos();
-  if (enabled.length === 0) return null;
-  if (!name) return enabled[0];
-  const match = enabled.find((r) => r.name === name);
-  return match || null;
 }
 
 export function registerPlanTools(pi: ExtensionAPI): void {

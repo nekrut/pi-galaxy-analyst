@@ -13,6 +13,7 @@ import { getState, getNotebookPath } from "./state";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { getRecentActivityEvents } from "./activity";
 import { loadConfig } from "./config";
+import { listEnabledSkillRepos } from "./skills";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -402,10 +403,10 @@ answers, and turn-by-turn dialogue that doesn't need persistence.
  * them and tell the agent to start at \`AGENTS.md\` or \`README.md\`.
  */
 function buildSkillsContext(): string {
-  const cfg = loadConfig();
-  const repos = (cfg.skills?.repos ?? []).filter(
-    (r) => r && typeof r.name === "string" && r.url && r.enabled !== false,
-  );
+  // Single source of truth — the same allowlist filter that gates
+  // the skills_fetch tool. If a hand-edited config sneaks in a
+  // disallowed repo, it doesn't reach the system prompt either.
+  const repos = listEnabledSkillRepos();
   if (repos.length === 0) return "";
 
   const sections: string[] = [];

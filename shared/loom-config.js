@@ -11,6 +11,31 @@ export const DEFAULT_SKILLS = [
   },
 ];
 
+/**
+ * Allowlist for skill-repo URLs. The agent treats fetched SKILL.md
+ * content as authoritative instructions, so an arbitrary third-party
+ * repo is a prompt-injection vector. For the alpha release we limit
+ * skill repos to github.com/galaxyproject/* — Galaxy-controlled,
+ * auditable. To relax, edit this constant or replace
+ * isAllowedSkillUrl() with a more permissive predicate.
+ */
+export const ALLOWED_SKILLS_PREFIX = "https://github.com/galaxyproject/";
+
+export function isAllowedSkillUrl(url) {
+  if (typeof url !== "string") return false;
+  let parsed;
+  try { parsed = new URL(url.trim()); } catch { return false; }
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.hostname.toLowerCase() !== "github.com") return false;
+  const cleaned = parsed.pathname
+    .toLowerCase()
+    .replace(/\.git\/*$/, "")
+    .replace(/\/+$/, "");
+  if (!cleaned.startsWith("/galaxyproject/")) return false;
+  // Require at least owner + repo segments (no /galaxyproject alone).
+  return cleaned.split("/").filter(Boolean).length >= 2;
+}
+
 export function getConfigDir() {
   return path.join(os.homedir(), ".loom");
 }

@@ -54,3 +54,5 @@ export function getConfigDir(): string;
 export function getConfigPath(): string;
 export function loadConfig(): LoomConfig;
 export function saveConfig(config: LoomConfig): void;
+export const ALLOWED_SKILLS_PREFIX: string;
+export function isAllowedSkillUrl(url: string): boolean;

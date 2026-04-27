@@ -7,6 +7,10 @@ import {
   LoomWidgetKey,
   decodeMarkdownWidget,
 } from "../../../shared/loom-shell-contract.js";
+import {
+  ALLOWED_SKILLS_PREFIX,
+  isAllowedSkillUrl,
+} from "../../../shared/loom-config.js";
 
 declare global {
   interface Window {
@@ -2101,7 +2105,7 @@ function makeSkillCell(
   const input = document.createElement("input");
   input.type = inputType;
   input.value = repo[field];
-  if (field === "url") input.placeholder = "https://github.com/owner/repo";
+  if (field === "url") input.placeholder = `${ALLOWED_SKILLS_PREFIX}<repo>`;
   if (field === "branch") input.placeholder = "main";
   input.addEventListener("input", () => {
     prefsSkillsState[idx][field] = input.value.trim();
@@ -2219,6 +2223,21 @@ async function savePreferences(): Promise<void> {
       branch: r.branch.trim() || "main",
       enabled: r.enabled,
     }));
+
+  // Allowlist: alpha release accepts only github.com/galaxyproject/* repos.
+  // The brain enforces the same predicate as defense-in-depth, but we block
+  // at save time so the user sees the reason instead of a silent drop.
+  const disallowed = cleaned.filter((r) => !isAllowedSkillUrl(r.url));
+  if (disallowed.length > 0) {
+    const list = disallowed.map((r) => `  • ${r.name}: ${r.url}`).join("\n");
+    alert(
+      `Skills repos must live under ${ALLOWED_SKILLS_PREFIX}* (alpha ` +
+      `restriction). Disallowed entries:\n\n${list}\n\n` +
+      `Fix or remove them before saving.`,
+    );
+    return;
+  }
+
   config.skills = { repos: cleaned };
 
   const result = await window.orbit.saveConfig(config as Record<string, unknown>);
