@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, powerMonitor, nativeImage, protocol, net } from "electron";
+import { app, BrowserWindow, Menu, dialog, powerMonitor, nativeImage, protocol, net, shell } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs";
 import path from "node:path";
@@ -84,25 +84,62 @@ function getDefaultCwd(): string {
 }
 
 /**
- * Open an external URL in a new BrowserWindow. Used for things like IGV.js
- * viewers served on localhost, HTML reports, external docs — anything that
- * would otherwise navigate the main window away from the Orbit renderer.
+ * Decide what to do with a URL the renderer asked to open.
+ *
+ * - http(s) on localhost / 127.* / ::1 → open in our own BrowserWindow
+ *   (this is how IGV.js viewers, local report servers, etc. work).
+ * - https:// elsewhere → hand off to the OS browser via shell.openExternal
+ *   so the user's normal trust UI (cert warnings, password manager) applies.
+ * - http:// elsewhere, mailto:, tel:, file:, javascript:, anything else →
+ *   hand off to shell.openExternal, which will refuse javascript:/file:
+ *   on every platform.
+ *
+ * Previously this opened ANY URL in a privileged BrowserWindow with
+ * `sandbox: false`, meaning a notebook link to javascript:foo() or a
+ * malicious http page could run code in a renderer that shares the
+ * orbit-artifact protocol privileges.
  */
 function openExternalUrlWindow(url: string): void {
-  const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    title: url,
-    webPreferences: {
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  win.setMenuBarVisibility(true);
-  win.loadURL(url).catch((err) => {
-    log("failed to load external url:", url, err);
-  });
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    log("openExternalUrlWindow rejected — not a valid URL:", url);
+    return;
+  }
+  const proto = parsed.protocol.toLowerCase();
+  const host = parsed.hostname.toLowerCase();
+  const isLoopback = host === "localhost" || host.startsWith("127.") || host === "::1";
+
+  if ((proto === "http:" || proto === "https:") && isLoopback) {
+    const win = new BrowserWindow({
+      width: 1400,
+      height: 900,
+      title: parsed.host,
+      webPreferences: {
+        // Match the main window's sandbox stance — flip to true once
+        // chrome-sandbox SUID is set up (C2b).
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+      },
+    });
+    win.setMenuBarVisibility(true);
+    win.loadURL(url).catch((err) => log("failed to load loopback url:", url, err));
+    return;
+  }
+
+  if (proto === "https:") {
+    shell.openExternal(url).catch((err) => log("openExternal failed:", url, err));
+    return;
+  }
+
+  // http://non-loopback, mailto:, tel:, file:, javascript:, etc. — defer to
+  // the OS so its own policies kick in (mailto opens the mail client, etc.).
+  // shell.openExternal refuses javascript: and file: as a hard rule.
+  log("openExternalUrlWindow → shell.openExternal:", url);
+  shell.openExternal(url).catch((err) => log("openExternal refused:", url, err));
 }
 
 function createWindow(cwd: string): void {
