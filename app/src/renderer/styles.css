@@ -428,6 +428,14 @@ body:not(.artifact-collapsed) #artifact-toggle {
   display: none;
 }
 
+/* Class-level outline: none above kills the default browser ring at the
+   same specificity as *:focus-visible; restore a keyboard-only focus ring
+   so a11y users editing a file see where their caret is. */
+.file-viewer-editor:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .file-viewer-preview {
   flex: 1;
   overflow-y: auto;
