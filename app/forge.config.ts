@@ -218,12 +218,37 @@ const config: ForgeConfig = {
   makers: [
     {
       name: "@electron-forge/maker-zip",
-      platforms: ["darwin", "linux"],
+      platforms: ["darwin", "linux", "win32"],
     },
     {
       name: "@electron-forge/maker-dmg",
       config: {
         format: "ULFO",
+      },
+    },
+    {
+      name: "@electron-forge/maker-squirrel",
+      config: {
+        name: "Orbit",
+        // Squirrel is happy unsigned for dev/internal builds; production
+        // distribution will need a code-signing cert configured here.
+      },
+    },
+    {
+      name: "@electron-forge/maker-deb",
+      config: {
+        options: {
+          maintainer: "Galaxy Project contributors",
+          homepage: "https://galaxyproject.org",
+        },
+      },
+    },
+    {
+      name: "@electron-forge/maker-rpm",
+      config: {
+        options: {
+          homepage: "https://galaxyproject.org",
+        },
       },
     },
   ],
