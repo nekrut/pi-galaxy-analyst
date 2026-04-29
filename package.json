@@ -47,7 +47,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke:pack": "node scripts/smoke-pack.mjs",
+    "prepublishOnly": "npm run typecheck && npm test && npm run smoke:pack"
   },
   "devDependencies": {
     "@mariozechner/pi-ai": "^0.70.0",
