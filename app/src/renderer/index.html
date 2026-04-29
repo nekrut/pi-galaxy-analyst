@@ -440,21 +440,21 @@
         </div>
         <div class="prefs-row">
           <label for="report-title">Title</label>
-          <input id="report-title" type="text" placeholder="Short summary" />
+          <input id="report-title" type="text" placeholder="Short summary" required />
         </div>
         <div class="prefs-row">
           <label for="report-body">What happened?</label>
           <textarea id="report-body" rows="6" placeholder="Steps to reproduce, expected vs actual, screenshots if relevant..."></textarea>
         </div>
         <div class="report-options">
-          <label><input type="checkbox" id="report-include-sysinfo" checked /> Include system info</label>
-          <label><input type="checkbox" id="report-include-logs" checked /> Include logs</label>
+          <label><input type="checkbox" id="report-include-sysinfo" /> Include system info</label>
+          <label><input type="checkbox" id="report-include-logs" /> Include logs</label>
         </div>
         <details class="report-disclosure">
           <summary>What's in this report?</summary>
-          <p><b>System info:</b> Orbit version, OS, Electron/Node versions, LLM model + provider name (no API key), Galaxy connection state (no credentials), current working directory.</p>
-          <p><b>Logs:</b> last 30 lines of <code>activity.jsonl</code> (if present in the cwd) and last ~150 lines of the in-app shell stream.</p>
-          <p>Both are off by toggle if you'd rather not share them.</p>
+          <p><b>System info:</b> Orbit version, OS, Electron/Node versions, LLM model + provider name (no API key), Galaxy connection state (no credentials).</p>
+          <p><b>Logs:</b> last 30 lines of <code>activity.jsonl</code> (if present in the cwd) and last ~150 lines of the in-app shell stream. These can include filenames, tool arguments, and command output -- review the issue body on GitHub before you click Submit there.</p>
+          <p>Both are off by default. Opt in only when you've decided you're OK sharing them on a public issue.</p>
         </details>
       </div>
       <div class="modal-footer">

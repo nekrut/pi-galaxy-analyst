@@ -2334,8 +2334,11 @@ const REPORT_BODY_CAP = 6000;
 function openReportModal(): void {
   reportTitle.value = "";
   reportBody.value = "";
-  reportIncludeSysinfo.checked = true;
-  reportIncludeLogs.checked = true;
+  // Default to no auto-collected data. The destination is a public GitHub
+  // issue, so opt-in beats opt-out -- forces the user to read the
+  // disclosure before sharing logs or sysinfo.
+  reportIncludeSysinfo.checked = false;
+  reportIncludeLogs.checked = false;
   reportOverlay.classList.remove("hidden");
   reportTitle.focus();
 }
@@ -2353,15 +2356,16 @@ async function buildReportBody(userText: string): Promise<string> {
         llm?: { provider?: string; model?: string };
         galaxy?: { active: string | null };
       };
-      const cwd = await window.orbit.getCwd().catch(() => "(unknown)");
+      // Deliberately not including cwd -- a path like /home/<user>/<project>
+      // leaks both username and project name to a public issue, and isn't
+      // useful for debugging.
       sections.push(
         `## System info\n` +
         `- Orbit: ${info.appVersion}\n` +
         `- Platform: ${info.platform} ${info.arch}\n` +
         `- Electron: ${info.electronVersion}, Chrome: ${info.chromeVersion}, Node: ${info.nodeVersion}\n` +
         `- LLM: ${cfg.llm?.provider ?? "(none)"} / ${cfg.llm?.model ?? "(none)"}\n` +
-        `- Galaxy: ${cfg.galaxy?.active ? "configured" : "not configured"}\n` +
-        `- cwd: \`${cwd}\``
+        `- Galaxy: ${cfg.galaxy?.active ? "configured" : "not configured"}`
       );
     } catch (err) {
       sections.push(`## System info\n(failed to collect: ${err instanceof Error ? err.message : String(err)})`);
@@ -2409,7 +2413,10 @@ document.addEventListener("keydown", (e) => {
 reportSubmit.addEventListener("click", async () => {
   const title = reportTitle.value.trim();
   if (!title) {
-    reportTitle.focus();
+    // Native validity tooltip is consistent with how form validation works
+    // elsewhere in the app and avoids silent failure when the button click
+    // doesn't appear to do anything.
+    reportTitle.reportValidity();
     return;
   }
   reportSubmit.disabled = true;
