@@ -150,22 +150,32 @@ resources before deciding what runs where:
    - Heavy compute (alignment, large variant calling, big assemblies,
      long-running BLAST, etc.) → check Galaxy tool availability
      (\`galaxy_search_tools_by_name\`); if installed, mark step Galaxy.
-   - Light/exploratory (parsing, summarization, awk/sed/jq/small
-     scripts) → mark step local.
+   - **Gap-filling glue** between Galaxy steps (a small filter,
+     reformatter, joiner, column-trimmer, etc. that isn't in the
+     public tool panel) → **prefer a user-defined tool** over a local
+     script. Create it once with \`galaxy_create_user_tool\` and run it
+     with \`galaxy_run_user_tool\`. Keeps the analysis on Galaxy,
+     preserves provenance, stays reusable across histories. Default to
+     this whenever the glue is something a future user might want to
+     run again.
+   - Light/exploratory (parsing, summarization, awk/sed/jq one-offs,
+     truly throwaway probes) → mark step local. Reserve for work that
+     doesn't belong in the durable record.
 3. Document routing in the plan section header and inline per-step:
    \`## Plan A: chrM Variant Calling [hybrid]\`
    \`Step 3: BWA alignment (Galaxy: bwa-mem2/2.2.1)\`
-   \`Step 4: VCF filter (local awk)\`
+   \`Step 4: VCF filter (Galaxy UDT: vcf_min_depth)\`
+   \`Step 5: quick stat probe (local awk)\`
 
 ### Galaxy terminology
 
 - **User-defined tool** ("UDT"): a server-side custom tool the user
-  registers in their Galaxy account. Created/managed via Galaxy API
-  (and the Galaxy MCP if/when the version installed exposes UDT
-  endpoints). **Do not generate old-style XML tool wrappers locally
-  when the user asks for a UDT** — that's a different concept (legacy
-  ToolShed tools). If the connected Galaxy MCP doesn't expose UDT
-  tools, say so and point the user to the Galaxy UI rather than
+  registers in their Galaxy account, runs unprivileged. The connected
+  Galaxy MCP exposes the full lifecycle: \`galaxy_create_user_tool\`,
+  \`galaxy_list_user_tools\`, \`galaxy_run_user_tool\`,
+  \`galaxy_delete_user_tool\`. **Do not generate old-style XML tool
+  wrappers locally when the user asks for a UDT** — that's a different
+  concept (legacy ToolShed tools). Reach for the MCP tools rather than
   inventing a local workaround.
 - **Workflow invocation**: a single run of a Galaxy workflow on a
   history. Tracked in the notebook via \`loom-invocation\` blocks.
