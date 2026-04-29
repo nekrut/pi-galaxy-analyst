@@ -1,5 +1,5 @@
 {
-  "name": "loom",
+  "name": "@galaxyproject/loom",
   "version": "0.1.0",
   "type": "module",
   "description": "AI co-scientist for Galaxy bioinformatics, built on Pi.dev",
@@ -15,6 +15,16 @@
     "type": "git",
     "url": "https://github.com/galaxyproject/pi-galaxy-analyst"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin/",
+    "extensions/",
+    "shared/",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "loom": "./bin/loom.js"
   },
