@@ -1177,6 +1177,90 @@ body:not(.artifact-collapsed) #artifact-toggle {
   overflow: hidden;
 }
 
+#activity-galaxy-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--masthead);
+  color: var(--text);
+  overflow: hidden;
+  max-height: 40%;
+}
+#activity-galaxy-section.hidden {
+  display: none;
+}
+
+#galaxy-invocations-body {
+  overflow-y: auto;
+  padding: 6px 12px 8px;
+}
+
+.galaxy-invocation-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.galaxy-invocation-row:last-child {
+  border-bottom: 0;
+}
+
+.galaxy-invocation-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.galaxy-invocation-label {
+  flex: 1;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.galaxy-invocation-counts {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.galaxy-invocation-bar {
+  margin-top: 4px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.galaxy-invocation-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+.galaxy-invocation-row.failed .galaxy-invocation-bar-fill {
+  background: var(--error);
+}
+.galaxy-invocation-row.completed .galaxy-invocation-bar-fill {
+  background: var(--success);
+}
+
+.galaxy-invocation-meta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+#galaxy-invocations-count {
+  background: var(--accent);
+  color: var(--galaxy-dark);
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+#galaxy-invocations-count.zero {
+  background: var(--bg-deep);
+  color: var(--text-dim);
+}
+
 .activity-section-header {
   display: flex;
   align-items: center;

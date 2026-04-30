@@ -637,14 +637,21 @@ export async function checkInvocations(specificId: string | undefined, signal?: 
         );
 
         const summary = { ok: 0, running: 0, queued: 0, error: 0, other: 0 };
+        let totalJobs = 0;
+        let completedSteps = 0;
         for (const invStep of inv.steps) {
+          let stepJobs = 0;
+          let stepOk = 0;
           for (const job of invStep.jobs) {
-            if (job.state === "ok") summary.ok++;
+            stepJobs++;
+            totalJobs++;
+            if (job.state === "ok") { summary.ok++; stepOk++; }
             else if (job.state === "running") summary.running++;
             else if (job.state === "queued" || job.state === "new" || job.state === "waiting") summary.queued++;
             else if (job.state === "error" || job.state === "deleted") summary.error++;
             else summary.other++;
           }
+          if (stepJobs > 0 && stepJobs === stepOk) completedSteps++;
         }
 
         let autoAction: string | undefined;
@@ -661,10 +668,21 @@ export async function checkInvocations(specificId: string | undefined, signal?: 
           autoAction = "failed";
         }
 
-        if (nextStatus !== block.status || nextSummary !== block.summary) {
-          const updated: InvocationYaml = { ...block, status: nextStatus, summary: nextSummary };
-          content = upsertInvocationBlock(content, updated);
-        }
+        // Always update the block — even if the rolled-up status didn't
+        // change, the per-poll counters (and last_polled_at) did, and the
+        // renderer wants those for the live progress bar.
+        const updated: InvocationYaml = {
+          ...block,
+          status: nextStatus,
+          summary: nextSummary,
+          totalSteps: inv.steps.length,
+          completedSteps,
+          totalJobs,
+          completedJobs: summary.ok,
+          failedJobs: summary.error,
+          lastPolledAt: new Date().toISOString(),
+        };
+        content = upsertInvocationBlock(content, updated);
 
         results.push({
           invocationId: block.invocationId,

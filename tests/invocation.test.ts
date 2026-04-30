@@ -150,3 +150,34 @@ describe("upsertInvocationBlock", () => {
     expect(parsed.find((p) => p.invocationId === "inv-b")?.label).toBe("B");
   });
 });
+
+describe("progress counters", () => {
+  it("round-trips total_steps / completed_steps / total_jobs / completed_jobs / failed_jobs / last_polled_at", () => {
+    const original = makeInvocation({
+      totalSteps: 5,
+      completedSteps: 3,
+      totalJobs: 27,
+      completedJobs: 12,
+      failedJobs: 0,
+      lastPolledAt: "2026-04-29T14:31:12Z",
+    });
+    const yaml = renderInvocationYaml(original);
+    const [parsed] = findInvocationBlocks(yaml);
+    expect(parsed.totalSteps).toBe(5);
+    expect(parsed.completedSteps).toBe(3);
+    expect(parsed.totalJobs).toBe(27);
+    expect(parsed.completedJobs).toBe(12);
+    expect(parsed.failedJobs).toBe(0);
+    expect(parsed.lastPolledAt).toBe("2026-04-29T14:31:12Z");
+  });
+
+  it("omits counter fields when undefined (older blocks round-trip cleanly)", () => {
+    const yaml = renderInvocationYaml(makeInvocation());
+    expect(yaml).not.toContain("total_steps");
+    expect(yaml).not.toContain("completed_jobs");
+    expect(yaml).not.toContain("last_polled_at");
+    const [parsed] = findInvocationBlocks(yaml);
+    expect(parsed.totalSteps).toBeUndefined();
+    expect(parsed.completedJobs).toBeUndefined();
+  });
+});
