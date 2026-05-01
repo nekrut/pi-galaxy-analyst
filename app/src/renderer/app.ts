@@ -2353,7 +2353,12 @@ const reportBody = document.getElementById("report-body") as HTMLTextAreaElement
 const reportIncludeSysinfo = document.getElementById("report-include-sysinfo") as HTMLInputElement;
 const reportIncludeLogs = document.getElementById("report-include-logs") as HTMLInputElement;
 
-const REPORT_BODY_CAP = 6000;
+// Budget for the *encoded* body in the GitHub URL. The whole URL
+// (~"https://github.com/galaxyproject/loom/issues/new?title=…&body=…")
+// has to fit within ~8KB or the OS/browser refuses to open it. Most
+// punctuation triples in length once URL-encoded (a newline becomes
+// "%0A"), so the raw body has to be capped well below 8000 chars.
+const REPORT_URL_BUDGET = 7000;
 
 function openReportModal(): void {
   reportTitle.value = "";
@@ -2397,27 +2402,44 @@ async function buildReportBody(userText: string): Promise<string> {
   }
 
   if (reportIncludeLogs.checked) {
-    // Activity tail (last 30 lines of activity.jsonl, if present)
+    // Activity tail — last 15 events, summarized to {timestamp} {kind}.
+    // The full payload column has stuffed-JSON tool results that explode
+    // 3–5× under URL-encoding and quickly blow GitHub's URL budget.
     try {
       const res = await window.orbit.readFile("activity.jsonl");
       if (res.ok) {
         const text = new TextDecoder("utf-8").decode(res.bytes);
-        const lines = text.split("\n").filter(Boolean);
-        const tail = lines.slice(-30).join("\n");
-        sections.push("## activity.jsonl (last 30 lines)\n```\n" + tail + "\n```");
+        const lines = text.split("\n").filter(Boolean).slice(-15);
+        const summarized = lines.map((line) => {
+          try {
+            const e = JSON.parse(line) as { timestamp?: string; kind?: string; source?: string };
+            return `${e.timestamp ?? "?"} ${e.kind ?? "?"}${e.source ? " (" + e.source + ")" : ""}`;
+          } catch {
+            return line.slice(0, 80);
+          }
+        });
+        sections.push("## activity.jsonl (last 15 events, summarized)\n```\n" + summarized.join("\n") + "\n```");
       }
     } catch { /* file missing or unreadable — skip */ }
 
-    // Shell tail (last ~150 lines of in-memory ShellPanel)
-    const shellTail = shell.tail(150);
+    // Shell tail (last ~80 lines of in-memory ShellPanel)
+    const shellTail = shell.tail(80);
     if (shellTail.trim()) {
-      sections.push("## Shell stream (last ~150 lines)\n```\n" + shellTail + "\n```");
+      sections.push("## Shell stream (last ~80 lines)\n```\n" + shellTail + "\n```");
     }
   }
 
   let body = sections.join("\n\n");
-  if (body.length > REPORT_BODY_CAP) {
-    body = body.slice(0, REPORT_BODY_CAP - 50) + "\n\n…(truncated)";
+  // Cap on the URL-encoded length, not the raw length — a body full of
+  // backslash-quoted JSON expands ~3× under encodeURIComponent. Trim
+  // raw chars until the encoded form fits the budget.
+  if (encodeURIComponent(body).length > REPORT_URL_BUDGET) {
+    const marker = "\n\n…(truncated)";
+    const markerCost = encodeURIComponent(marker).length;
+    while (encodeURIComponent(body).length + markerCost > REPORT_URL_BUDGET) {
+      body = body.slice(0, Math.floor(body.length * 0.9));
+    }
+    body = body + marker;
   }
   return body;
 }
