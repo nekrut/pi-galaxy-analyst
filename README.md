@@ -494,7 +494,7 @@ Loom registers a small set of extension tools. Plans, decisions, results, and in
 | **Skills** | `skills_fetch` (fetch SKILL.md / reference docs from configured repos) |
 | **Multi-agent (experimental)** | `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`) |
 
-Galaxy MCP (registered separately when credentials are present) provides `galaxy_connect`, `galaxy_search_tools_by_name`, `galaxy_run_tool`, `galaxy_invoke_workflow`, `galaxy_search_iwc`, `get_iwc_workflows`, `import_workflow_from_iwc`, history/dataset operations, and more.
+Galaxy MCP (registered separately when credentials are present) provides `galaxy_connect`, `galaxy_search_tools_by_name`, `galaxy_run_tool`, `galaxy_invoke_workflow`, `galaxy_search_iwc`, `get_iwc_workflows`, `import_workflow_from_iwc`, user-defined tool lifecycle (`galaxy_create_user_tool`, `galaxy_list_user_tools`, `galaxy_run_user_tool`, `galaxy_delete_user_tool`), history/dataset operations, and more.
 
 ## Tech stack
 
