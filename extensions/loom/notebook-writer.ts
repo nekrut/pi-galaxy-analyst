@@ -130,6 +130,16 @@ export interface InvocationYaml {
   submittedAt: string;
   status: "in_progress" | "completed" | "failed";
   summary?: string;
+  // Progress counters — populated by galaxy_invocation_check_*. Persisted
+  // back to the YAML so the Orbit renderer can draw a live progress bar
+  // without each side polling Galaxy independently. Optional so older
+  // blocks (and the initial record-time write) round-trip cleanly.
+  totalSteps?: number;
+  completedSteps?: number;
+  totalJobs?: number;
+  completedJobs?: number;
+  failedJobs?: number;
+  lastPolledAt?: string;
 }
 
 const INVOCATION_FENCE_OPEN = "```loom-invocation";
@@ -149,8 +159,14 @@ export function renderInvocationYaml(inv: InvocationYaml): string {
     `submitted_at: ${inv.submittedAt}`,
     `status: ${inv.status}`,
     `summary: ${escapeYaml(inv.summary ?? "")}`,
-    INVOCATION_FENCE_CLOSE,
   ];
+  if (inv.totalSteps !== undefined) lines.push(`total_steps: ${inv.totalSteps}`);
+  if (inv.completedSteps !== undefined) lines.push(`completed_steps: ${inv.completedSteps}`);
+  if (inv.totalJobs !== undefined) lines.push(`total_jobs: ${inv.totalJobs}`);
+  if (inv.completedJobs !== undefined) lines.push(`completed_jobs: ${inv.completedJobs}`);
+  if (inv.failedJobs !== undefined) lines.push(`failed_jobs: ${inv.failedJobs}`);
+  if (inv.lastPolledAt) lines.push(`last_polled_at: ${inv.lastPolledAt}`);
+  lines.push(INVOCATION_FENCE_CLOSE);
   return lines.join("\n") + "\n";
 }
 
@@ -252,6 +268,12 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
   ) {
     return null;
   }
+  const numField = (key: string): number | undefined => {
+    const raw = fields[key];
+    if (raw === undefined || raw === "") return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  };
   return {
     invocationId: fields.invocation_id,
     galaxyServerUrl: fields.galaxy_server_url,
@@ -260,6 +282,12 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
     submittedAt: fields.submitted_at,
     status,
     summary: fields.summary || undefined,
+    totalSteps: numField("total_steps"),
+    completedSteps: numField("completed_steps"),
+    totalJobs: numField("total_jobs"),
+    completedJobs: numField("completed_jobs"),
+    failedJobs: numField("failed_jobs"),
+    lastPolledAt: fields.last_polled_at || undefined,
   };
 }
 

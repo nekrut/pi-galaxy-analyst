@@ -3,6 +3,7 @@ import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
 import { FileViewer } from "./files/file-viewer.js";
+import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import {
   LoomWidgetKey,
   decodeMarkdownWidget,
@@ -376,9 +377,11 @@ document.addEventListener("mouseup", () => {
 
 // Initial tree population + live updates from the main-process watcher.
 void filesPanel.refresh();
+void refreshGalaxyInvocations(window.orbit);
 window.orbit.onFilesChanged(() => {
   void filesPanel.refresh();
   void fileViewer.refreshFromDisk();
+  void refreshGalaxyInvocations(window.orbit);
 });
 
 // ── Galaxy connection indicator ──────────────────────────────────────────────
@@ -719,6 +722,7 @@ function applyCwdChange(dir: string): void {
   artifacts.hideFileTab();
   filesPanel.reset();
   void filesPanel.refresh();
+  void refreshGalaxyInvocations(window.orbit);
 }
 
 cwdChangeBtn.addEventListener("click", async () => {
