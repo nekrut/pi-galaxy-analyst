@@ -7,6 +7,7 @@ import { app, type BrowserWindow } from "electron";
 import { loadConfig } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
 import { loadSessionHistory } from "./session-replay.js";
+import { collectDescendantsOf } from "./proc-monitor.js";
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -418,6 +419,39 @@ export class AgentManager {
     const json = JSON.stringify(obj);
     log("→ stdin:", json.slice(0, 200));
     this.process.stdin.write(json + "\n");
+  }
+
+  /**
+   * Stop button handler — signals the brain AND kills its tool subprocess
+   * descendants. pi-coding-agent's abort flag only fires at the next agent
+   * loop tick, which means a long bash → fastp keeps running until natural
+   * exit (#64). Walk the brain's process tree and SIGTERM everything,
+   * with a 3s grace before SIGKILL.
+   */
+  async abort(): Promise<void> {
+    this.send({ type: "abort" });
+    const brainPid = this.process?.pid;
+    if (!brainPid) return;
+    try {
+      const descendants = await collectDescendantsOf(brainPid);
+      if (descendants.length === 0) return;
+      log(`abort: SIGTERM ${descendants.length} descendant(s)`);
+      for (const p of descendants) {
+        try { process.kill(p.pid, "SIGTERM"); } catch { /* already gone */ }
+      }
+      // After 3s, SIGKILL anything still alive.
+      setTimeout(() => {
+        for (const p of descendants) {
+          try {
+            process.kill(p.pid, 0); // probe
+            log(`abort: SIGKILL stuck pid ${p.pid}`);
+            try { process.kill(p.pid, "SIGKILL"); } catch { /* gone now */ }
+          } catch { /* already exited */ }
+        }
+      }, 3000);
+    } catch (err) {
+      log("abort: failed to walk descendants:", err);
+    }
   }
 
   sendCommand(obj: Record<string, unknown>): Promise<unknown> {

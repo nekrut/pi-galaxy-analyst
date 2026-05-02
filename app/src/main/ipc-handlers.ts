@@ -141,7 +141,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
   ipcMain.handle("agent:abort", async () => {
     log("abort");
-    agent.send({ type: "abort" });
+    await agent.abort();
   });
 
   ipcMain.handle("agent:new-session", async () => {
