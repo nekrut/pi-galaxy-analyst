@@ -26,19 +26,24 @@ jobs:
       - name: Install root deps
         run: npm ci
 
-      - name: Typecheck (root)
-        run: npm run typecheck
-
-      - name: Test (root)
-        run: npm test
-
+      # App deps are installed BEFORE the root test step on purpose:
+      # tests/agent-manager.test.ts imports through app/src/main/agent.ts →
+      # secure-config.ts → "electron", and electron lives in
+      # app/node_modules. Without app/ deps the root vitest run fails with
+      # ERR_MODULE_NOT_FOUND on electron.
       - name: Install app deps
         working-directory: app
         run: npm ci
 
+      - name: Typecheck (root)
+        run: npm run typecheck
+
       - name: Typecheck (app)
         working-directory: app
         run: npx tsc --noEmit
+
+      - name: Test (root)
+        run: npm test
 
       - name: Package Electron app
         working-directory: app
