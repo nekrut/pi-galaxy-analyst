@@ -104,8 +104,17 @@ export class FileViewer {
   /**
    * Replace the container with a viewer for `relPath`. Returns true if the
    * open went ahead, false if the user cancelled due to unsaved changes.
+   *
+   * `preview` is set when bytes is a head-only excerpt of a file too large
+   * for full read; the text view renders read-only with a banner explaining
+   * the truncation (#58).
    */
-  open(relPath: string, bytes: Uint8Array, size: number): boolean {
+  open(
+    relPath: string,
+    bytes: Uint8Array,
+    size: number,
+    preview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean },
+  ): boolean {
     if (this.dirty && this.currentPath && this.currentPath !== relPath) {
       const ok = window.confirm(`Discard unsaved changes in ${this.currentPath}?`);
       if (!ok) return false;
@@ -126,7 +135,7 @@ export class FileViewer {
     root.className = "file-viewer-root";
 
     if (this.currentKind === "text") {
-      this.renderText(root, relPath, bytes);
+      this.renderText(root, relPath, bytes, preview, size);
     } else if (this.currentKind === "image") {
       this.renderImage(root, relPath, bytes, size);
     } else if (this.currentKind === "pdf") {
@@ -270,10 +279,48 @@ export class FileViewer {
     }
   }
 
-  private renderText(root: HTMLElement, relPath: string, bytes: Uint8Array): void {
+  private renderText(
+    root: HTMLElement,
+    relPath: string,
+    bytes: Uint8Array,
+    headPreview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean },
+    size?: number,
+  ): void {
     const ext = extOf(relPath);
     const isMarkdown = ext === ".md";
     const text = new TextDecoder("utf-8").decode(bytes);
+
+    // Head-preview path: render read-only with a banner. Skip the
+    // editor + Save toolbar + markdown preview toggle entirely — the
+    // user can't usefully edit a 200 MB file's first 10 lines.
+    if (headPreview) {
+      const toolbar = document.createElement("div");
+      toolbar.className = "file-viewer-toolbar";
+      const filename = document.createElement("span");
+      filename.className = "file-viewer-filename";
+      filename.textContent = relPath;
+      filename.title = relPath;
+      toolbar.appendChild(filename);
+      const sizeLabel = document.createElement("span");
+      sizeLabel.className = "file-viewer-status";
+      sizeLabel.textContent = typeof size === "number" ? formatBytes(size) : "";
+      toolbar.appendChild(sizeLabel);
+      root.appendChild(toolbar);
+
+      const banner = document.createElement("div");
+      banner.className = "file-viewer-preview-banner";
+      const truncated = headPreview.byteBudgetHit
+        ? `Preview only — first ${headPreview.lineCount} lines (truncated mid-line: lines longer than 64 KB are clipped).`
+        : `Preview only — first ${headPreview.lineCount} lines.`;
+      banner.textContent = `${truncated} Open externally to see the full file.`;
+      root.appendChild(banner);
+
+      const pre = document.createElement("pre");
+      pre.className = "file-viewer-preview-text";
+      pre.textContent = text;
+      root.appendChild(pre);
+      return;
+    }
 
     // Toolbar ---------------------------------------------------------
     const toolbar = document.createElement("div");

@@ -55,7 +55,13 @@ export interface OrbitAPI {
     | { ok: false; error: string }
   >;
   readFile(relPath: string): Promise<
-    | { ok: true; size: number; bytes: Uint8Array }
+    | {
+        ok: true;
+        size: number;
+        bytes: Uint8Array;
+        // Set when bytes is a head-only excerpt of a file too large for full read.
+        preview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean };
+      }
     | { ok: false; error: string; size?: number }
   >;
   writeFile(relPath: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;

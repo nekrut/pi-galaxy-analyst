@@ -484,6 +484,29 @@ body:not(.artifact-collapsed) #artifact-toggle {
   color: var(--error);
 }
 
+.file-viewer-preview-banner {
+  background: var(--accent-bg);
+  border-bottom: 1px solid var(--accent);
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.file-viewer-preview-text {
+  flex: 1;
+  width: 100%;
+  margin: 0;
+  padding: 12px;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
 /* Galaxy connection indicator — pure color/dot variant atop .footer-control. */
 .status-dot::before {
   content: "";

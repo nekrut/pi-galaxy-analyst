@@ -58,7 +58,7 @@ async function openFileFromTree(relPath: string): Promise<void> {
     chat.addErrorMessage(`Failed to open ${relPath}${sizeHint}: ${res.error}`);
     return;
   }
-  const proceed = fileViewer.open(relPath, res.bytes, res.size);
+  const proceed = fileViewer.open(relPath, res.bytes, res.size, res.preview);
   if (proceed) {
     artifacts.showFileTab();
     setArtifactCollapsed(false);
