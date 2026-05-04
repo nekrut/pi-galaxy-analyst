@@ -234,6 +234,46 @@ Lifecycle (lazy):
 If neither conda nor mamba is installed, tell the user once and ask
 whether to fall back to system tools (non-reproducible) or abort.
 
+### Compressed inputs
+
+Keep FASTQ / VCF / SAM data **gzip-compressed at every step**. Modern
+bioinformatics tools accept \`.fastq.gz\` / \`.vcf.gz\` / \`.sam.gz\`
+natively — fastp, bwa, bowtie2, STAR, hisat2, salmon, samtools, seqkit,
+cutadapt, bbduk, kraken2, minimap2, fastqc all read gzipped input. **Do
+not** call \`gunzip\`, \`zcat … > foo.fastq\`, or any other decompression
+step as setup. Decompressing a typical short-read library wastes 4-5×
+disk and tens of seconds per file for nothing. If a tool truly requires
+uncompressed input, name it explicitly in the plan with a one-line
+justification.
+
+### Machine capacity
+
+Before launching a heavy local tool, check available CPU + memory and
+pass the right thread/process flag — most bioinformatics tools default
+to **single-threaded**, so a 16-core machine sits at ~6% utilization
+while the user waits 16× longer than necessary.
+
+- **CPU:** \`nproc\` (Linux) / \`sysctl -n hw.ncpu\` (macOS). Leave 2 cores
+  free for the OS and the agent itself; pass the rest to the tool.
+- **Memory:** \`free -m\` (Linux) / \`vm_stat\` (macOS). Don't oversubscribe;
+  STAR genome generation alone wants ~30 GB.
+
+Common thread flags:
+
+| Tool       | Flag                  |
+| ---------- | --------------------- |
+| fastp      | \`-w N\`              |
+| bwa mem    | \`-t N\`              |
+| bowtie2    | \`-p N\`              |
+| samtools   | \`-@ N\` (sort/view)  |
+| STAR       | \`--runThreadN N\`    |
+| hisat2     | \`-p N\`              |
+| salmon     | \`-p N\`              |
+| kraken2    | \`--threads N\`       |
+| minimap2   | \`-t N\`              |
+| fastqc     | \`-t N\`              |
+| cutadapt   | \`-j N\`              |
+
 ### Bash timeouts on long-running tools
 
 Pi's \`bash\` tool's \`timeout\` is **optional** and in **seconds**. When
