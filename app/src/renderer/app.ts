@@ -1327,12 +1327,13 @@ async function switchModelByAlias(originalText: string, alias: string): Promise<
   renderModelIndicator();
 
   if (switchingProvider) {
-    chat.addErrorMessage(
-      `Switched to ${chosen.provider} / ${chosen.model.id}. Agent restarting… ` +
-      `(if you don't have a ${chosen.provider} API key set in Preferences, the agent will fail to start)`
+    chat.addInfoMessage(
+      `<i>Changed model to <code>${chosen.model.id}</code> ` +
+      `(provider: ${chosen.provider}). Agent restarting…</i><br>` +
+      `<small>If you don't have a ${chosen.provider} API key set in Preferences, the agent will fail to start.</small>`
     );
   } else {
-    chat.addErrorMessage(`Model switched to ${chosen.model.id}. Agent restarting…`);
+    chat.addInfoMessage(`<i>Changed model to <code>${chosen.model.id}</code>. Agent restarting…</i>`);
   }
 }
 
@@ -2359,6 +2360,11 @@ async function savePreferences(): Promise<void> {
 
   config.skills = { repos: cleaned };
 
+  // Snapshot the model name BEFORE the save so we can mention it in the
+  // info card if it actually changed (vs. user toggling some other field
+  // and not touching the model — that case shouldn't claim a model swap).
+  const prevModel = currentModel;
+
   const result = await window.orbit.saveConfig(config as Record<string, unknown>);
   if (result.success) {
     closePreferences();
@@ -2368,7 +2374,14 @@ async function savePreferences(): Promise<void> {
     }
     // Info card, not a fake user prompt — was getting numbered as a real
     // user submission and inflating the prompt counter.
-    chat.addInfoMessage("<i>Preferences saved. Agent restarted.</i>");
+    const modelChanged = selectedModel && selectedModel !== prevModel;
+    if (modelChanged) {
+      chat.addInfoMessage(
+        `<i>Preferences saved. Changed model to <code>${selectedModel}</code>. Agent restarted.</i>`
+      );
+    } else {
+      chat.addInfoMessage("<i>Preferences saved. Agent restarted.</i>");
+    }
   } else {
     alert(`Failed to save preferences: ${result.error}`);
   }
