@@ -821,11 +821,55 @@ document.getElementById("queued-indicator")?.addEventListener("click", () => {
   clearPendingMessage();
 });
 
+// Cheaper-model nudge state. Suppress per-session if the user dismisses
+// the hint, or persistently if they click "Don't show again".
+const CHEAPER_NUDGE_SKIP_KEY = "loom.skipCheaperNudge";
+const EXEC_COMMAND_RE = /^\/(execute|run)\b/i;
+let cheaperNudgeShownThisSession = false;
+
+/**
+ * Plan execution is mostly mechanical (file edits, tool invocations, polling)
+ * — Sonnet/Haiku-class models usually do equally well at 5–20× lower cost
+ * than Opus. When the user kicks off /execute or /run on an Opus-tier model,
+ * surface a one-time chat hint inviting a model swap. (#73)
+ */
+function maybeShowCheaperModelNudge(text: string): void {
+  if (cheaperNudgeShownThisSession) return;
+  if (localStorage.getItem(CHEAPER_NUDGE_SKIP_KEY) === "1") return;
+  if (!EXEC_COMMAND_RE.test(text)) return;
+  if (!currentModel) return;
+  const pricing = findPricing(currentModel);
+  if (!pricing || pricing.in < 10) return;  // mid-tier or cheaper — no nudge
+  cheaperNudgeShownThisSession = true;
+  chat.addInfoMessage(
+    `<i><strong>Heads up:</strong> running plan execution on ` +
+    `<code>${currentModel}</code> ($${pricing.in}/$${pricing.out} per 1M tokens). ` +
+    `Sonnet/Haiku-class models usually do equally well for execution at 5–20× ` +
+    `lower cost — try <code>/model sonnet</code> or <code>/model haiku</code> ` +
+    `before this turn if you want to save. ` +
+    `<a href="#" class="cheaper-nudge-dismiss">Don't show again</a></i>`
+  );
+}
+
+// Persist the dismiss click. Uses event delegation so it fires for any
+// nudge card (the chat replaces messages on /chat replay etc.).
+messagesEl.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement | null;
+  if (!target?.classList.contains("cheaper-nudge-dismiss")) return;
+  e.preventDefault();
+  localStorage.setItem(CHEAPER_NUDGE_SKIP_KEY, "1");
+  target.replaceWith(document.createTextNode("(dismissed)"));
+});
+
 function submit(): void {
   const text = inputEl.value.trim();
   if (!text) return;
 
   appendHistoryEntry(text);
+
+  // Cheaper-model nudge fires before slash dispatch so /execute on Opus
+  // gets the hint inline above the agent's thinking response.
+  maybeShowCheaperModelNudge(text);
 
   // Slash commands — handled locally, no LLM round-trip (allowed even while streaming)
   if (text.startsWith("/")) {
