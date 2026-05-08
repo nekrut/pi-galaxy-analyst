@@ -80,6 +80,15 @@ export class ProcMonitor {
    * Excludes the agent itself.
    */
   private async collectDescendants(agentPid: number): Promise<ProcInfo[]> {
+    return collectDescendantsOf(agentPid);
+  }
+}
+
+/**
+ * Standalone descendant walker — also used by AgentManager.abort() to
+ * SIGTERM the brain's tool subprocesses on Stop.
+ */
+export async function collectDescendantsOf(agentPid: number): Promise<ProcInfo[]> {
     // Get all processes with their PID and PPID so we can walk the tree.
     // Note: macOS ps doesn't support `nlwp` (thread count) — don't request it.
     const { stdout: psOut } = await execFileP("ps", [
@@ -128,5 +137,4 @@ export class ProcMonitor {
       }
     }
     return descendants;
-  }
 }
