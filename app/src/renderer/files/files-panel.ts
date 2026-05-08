@@ -16,10 +16,7 @@ export class FilesPanel {
   private showHidden = false;
   private loading = false;
 
-  constructor(
-    container: HTMLElement,
-    onFileOpen: (relPath: string) => void,
-  ) {
+  constructor(container: HTMLElement, onFileOpen: (relPath: string) => void) {
     this.container = container;
     this.onFileOpen = onFileOpen;
   }
@@ -108,7 +105,14 @@ export class FilesPanel {
     if (node.type === "directory") {
       const isExpanded = this.expanded.has(node.relPath);
       icon.textContent = isExpanded ? "\u{1F4C2}" : "\u{1F4C1}";
-      row.title = node.name;
+      const count = node.children?.length;
+      if (typeof count === "number") {
+        const countEl = document.createElement("span");
+        countEl.className = "files-tree-size";
+        countEl.textContent = String(count);
+        row.appendChild(countEl);
+      }
+      row.title = typeof count === "number" ? `${node.name} (${count} entries)` : node.name;
       row.addEventListener("click", (e) => {
         e.stopPropagation();
         if (this.expanded.has(node.relPath)) {

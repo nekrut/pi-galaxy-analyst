@@ -8,6 +8,10 @@ const readdirSyncMock = vi.fn(() => []);
 
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
+  // execFile is pulled in transitively via agent.ts -> proc-monitor.ts
+  // (collectDescendantsOf walks `ps` for the abort-kill path, #64). Tests
+  // don't trigger abort, but the import must resolve.
+  execFile: vi.fn(),
 }));
 
 vi.mock("node:readline", () => ({
@@ -44,7 +48,9 @@ function makeProcess(pid: number) {
   const proc = new EventEmitter() as EventEmitter & Record<string, unknown>;
   proc.pid = pid;
   proc.stdin = { writable: true, write: vi.fn() };
-  proc.stdout = new EventEmitter() as EventEmitter & { removeAllListeners: ReturnType<typeof vi.fn> };
+  proc.stdout = new EventEmitter() as EventEmitter & {
+    removeAllListeners: ReturnType<typeof vi.fn>;
+  };
   proc.stdout.removeAllListeners = vi.fn();
   proc.stderr = new EventEmitter() as EventEmitter & {
     removeAllListeners: ReturnType<typeof vi.fn>;
@@ -86,9 +92,9 @@ describe("AgentManager", () => {
       1,
       "node",
       expect.arrayContaining(["--mode", "rpc"]),
-      expect.objectContaining({ cwd: "/analysis/old" })
+      expect.objectContaining({ cwd: "/analysis/old" }),
     );
-    expect((spawnMock.mock.calls[0][1] as string[])).not.toContain("--continue");
+    expect(spawnMock.mock.calls[0][1] as string[]).not.toContain("--continue");
 
     expect(manager.switchCwd("/analysis/new")).toBe(true);
 
@@ -97,9 +103,9 @@ describe("AgentManager", () => {
       2,
       "node",
       expect.arrayContaining(["--mode", "rpc"]),
-      expect.objectContaining({ cwd: "/analysis/new" })
+      expect.objectContaining({ cwd: "/analysis/new" }),
     );
-    expect((spawnMock.mock.calls[1][1] as string[])).not.toContain("--continue");
+    expect(spawnMock.mock.calls[1][1] as string[]).not.toContain("--continue");
   });
 
   it("does not restart when the cwd is unchanged", async () => {

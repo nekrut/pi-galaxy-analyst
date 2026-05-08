@@ -7,6 +7,7 @@ import { app, type BrowserWindow } from "electron";
 import { loadConfig } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
 import { loadSessionHistory } from "./session-replay.js";
+import { collectDescendantsOf } from "./proc-monitor.js";
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -169,11 +170,11 @@ export class AgentManager {
   private pendingResponses = new Map<string, PendingResponse>();
   private idCounter = 0;
   private cwd: string;
-  private hasStartedBefore = false;  // → use --continue on restart to preserve chat history
+  private hasStartedBefore = false; // → use --continue on restart to preserve chat history
   private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
-  private nextStartIsFresh = false;  // → tells extension to skip notebook auto-load on next start
+  private nextStartIsFresh = false; // → tells extension to skip notebook auto-load on next start
   private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
-  private silentRestarting = false;  // → suppresses status flicker during MCP bootstrap restart
+  private silentRestarting = false; // → suppresses status flicker during MCP bootstrap restart
 
   /**
    * Crash-restart bookkeeping. We allow up to MAX_RESTARTS_PER_WINDOW
@@ -244,7 +245,7 @@ export class AgentManager {
       const encoded = `--${this.cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
       const sessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encoded);
       if (!fs.existsSync(sessionsDir)) return false;
-      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith(".jsonl"));
+      const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
       return files.length > 0;
     } catch {
       return false;
@@ -272,7 +273,13 @@ export class AgentManager {
 
     const fresh = this.nextStartIsFresh;
     this.nextStartIsFresh = false;
-    log("starting agent", { node: NODE_BIN, bin: LOOM_BIN, cwd: this.cwd, continue: args.includes("--continue"), fresh });
+    log("starting agent", {
+      node: NODE_BIN,
+      bin: LOOM_BIN,
+      cwd: this.cwd,
+      continue: args.includes("--continue"),
+      fresh,
+    });
 
     try {
       // Decrypted API keys flow to the brain via env so the child never reads
@@ -345,15 +352,24 @@ export class AgentManager {
       // Crash. Try a bounded silent restart before surfacing to the user.
       if (this.shouldAutoRestart()) {
         const attempt = this.crashRestartTimes.length;
-        log(`agent crashed (code ${code}); silent restart ${attempt}/${AgentManager.MAX_RESTARTS_PER_WINDOW}`);
-        this.appendShellNote(`[orbit] brain exited with code ${code}; restarting (attempt ${attempt}/${AgentManager.MAX_RESTARTS_PER_WINDOW})`);
+        log(
+          `agent crashed (code ${code}); silent restart ${attempt}/${AgentManager.MAX_RESTARTS_PER_WINDOW}`,
+        );
+        this.appendShellNote(
+          `[orbit] brain exited with code ${code}; restarting (attempt ${attempt}/${AgentManager.MAX_RESTARTS_PER_WINDOW})`,
+        );
         // Defer to next tick so listeners fully unwind before we spawn.
         setTimeout(() => this.start(), 100);
         return;
       }
       log(`agent crashed (code ${code}) and exhausted restart budget`);
-      this.appendShellNote(`[orbit] brain has crashed too many times in 60s; auto-restart disabled`);
-      this.setStatus("error", `Agent crashed repeatedly (code ${code}). Click status badge to open Preferences.`);
+      this.appendShellNote(
+        `[orbit] brain has crashed too many times in 60s; auto-restart disabled`,
+      );
+      this.setStatus(
+        "error",
+        `Agent crashed repeatedly (code ${code}). Click status badge to open Preferences.`,
+      );
     });
 
     spawnedProcess.on("error", (err) => {
@@ -418,6 +434,49 @@ export class AgentManager {
     const json = JSON.stringify(obj);
     log("→ stdin:", json.slice(0, 200));
     this.process.stdin.write(json + "\n");
+  }
+
+  /**
+   * Stop button handler — signals the brain AND kills its tool subprocess
+   * descendants. pi-coding-agent's abort flag only fires at the next agent
+   * loop tick, which means a long bash → fastp keeps running until natural
+   * exit (#64). Walk the brain's process tree and SIGTERM everything,
+   * with a 3s grace before SIGKILL.
+   */
+  async abort(): Promise<void> {
+    this.send({ type: "abort" });
+    const brainPid = this.process?.pid;
+    if (!brainPid) return;
+    try {
+      const descendants = await collectDescendantsOf(brainPid);
+      if (descendants.length === 0) return;
+      log(`abort: SIGTERM ${descendants.length} descendant(s)`);
+      for (const p of descendants) {
+        try {
+          process.kill(p.pid, "SIGTERM");
+        } catch {
+          /* already gone */
+        }
+      }
+      // After 3s, SIGKILL anything still alive.
+      setTimeout(() => {
+        for (const p of descendants) {
+          try {
+            process.kill(p.pid, 0); // probe
+            log(`abort: SIGKILL stuck pid ${p.pid}`);
+            try {
+              process.kill(p.pid, "SIGKILL");
+            } catch {
+              /* gone now */
+            }
+          } catch {
+            /* already exited */
+          }
+        }
+      }, 3000);
+    } catch (err) {
+      log("abort: failed to walk descendants:", err);
+    }
   }
 
   sendCommand(obj: Record<string, unknown>): Promise<unknown> {

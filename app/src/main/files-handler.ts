@@ -14,10 +14,10 @@ import * as path from "node:path";
 
 export interface FileNode {
   name: string;
-  relPath: string;              // always "" for root, otherwise relative to cwd with forward slashes
+  relPath: string; // always "" for root, otherwise relative to cwd with forward slashes
   type: "file" | "directory";
-  size?: number;                // files only
-  children?: FileNode[];        // directories only
+  size?: number; // files only
+  children?: FileNode[]; // directories only
 }
 
 const FS_BLOCKLIST = new Set([
@@ -37,8 +37,79 @@ const FS_BLOCKLIST = new Set([
 ]);
 
 const MAX_DEPTH = 8;
-const MAX_ENTRIES_PER_DIR = 2000;    // refuse to enumerate pathological dirs
-const MAX_READ_BYTES = 5 * 1024 * 1024; // 5 MB — protect the renderer from huge files
+const MAX_ENTRIES_PER_DIR = 2000; // refuse to enumerate pathological dirs
+const MAX_READ_BYTES = 5 * 1024 * 1024; // 5 MB — full read up to here
+const MAX_PREVIEW_BYTES = 1024 * 1024 * 1024; // 1 GB — hard refuse above this
+const PREVIEW_LINE_COUNT = 10;
+const PREVIEW_BYTE_BUDGET = 64 * 1024; // 64 KB cap on the head we read
+
+// Mirrors the renderer's TEXT_EXTS in file-viewer.ts -- the head-preview
+// path only makes sense for files the renderer would draw as text. Returning
+// 64 KB of head bytes for an image / pdf / binary would just produce a
+// broken <img> or corrupted pdf in the renderer, with no useful signal to
+// the user. Files outside this set in the (5 MB, 1 GB] band get the same
+// "too large" rejection they got before head-preview existed.
+const TEXT_PREVIEW_EXTS = new Set([
+  ".md",
+  ".txt",
+  ".log",
+  ".rst",
+  ".py",
+  ".js",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".sh",
+  ".rb",
+  ".pl",
+  ".r",
+  ".go",
+  ".rs",
+  ".json",
+  ".jsonl",
+  ".yml",
+  ".yaml",
+  ".toml",
+  ".ini",
+  ".cfg",
+  ".conf",
+  ".xml",
+  ".html",
+  ".htm",
+  ".css",
+  ".csv",
+  ".tsv",
+  ".tab",
+  ".fa",
+  ".fasta",
+  ".fna",
+  ".faa",
+  ".ffn",
+  ".fastq",
+  ".fq",
+  ".vcf",
+  ".bed",
+  ".bedgraph",
+  ".wig",
+  ".gff",
+  ".gff3",
+  ".gtf",
+  ".sam",
+  ".pdb",
+  ".cif",
+  ".nwk",
+  ".newick",
+  ".tree",
+  ".phy",
+  ".phylip",
+]);
+
+function isTextLikeForPreview(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  // No extension -- the renderer treats these as text (READMEs, configs).
+  if (dot <= 0) return true;
+  return TEXT_PREVIEW_EXTS.has(name.slice(dot).toLowerCase());
+}
 
 /**
  * Clamp a user-supplied path to the current cwd. Throws if it escapes.
@@ -196,15 +267,61 @@ export function registerFilesIpc(getCwd: () => string): void {
       const abs = resolveWithin(cwd, relPath);
       const stat = await fsp.stat(abs);
       if (!stat.isFile()) return { ok: false, error: "Not a regular file" };
-      if (stat.size > MAX_READ_BYTES) {
+
+      // Full read up to MAX_READ_BYTES.
+      if (stat.size <= MAX_READ_BYTES) {
+        const buf = await fsp.readFile(abs);
+        return { ok: true, size: stat.size, bytes: buf };
+      }
+
+      // Hard refuse pathological sizes (>1 GB) — even a head preview
+      // shouldn't justify opening it.
+      if (stat.size > MAX_PREVIEW_BYTES) {
+        return {
+          ok: false,
+          error: `File too large (${stat.size} bytes, hard limit ${MAX_PREVIEW_BYTES})`,
+          size: stat.size,
+        };
+      }
+
+      // Head preview only makes sense for text-like files. For images /
+      // pdfs / binaries in the (5 MB, 1 GB] band, fall back to the
+      // pre-existing "too large" rejection so the renderer surfaces a
+      // clear error instead of trying to draw 64 KB of mangled bytes.
+      if (!isTextLikeForPreview(path.basename(abs))) {
         return {
           ok: false,
           error: `File too large (${stat.size} bytes, limit ${MAX_READ_BYTES})`,
           size: stat.size,
         };
       }
-      const buf = await fsp.readFile(abs);
-      return { ok: true, size: stat.size, bytes: buf };
+
+      // Head preview: read at most PREVIEW_BYTE_BUDGET bytes from the
+      // start, slice to the first PREVIEW_LINE_COUNT newlines. Single
+      // very-long lines (uncompressed VCF data, packed JSON) get
+      // truncated at the byte cap with a marker.
+      const fd = await fsp.open(abs, "r");
+      try {
+        const headBuf = Buffer.alloc(PREVIEW_BYTE_BUDGET);
+        const { bytesRead } = await fd.read(headBuf, 0, PREVIEW_BYTE_BUDGET, 0);
+        const head = headBuf.subarray(0, bytesRead).toString("utf-8");
+        const lines = head.split("\n").slice(0, PREVIEW_LINE_COUNT);
+        const previewText = lines.join("\n");
+        const truncatedAtByteBudget =
+          bytesRead === PREVIEW_BYTE_BUDGET && lines.length < PREVIEW_LINE_COUNT;
+        return {
+          ok: true,
+          size: stat.size,
+          bytes: Buffer.from(previewText, "utf-8"),
+          preview: {
+            kind: "head" as const,
+            lineCount: lines.length,
+            byteBudgetHit: truncatedAtByteBudget,
+          },
+        };
+      } finally {
+        await fd.close();
+      }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

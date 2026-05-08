@@ -50,12 +50,17 @@ export interface OrbitAPI {
   getState(): Promise<unknown>;
   getCwd(): Promise<string>;
   openFile(filePath: string): Promise<{ opened: boolean; error?: string }>;
-  listFiles(opts?: { includeHidden?: boolean }): Promise<
-    | { ok: true; root: FileNode; cwd: string }
-    | { ok: false; error: string }
-  >;
+  listFiles(opts?: {
+    includeHidden?: boolean;
+  }): Promise<{ ok: true; root: FileNode; cwd: string } | { ok: false; error: string }>;
   readFile(relPath: string): Promise<
-    | { ok: true; size: number; bytes: Uint8Array }
+    | {
+        ok: true;
+        size: number;
+        bytes: Uint8Array;
+        // Set when bytes is a head-only excerpt of a file too large for full read.
+        preview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean };
+      }
     | { ok: false; error: string; size?: number }
   >;
   writeFile(relPath: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
@@ -73,7 +78,7 @@ export interface OrbitAPI {
   onAgentEvent(callback: (event: AgentEvent) => void): () => void;
   onUiRequest(callback: (request: UiRequest) => void): () => void;
   onAgentStatus(
-    callback: (status: "running" | "stopped" | "error", msg?: string) => void
+    callback: (status: "running" | "stopped" | "error", msg?: string) => void,
   ): () => void;
   getAgentStatus(): Promise<{ status: "running" | "stopped" | "error"; message?: string }>;
   onCwdChanged(callback: (dir: string) => void): () => void;
@@ -92,11 +97,17 @@ export interface OrbitAPI {
   }>;
   openIssueReport(payload: { title: string; body: string }): Promise<{ opened: boolean }>;
   listAllModels(): Promise<
-    | { ok: true; providers: Record<string, Array<{
-        id: string;
-        label: string;
-        pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
-      }>> }
+    | {
+        ok: true;
+        providers: Record<
+          string,
+          Array<{
+            id: string;
+            label: string;
+            pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+          }>
+        >;
+      }
     | { ok: false; error: string }
   >;
 }
@@ -148,11 +159,8 @@ const api: OrbitAPI = {
   },
 
   onAgentStatus: (callback) => {
-    const handler = (
-      _e: unknown,
-      status: "running" | "stopped" | "error",
-      msg?: string
-    ) => callback(status, msg);
+    const handler = (_e: unknown, status: "running" | "stopped" | "error", msg?: string) =>
+      callback(status, msg);
     ipcRenderer.on("agent:status", handler);
     return () => ipcRenderer.removeListener("agent:status", handler);
   },

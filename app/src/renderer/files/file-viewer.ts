@@ -12,23 +12,61 @@ type FileKind = "text" | "image" | "pdf" | "binary";
 
 const TEXT_EXTS = new Set([
   // generic
-  ".md", ".txt", ".log", ".rst",
+  ".md",
+  ".txt",
+  ".log",
+  ".rst",
   // code / config
-  ".py", ".js", ".ts", ".tsx", ".jsx", ".sh", ".rb", ".pl", ".r", ".go", ".rs",
-  ".json", ".jsonl", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf",
-  ".xml", ".html", ".htm", ".css",
+  ".py",
+  ".js",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".sh",
+  ".rb",
+  ".pl",
+  ".r",
+  ".go",
+  ".rs",
+  ".json",
+  ".jsonl",
+  ".yml",
+  ".yaml",
+  ".toml",
+  ".ini",
+  ".cfg",
+  ".conf",
+  ".xml",
+  ".html",
+  ".htm",
+  ".css",
   // tabular
-  ".csv", ".tsv", ".tab",
+  ".csv",
+  ".tsv",
+  ".tab",
   // bioinformatics text formats
-  ".fa", ".fasta", ".fna", ".faa", ".ffn",
-  ".fastq", ".fq",
+  ".fa",
+  ".fasta",
+  ".fna",
+  ".faa",
+  ".ffn",
+  ".fastq",
+  ".fq",
   ".vcf",
-  ".bed", ".bedgraph", ".wig",
-  ".gff", ".gff3", ".gtf",
+  ".bed",
+  ".bedgraph",
+  ".wig",
+  ".gff",
+  ".gff3",
+  ".gtf",
   ".sam",
-  ".pdb", ".cif",
-  ".nwk", ".newick", ".tree",
-  ".phy", ".phylip",
+  ".pdb",
+  ".cif",
+  ".nwk",
+  ".newick",
+  ".tree",
+  ".phy",
+  ".phylip",
 ]);
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]);
@@ -48,7 +86,7 @@ function extOf(path: string): string {
 
 function kindOf(path: string): FileKind {
   const ext = extOf(path);
-  if (!ext) return "text";                    // no extension → treat as text
+  if (!ext) return "text"; // no extension → treat as text
   if (TEXT_EXTS.has(ext)) return "text";
   if (IMAGE_EXTS.has(ext)) return "image";
   if (PDF_EXTS.has(ext)) return "pdf";
@@ -57,13 +95,19 @@ function kindOf(path: string): FileKind {
 
 function mimeForImage(ext: string): string {
   switch (ext) {
-    case ".png":  return "image/png";
+    case ".png":
+      return "image/png";
     case ".jpg":
-    case ".jpeg": return "image/jpeg";
-    case ".gif":  return "image/gif";
-    case ".svg":  return "image/svg+xml";
-    case ".webp": return "image/webp";
-    default:      return "application/octet-stream";
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".svg":
+      return "image/svg+xml";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
   }
 }
 
@@ -104,8 +148,17 @@ export class FileViewer {
   /**
    * Replace the container with a viewer for `relPath`. Returns true if the
    * open went ahead, false if the user cancelled due to unsaved changes.
+   *
+   * `preview` is set when bytes is a head-only excerpt of a file too large
+   * for full read; the text view renders read-only with a banner explaining
+   * the truncation (#58).
    */
-  open(relPath: string, bytes: Uint8Array, size: number): boolean {
+  open(
+    relPath: string,
+    bytes: Uint8Array,
+    size: number,
+    preview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean },
+  ): boolean {
     if (this.dirty && this.currentPath && this.currentPath !== relPath) {
       const ok = window.confirm(`Discard unsaved changes in ${this.currentPath}?`);
       if (!ok) return false;
@@ -126,7 +179,7 @@ export class FileViewer {
     root.className = "file-viewer-root";
 
     if (this.currentKind === "text") {
-      this.renderText(root, relPath, bytes);
+      this.renderText(root, relPath, bytes, preview, size);
     } else if (this.currentKind === "image") {
       this.renderImage(root, relPath, bytes, size);
     } else if (this.currentKind === "pdf") {
@@ -235,7 +288,10 @@ export class FileViewer {
   private reloadImage(bytes: Uint8Array): void {
     const img = this.container.querySelector<HTMLImageElement>("img.file-viewer-image");
     if (!img) return;
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const buf = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
     const blob = new Blob([buf]);
     const nextUrl = URL.createObjectURL(blob);
     const prev = this.currentImageUrl;
@@ -270,10 +326,48 @@ export class FileViewer {
     }
   }
 
-  private renderText(root: HTMLElement, relPath: string, bytes: Uint8Array): void {
+  private renderText(
+    root: HTMLElement,
+    relPath: string,
+    bytes: Uint8Array,
+    headPreview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean },
+    size?: number,
+  ): void {
     const ext = extOf(relPath);
     const isMarkdown = ext === ".md";
     const text = new TextDecoder("utf-8").decode(bytes);
+
+    // Head-preview path: render read-only with a banner. Skip the
+    // editor + Save toolbar + markdown preview toggle entirely — the
+    // user can't usefully edit a 200 MB file's first 10 lines.
+    if (headPreview) {
+      const toolbar = document.createElement("div");
+      toolbar.className = "file-viewer-toolbar";
+      const filename = document.createElement("span");
+      filename.className = "file-viewer-filename";
+      filename.textContent = relPath;
+      filename.title = relPath;
+      toolbar.appendChild(filename);
+      const sizeLabel = document.createElement("span");
+      sizeLabel.className = "file-viewer-status";
+      sizeLabel.textContent = typeof size === "number" ? formatBytes(size) : "";
+      toolbar.appendChild(sizeLabel);
+      root.appendChild(toolbar);
+
+      const banner = document.createElement("div");
+      banner.className = "file-viewer-preview-banner";
+      const truncated = headPreview.byteBudgetHit
+        ? `Preview only — first ${headPreview.lineCount} lines (truncated mid-line: lines longer than 64 KB are clipped).`
+        : `Preview only — first ${headPreview.lineCount} lines.`;
+      banner.textContent = `${truncated} Open externally to see the full file.`;
+      root.appendChild(banner);
+
+      const pre = document.createElement("pre");
+      pre.className = "file-viewer-preview-text";
+      pre.textContent = text;
+      root.appendChild(pre);
+      return;
+    }
 
     // Toolbar ---------------------------------------------------------
     const toolbar = document.createElement("div");
@@ -412,12 +506,7 @@ export class FileViewer {
     }
   }
 
-  private renderImage(
-    root: HTMLElement,
-    relPath: string,
-    bytes: Uint8Array,
-    size: number,
-  ): void {
+  private renderImage(root: HTMLElement, relPath: string, bytes: Uint8Array, size: number): void {
     const toolbar = document.createElement("div");
     toolbar.className = "file-viewer-toolbar";
     const filename = document.createElement("span");
@@ -453,12 +542,7 @@ export class FileViewer {
     root.appendChild(wrap);
   }
 
-  private renderPdf(
-    root: HTMLElement,
-    relPath: string,
-    bytes: Uint8Array,
-    size: number,
-  ): void {
+  private renderPdf(root: HTMLElement, relPath: string, bytes: Uint8Array, size: number): void {
     const toolbar = document.createElement("div");
     toolbar.className = "file-viewer-toolbar";
     const filename = document.createElement("span");
