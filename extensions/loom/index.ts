@@ -18,6 +18,7 @@ import { registerTeamTools } from "./teams/tool";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { registerSessionIndexTools } from "./session-index/tools";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
+import { registerConfusablesHint } from "./confusables-hint";
 import * as fs from "fs";
 import { getState, getNotebookPath } from "./state";
 import {
@@ -38,6 +39,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
 
   registerPlanTools(pi);
   registerExecutionCommands(pi);
+  registerConfusablesHint(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
   }
