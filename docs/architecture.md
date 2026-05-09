@@ -61,7 +61,7 @@ The Loom brain is loaded as a Pi extension from [`extensions/loom/`](../extensio
 
 - [`index.ts`](../extensions/loom/index.ts) -- entry wiring: registers tools, slash commands, lifecycle hooks, UI bridge, context injection.
 - [`state.ts`](../extensions/loom/state.ts) -- session state. Connection flag, current Galaxy history id, notebook path, and a chokidar watcher that re-fires the UI bridge on every notebook write. Also runs the auto-commit hook when the repo has `loom.managed=true`.
-- [`session-bootstrap.ts`](../extensions/loom/session-bootstrap.ts) -- session lifecycle: resets state on `session_start`, ensures `notebook.md` exists, drops a `session.jsonl` symlink to Pi's session file, snapshots the notebook on `session_before_compact` and `session_shutdown`, sends the startup greeting (Galaxy-aware).
+- [`session-lifecycle.ts`](../extensions/loom/session-lifecycle.ts) -- session lifecycle: resets state on `session_start`, ensures `notebook.md` exists, drops a `session.jsonl` symlink to Pi's session file, snapshots the notebook on `session_before_compact` and `session_shutdown`, writes a `loom-session` summary block on shutdown, sends the startup greeting (Galaxy-aware).
 - [`execution-commands.ts`](../extensions/loom/execution-commands.ts) -- `/execute` and `/run` slash commands; pure prompt nudges, no execution policy.
 - [`tools.ts`](../extensions/loom/tools.ts) -- LLM-callable tools: `gtn_search`, `gtn_fetch`, `skills_fetch`, `galaxy_invocation_record`, `galaxy_invocation_check_all`, `galaxy_invocation_check_one`.
 - [`teams/tool.ts`](../extensions/loom/teams/tool.ts) -- `team_dispatch` (gated by `LOOM_TEAM_DISPATCH=1`).
@@ -154,7 +154,7 @@ The notebook is the only authority. There is no external invocation store.
 
 ## Session lifecycle
 
-`extensions/loom/session-bootstrap.ts` owns:
+`extensions/loom/session-lifecycle.ts` owns:
 
 1. `session_start`:
    - reset state

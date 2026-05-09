@@ -41,7 +41,7 @@ cd app && npm start
 - Keep the Loom brain shell-neutral. Orbit/web-specific behavior belongs in shells, not in `extensions/loom/`.
 - Shared cross-boundary contracts belong in `shared/`, not in duplicated ad hoc payload logic.
 - Galaxy is the primary execution path. Local mode is an exception path, not the main runtime model.
-- Startup/restore behavior belongs in `extensions/loom/session-bootstrap.ts`.
+- Startup/shutdown/restore behavior belongs in `extensions/loom/session-lifecycle.ts`.
 - `/review`, `/test`, `/execute`, and `/run` are brain-owned command semantics in `extensions/loom/execution-commands.ts`.
 - Orbit should stay a shell, not a second brain.
 
