@@ -1,8 +1,20 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { resetState, initSessionArtifacts, getNotebookPath } from "./state.js";
 import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller.js";
+import {
+  appendSessionSummaryBlock,
+  readNotebook,
+  withNotebookLock,
+  writeNotebook,
+  type SessionSummaryYaml,
+} from "./notebook-writer.js";
 import * as fs from "fs";
 import * as path from "path";
+
+// Tracked across the session so the shutdown handler can write a complete
+// `loom-session` block. ctx is per-event; we can't read it on shutdown
+// directly, so capture what we need on session_start.
+let sessionStart: { id: string; startedAt: string } | null = null;
 
 export function registerSessionLifecycle(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
@@ -17,6 +29,11 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     // Background poller for in-flight Galaxy invocations (#67 part 2).
     // Idempotent — start() stops any prior timer first.
     startGalaxyPoller();
+
+    sessionStart = {
+      id: ctx.sessionManager?.getSessionId?.() ?? `session-${Date.now()}`,
+      startedAt: new Date().toISOString(),
+    };
 
     const freshSession = process.env.LOOM_FRESH_SESSION === "1";
 
@@ -37,6 +54,7 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async () => {
     stopGalaxyPoller();
+    await writeSessionSummary();
     snapshotNotebook(pi);
   });
 }
@@ -50,6 +68,48 @@ function snapshotNotebook(pi: ExtensionAPI): void {
   } catch (err) {
     console.error("notebook snapshot failed:", err);
   }
+}
+
+/**
+ * Append a `loom-session` block to the notebook on shutdown so a future
+ * session can see what was running. `orphaned_active_steps` is 0 today
+ * (typed plan-step blocks don't exist yet); this writer is the receiving
+ * end of that future change.
+ *
+ * Uses the same per-path mutex chain as the invocation poller so a
+ * concurrent `galaxy_invocation_check_*` write at shutdown doesn't lose
+ * the summary.
+ */
+async function writeSessionSummary(): Promise<void> {
+  const nbPath = getNotebookPath();
+  if (!nbPath || !sessionStart) return;
+  const summary: SessionSummaryYaml = {
+    id: sessionStart.id,
+    startedAt: sessionStart.startedAt,
+    endedAt: new Date().toISOString(),
+    notebook: path.basename(nbPath),
+    orphanedActiveSteps: countOrphanedActiveSteps(),
+  };
+  try {
+    await withNotebookLock(nbPath, async () => {
+      const content = await readNotebook(nbPath);
+      const updated = appendSessionSummaryBlock(content, summary);
+      await writeNotebook(nbPath, updated);
+    });
+  } catch (err) {
+    console.error("session summary write failed:", err);
+  }
+}
+
+/**
+ * Count plan steps left in the `active` state when the session ends. Stub
+ * for now -- typed `loom-step` blocks don't exist yet. When they do, this
+ * scans the notebook for blocks with `state: active` and rewrites them to
+ * `state: blocked` with `blocked_reason: session_ended_while_active`,
+ * returning the count.
+ */
+function countOrphanedActiveSteps(): number {
+  return 0;
 }
 
 /**

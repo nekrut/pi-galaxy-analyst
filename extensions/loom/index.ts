@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { registerPlanTools } from "./tools";
 import { setupContextInjection, formatConnectionStatus } from "./context";
 import { setupUIBridge } from "./ui-bridge";
-import { registerSessionLifecycle } from "./session-bootstrap";
+import { registerSessionLifecycle } from "./session-lifecycle";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerTeamTools } from "./teams/tool";

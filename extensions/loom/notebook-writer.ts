@@ -294,6 +294,99 @@ function parseInvocationBlock(blockLines: string[]): InvocationYaml | null {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Session summary YAML blocks
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `loom-session` block, appended on `session_shutdown`. Pairs with the
+ * notebook's role as the durable record: when a Pi session dies mid-poll,
+ * a fresh session can read the most recent `loom-session` block to learn
+ * what was in flight and re-orient. `orphaned_active_steps` is 0 today
+ * (typed plan-step blocks don't exist yet); the field is here so the
+ * schema stays stable when that follow-up lands.
+ */
+export interface SessionSummaryYaml {
+  id: string;
+  startedAt: string;
+  endedAt: string;
+  notebook: string;
+  orphanedActiveSteps: number;
+}
+
+const SESSION_FENCE_OPEN = "```loom-session";
+const SESSION_FENCE_CLOSE = "```";
+
+export function renderSessionSummaryYaml(s: SessionSummaryYaml): string {
+  const lines: string[] = [
+    SESSION_FENCE_OPEN,
+    `id: ${s.id}`,
+    `started_at: ${s.startedAt}`,
+    `ended_at: ${s.endedAt}`,
+    `notebook: ${s.notebook}`,
+    `orphaned_active_steps: ${s.orphanedActiveSteps}`,
+    SESSION_FENCE_CLOSE,
+  ];
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Append a session summary block at the end of the notebook content.
+ * Sessions are append-only (no upsert) -- each shutdown writes a fresh
+ * block so the notebook keeps a chronological session log.
+ */
+export function appendSessionSummaryBlock(content: string, s: SessionSummaryYaml): string {
+  const block = renderSessionSummaryYaml(s).trimEnd();
+  const trimmed = content.replace(/\s+$/, "");
+  const sep = trimmed.length > 0 ? "\n\n" : "";
+  return trimmed + sep + block + "\n";
+}
+
+/**
+ * Find every `loom-session` block in the notebook content and parse each.
+ * Skips blocks that fail validation. Used by `session_start` to surface
+ * any orphaned-active state from the previous session.
+ */
+export function findSessionSummaryBlocks(content: string): SessionSummaryYaml[] {
+  const result: SessionSummaryYaml[] = [];
+  const lines = content.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === SESSION_FENCE_OPEN) {
+      const start = i + 1;
+      let end = start;
+      while (end < lines.length && lines[end].trim() !== SESSION_FENCE_CLOSE) {
+        end++;
+      }
+      const parsed = parseSessionSummaryBlock(lines.slice(start, end));
+      if (parsed) result.push(parsed);
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return result;
+}
+
+function parseSessionSummaryBlock(blockLines: string[]): SessionSummaryYaml | null {
+  const fields: Record<string, string> = {};
+  for (const line of blockLines) {
+    const m = line.match(/^([a-z_]+):\s*(.*)$/);
+    if (m) fields[m[1]] = unescapeYaml(m[2].trim());
+  }
+  if (!fields.id || !fields.started_at || !fields.ended_at || !fields.notebook) {
+    return null;
+  }
+  const orphaned = Number(fields.orphaned_active_steps);
+  return {
+    id: fields.id,
+    startedAt: fields.started_at,
+    endedAt: fields.ended_at,
+    notebook: fields.notebook,
+    orphanedActiveSteps: Number.isFinite(orphaned) ? orphaned : 0,
+  };
+}
+
 function escapeYaml(value: string): string {
   // Quote if contains characters that would confuse the line parser.
   if (/[:#\n]/.test(value)) {
