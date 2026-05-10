@@ -301,6 +301,35 @@ body.files-collapsed #files-divider {
   display: none;
 }
 
+/* Right-click context menu on a file/folder row. Floats at cursor. */
+.files-tree-ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+.files-tree-ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.files-tree-ctx-item:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
 .files-tree-empty {
   padding: 12px 14px;
   color: var(--text-dim);
