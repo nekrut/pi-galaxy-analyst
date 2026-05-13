@@ -46,6 +46,13 @@ function stageLoomBundle(platform: string, arch: string): void {
     fs.cpSync(src, path.join(LOOM_STAGE_DIR, item), { recursive: true });
   }
 
+  // Loom's root prepare script runs `husky`, which is a devDependency.
+  // `npm ci --omit=dev` skips installing husky but still fires the prepare
+  // lifecycle → `sh -c husky` → exit 127. Strip prepare from the staged
+  // copy before installing. Other install/postinstall hooks (native module
+  // prebuild downloads) stay intact.
+  execSync("npm pkg delete scripts.prepare", { cwd: LOOM_STAGE_DIR, stdio: "inherit" });
+
   // Install runtime deps only (no devDependencies) into the staged bundle.
   // npm ci is faster + deterministic when the lockfile is present.
   const installCmd = fs.existsSync(path.join(LOOM_STAGE_DIR, "package-lock.json"))
