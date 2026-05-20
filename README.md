@@ -116,7 +116,8 @@ frequencies across tissues.
 Conventions:
 
 - Routing tag in the section header: `[local]`, `[hybrid]`, or `[remote]`. Literal so future tooling can grep.
-- Step status by the checkbox: `- [ ]` pending, `- [x]` completed, `- [!]` failed.
+- Step status by the checkbox: `- [ ]` pending, `- [x]` verified completed, `- [!]` failed.
+- If verification is blocked or inconclusive but the step itself has not failed, leave the step pending and record the blocker.
 - Anchors `{#plan-X-step-N}` so Galaxy invocation YAML can reference individual steps.
 - Multiple plans coexist; new plan sections append at the bottom. Old plans aren't deleted.
 
