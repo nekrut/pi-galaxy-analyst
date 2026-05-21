@@ -2728,3 +2728,53 @@ body:not(.artifact-collapsed) #artifact-toggle {
   font-size: 10px;
   padding: 2px 8px;
 }
+
+/* ─── Channel-2 MCP toasts + confirm modal ───────────────────────────── */
+#mcp-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.mcp-toast {
+  pointer-events: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 13px;
+  max-width: 380px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  animation: fade-up 0.18s ease;
+}
+.mcp-toast.level-info {
+  border-left-color: #62b3ff;
+}
+.mcp-toast.level-warning {
+  border-left-color: #ffb454;
+}
+.mcp-toast.level-error {
+  border-left-color: #ff6464;
+}
+.mcp-toast .mcp-toast-source {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.mcp-confirm-modal {
+  width: 440px;
+}
+.mcp-confirm-modal #mcp-confirm-prompt {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}

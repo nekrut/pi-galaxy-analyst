@@ -20,6 +20,7 @@ import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-h
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
+import { startMcpHost, stopMcpHost, updateWebContents as updateMcpWebContents } from "./mcp-host.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
@@ -479,6 +480,10 @@ app.whenReady().then(() => {
   log("cwd:", cwd);
   createWindow(cwd);
 
+  // Channel-2 MCP host: opens TCP on 127.0.0.1, publishes endpoint so the
+  // bundled MCP server subprocess (spawned by the user's agent) can connect.
+  if (mainWindow) startMcpHost(mainWindow.webContents);
+
   powerMonitor.on("suspend", () => log("[diag] powerMonitor suspend"));
   powerMonitor.on("resume", () => log("[diag] powerMonitor resume"));
 
@@ -500,4 +505,5 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   log("before-quit");
   agentManager?.stop();
+  stopMcpHost();
 });

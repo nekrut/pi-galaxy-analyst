@@ -3023,3 +3023,100 @@ window.orbit.onProcUpdate((procs) => {
 
 // ── Focus input on load ───────────────────────────────────────────────────────
 inputEl.focus();
+
+// ── Channel-2 MCP — dispatch agent-side tool calls to viewer UI ──────────────
+//
+// Three prototype tools:
+//   notify(level, message)        → toast in top-right
+//   request_confirmation(prompt)  → modal, blocks until user clicks
+//   get_execution_preference()    → stub returns "auto"
+//
+// Errors thrown inside a handler are caught and returned as { ok: false, error }
+// so the agent sees an MCP-level error rather than a stalled call.
+const mcpToastContainer = document.getElementById("mcp-toast-container")!;
+const mcpConfirmOverlay = document.getElementById("mcp-confirm-overlay")!;
+const mcpConfirmPrompt = document.getElementById("mcp-confirm-prompt")!;
+const mcpConfirmYes = document.getElementById("mcp-confirm-yes")!;
+const mcpConfirmNo = document.getElementById("mcp-confirm-no")!;
+
+function mcpShowToast(level: "info" | "warning" | "error", message: string): void {
+  const el = document.createElement("div");
+  el.className = `mcp-toast level-${level}`;
+  const src = document.createElement("span");
+  src.className = "mcp-toast-source";
+  src.textContent = `agent · ${level}`;
+  const body = document.createElement("span");
+  body.textContent = message;
+  el.append(src, body);
+  mcpToastContainer.appendChild(el);
+  setTimeout(
+    () => {
+      el.style.opacity = "0";
+      el.style.transition = "opacity 0.3s";
+      setTimeout(() => el.remove(), 300);
+    },
+    level === "error" ? 8000 : 4000,
+  );
+}
+
+let mcpConfirmResolver: ((confirmed: boolean) => void) | null = null;
+
+function mcpAskConfirmation(prompt: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    mcpConfirmPrompt.textContent = prompt;
+    mcpConfirmOverlay.classList.remove("hidden");
+    mcpConfirmResolver = resolve;
+  });
+}
+
+function mcpResolveConfirm(value: boolean): void {
+  mcpConfirmOverlay.classList.add("hidden");
+  const r = mcpConfirmResolver;
+  mcpConfirmResolver = null;
+  if (r) r(value);
+}
+
+mcpConfirmYes.addEventListener("click", () => mcpResolveConfirm(true));
+mcpConfirmNo.addEventListener("click", () => mcpResolveConfirm(false));
+mcpConfirmOverlay.addEventListener("click", (e) => {
+  if (e.target === mcpConfirmOverlay) mcpResolveConfirm(false);
+});
+
+window.orbit.onMcpToolCall(async (call) => {
+  try {
+    let result: unknown;
+    switch (call.tool) {
+      case "notify": {
+        const level = String(call.args.level ?? "info");
+        const message = String(call.args.message ?? "");
+        if (!["info", "warning", "error"].includes(level)) {
+          throw new Error(`invalid level "${level}"; expected info|warning|error`);
+        }
+        mcpShowToast(level as "info" | "warning" | "error", message);
+        result = { shown: true };
+        break;
+      }
+      case "request_confirmation": {
+        const prompt = String(call.args.prompt ?? "");
+        if (!prompt) throw new Error("prompt is required");
+        const confirmed = await mcpAskConfirmation(prompt);
+        result = { confirmed };
+        break;
+      }
+      case "get_execution_preference": {
+        // Prototype stub. Real impl reads ~/.orbit/preferences.json or per-
+        // project .orbit/config.json. Round-trip proves the channel works.
+        result = { preference: "auto" };
+        break;
+      }
+      default:
+        throw new Error(`unknown tool "${call.tool}"`);
+    }
+    window.orbit.respondToMcpToolCall(call.forwardId, { ok: true, result });
+  } catch (err) {
+    window.orbit.respondToMcpToolCall(call.forwardId, {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});

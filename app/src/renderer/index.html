@@ -642,6 +642,27 @@
       </div>
     </div>
 
+    <!-- Channel-2 MCP — toast notifications from agent (notify) -->
+    <div id="mcp-toast-container" aria-live="polite"></div>
+
+    <!-- Channel-2 MCP — modal for request_confirmation -->
+    <div id="mcp-confirm-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+      <div class="modal mcp-confirm-modal">
+        <div class="modal-header">
+          <h2>Agent requests confirmation</h2>
+        </div>
+        <div class="modal-body">
+          <p id="mcp-confirm-prompt"></p>
+        </div>
+        <div class="modal-footer">
+          <div class="modal-actions">
+            <button id="mcp-confirm-no" class="plan-btn">No</button>
+            <button id="mcp-confirm-yes" class="plan-btn primary">Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./app.ts"></script>
   </body>
 </html>

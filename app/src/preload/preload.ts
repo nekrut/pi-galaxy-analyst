@@ -110,6 +110,14 @@ export interface OrbitAPI {
       }
     | { ok: false; error: string }
   >;
+  // Channel-2 MCP: agent → viewer tool dispatch
+  onMcpToolCall(
+    callback: (call: { forwardId: string; tool: string; args: Record<string, unknown> }) => void,
+  ): () => void;
+  respondToMcpToolCall(
+    forwardId: string,
+    payload: { ok: true; result?: unknown } | { ok: false; error: string },
+  ): void;
 }
 
 const api: OrbitAPI = {
@@ -201,6 +209,19 @@ const api: OrbitAPI = {
     const handler = (_e: unknown, history: ReplaySegment[]) => callback(history);
     ipcRenderer.on("agent:session-history", handler);
     return () => ipcRenderer.removeListener("agent:session-history", handler);
+  },
+
+  onMcpToolCall: (callback) => {
+    const handler = (
+      _e: unknown,
+      call: { forwardId: string; tool: string; args: Record<string, unknown> },
+    ) => callback(call);
+    ipcRenderer.on("mcp:tool-call", handler);
+    return () => ipcRenderer.removeListener("mcp:tool-call", handler);
+  },
+
+  respondToMcpToolCall: (forwardId, payload) => {
+    ipcRenderer.send("mcp:tool-response", { forwardId, ...payload });
   },
 };
 
