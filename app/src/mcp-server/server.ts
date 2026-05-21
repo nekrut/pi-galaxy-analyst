@@ -154,8 +154,10 @@ const TOOLS = [
   {
     name: "get_execution_preference",
     description:
-      "Read the user's current local-vs-Galaxy execution preference from the Orbit " +
-      "viewer. Use to decide where to route a task. Returns 'local', 'galaxy', or 'auto'.",
+      "Read the user's current execution-mode preference from the Orbit viewer's " +
+      "footer toggle. Use this before deciding whether to route a task locally or " +
+      "to Galaxy. Returns { preference: 'local' | 'cloud' } where 'cloud' means " +
+      "the agent may route steps to Galaxy.",
     inputSchema: { type: "object", properties: {} },
   },
 ] as const;

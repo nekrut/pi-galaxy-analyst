@@ -3104,9 +3104,13 @@ window.orbit.onMcpToolCall(async (call) => {
         break;
       }
       case "get_execution_preference": {
-        // Prototype stub. Real impl reads ~/.orbit/preferences.json or per-
-        // project .orbit/config.json. Round-trip proves the channel works.
-        result = { preference: "auto" };
+        // Reads the same `executionMode` field the viewer's footer toggle
+        // writes (Local / Cloud). The agent can call this before deciding
+        // where to route a step.
+        const cfg = (await window.orbit.getConfig()) as { executionMode?: string };
+        const preference: "local" | "cloud" =
+          cfg.executionMode === "local" ? "local" : "cloud";
+        result = { preference };
         break;
       }
       default:
