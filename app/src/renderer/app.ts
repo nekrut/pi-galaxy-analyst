@@ -6,6 +6,9 @@ import { FileViewer } from "./files/file-viewer.js";
 import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 
 declare global {
   interface Window {
@@ -3124,3 +3127,74 @@ window.orbit.onMcpToolCall(async (call) => {
     });
   }
 });
+
+// ── Terminal pane — xterm.js hosting the user's chosen agent CLI ─────────────
+//
+// Main spawns `claude` (or whatever ORBIT_TERMINAL_CMD names) in a real PTY
+// in the analysis cwd. We just bridge keystrokes ↔ bytes and resize the PTY
+// when the renderer pane resizes.
+//
+// Only initialize when viewer-mode is active. In legacy mode the pane is
+// CSS-hidden and the terminal would be wasted DOM + a useless PTY connection.
+const terminalMount = document.getElementById("terminal-mount");
+const terminalRestartBtn = document.getElementById("terminal-restart");
+
+if (document.body.classList.contains("viewer-mode") && terminalMount) {
+  const term = new Terminal({
+    fontFamily:
+      'Menlo, "DejaVu Sans Mono", "SF Mono", Consolas, "Liberation Mono", monospace',
+    fontSize: 13,
+    cursorBlink: true,
+    scrollback: 10000,
+    theme: {
+      background: "#1a1d2a",
+      foreground: "#e8eaef",
+      cursor: "#ffd700",
+      selectionBackground: "rgba(255, 215, 0, 0.25)",
+    },
+    allowProposedApi: true,
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(terminalMount);
+
+  // First fit needs the element to have non-zero size. The pane is shown
+  // immediately by viewer-mode CSS, but layout may not have settled when
+  // this code runs synchronously after DOM ready, so fit on the next frame.
+  requestAnimationFrame(() => {
+    try {
+      fit.fit();
+      window.orbit.ptyResize(term.cols, term.rows);
+    } catch (e) {
+      console.warn("xterm initial fit failed:", e);
+    }
+  });
+
+  term.onData((data) => window.orbit.ptyInput(data));
+  term.onResize(({ cols, rows }) => window.orbit.ptyResize(cols, rows));
+
+  window.orbit.onPtyData((data) => term.write(data));
+  window.orbit.onPtyExit(({ code, signal }) => {
+    term.writeln(
+      `\r\n\x1b[33m[orbit] agent exited (code ${code}${signal ? `, signal ${signal}` : ""}). ` +
+        `Click ↻ to restart.\x1b[0m`,
+    );
+  });
+
+  if (terminalRestartBtn) {
+    terminalRestartBtn.addEventListener("click", async () => {
+      term.clear();
+      await window.orbit.ptyRestart();
+    });
+  }
+
+  // Refit on window resize. Pane resize via the terminal-divider is a
+  // follow-up (the divider drag would need its own handler — for now the
+  // pane sits at the CSS-default 50% width and only window resize matters).
+  const ro = new ResizeObserver(() => {
+    try {
+      fit.fit();
+    } catch {}
+  });
+  ro.observe(terminalMount);
+}

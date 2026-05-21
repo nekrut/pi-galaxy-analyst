@@ -207,6 +207,11 @@ const config: ForgeConfig = {
     name: "Orbit",
     executableName: "orbit",
     icon: "resources/icon",
+    // asar off for the prototype: native modules (node-pty) need to be
+    // require()-able at runtime from .vite/build/main.js, and the simplest
+    // way is to leave the .app's file tree flat. Revisit with
+    // app.asar + AutoUnpackNatives once everything else is stable.
+    asar: false,
     // Copies the staged Loom bundle, Node runtime, and uv binary to
     // Contents/Resources/ in the packaged app. agent.ts resolves
     // process.resourcesPath/{loom,node,uv}/... at brain spawn time.
@@ -217,6 +222,23 @@ const config: ForgeConfig = {
       stageLoomBundle();
       await stageNodeBundle();
       await stageUvBundle();
+    },
+    // Forge-vite's package step ships only the rolled-up .vite output, not
+    // node_modules — so any module we marked external (node-pty) can't be
+    // require()'d at runtime. Copy the few we need into the .app's resources
+    // alongside the asar so resolver walks find them.
+    postPackage: async (_forgeConfig, options) => {
+      for (const outPath of options.outputPaths) {
+        const appResources = path.join(outPath, "Orbit.app", "Contents", "Resources", "app");
+        const nm = path.join(appResources, "node_modules");
+        fs.mkdirSync(nm, { recursive: true });
+        const ptySrc = path.join(APP_DIR, "node_modules", "node-pty");
+        const ptyDst = path.join(nm, "node-pty");
+        if (fs.existsSync(ptySrc)) {
+          fs.cpSync(ptySrc, ptyDst, { recursive: true });
+          console.log("[forge] copied node-pty →", ptyDst);
+        }
+      }
     },
   },
   makers: [

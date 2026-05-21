@@ -20,7 +20,7 @@
     <title>orbit</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="viewer-mode">
     <div id="app">
       <div id="app-main">
         <!-- Left pane: File tree sidebar -->
@@ -70,6 +70,21 @@
 
         <!-- Draggable divider between files pane and chat -->
         <div id="files-divider"></div>
+
+        <!-- Terminal pane (viewer-mode only) — runs Claude Code / Codex / Gemini -->
+        <div id="terminal-pane" class="pane">
+          <div class="pane-title">
+            <span>Terminal</span>
+            <button
+              id="terminal-restart"
+              class="pane-title-btn"
+              title="Restart agent (kills + respawns claude in this cwd)"
+              aria-label="Restart agent"
+            >↻</button>
+          </div>
+          <div id="terminal-mount"></div>
+        </div>
+        <div id="terminal-divider"></div>
 
         <!-- Left pane: Chat -->
         <div id="chat-pane" class="pane">

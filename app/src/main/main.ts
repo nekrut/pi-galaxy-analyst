@@ -21,6 +21,7 @@ import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
 import { startMcpHost, stopMcpHost, updateWebContents as updateMcpWebContents } from "./mcp-host.js";
+import { startPty, stopPty, registerPtyIpc } from "./pty-manager.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
@@ -266,9 +267,13 @@ function createWindow(cwd: string): void {
   procMonitor = new ProcMonitor(mainWindow, () => agentManager?.getPid() ?? null);
 
   mainWindow.webContents.once("did-finish-load", () => {
-    log("renderer loaded, starting agent");
-    agentManager!.start();
-    procMonitor!.start();
+    log("renderer loaded");
+    // Viewer-mode prototype: no brain spawn. The user-installed `claude` CLI
+    // runs in the terminal pane via node-pty (see pty-manager.ts) and talks
+    // to the viewer via the Channel-2 MCP host.
+    registerPtyIpc();
+    startPty(mainWindow!.webContents, cwd);
+    log("viewer mode — claude PTY launched in cwd:", cwd);
   });
 
   // Diagnostic listeners (macOS display-sleep UI-wipe bug tracking)
@@ -505,5 +510,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   log("before-quit");
   agentManager?.stop();
+  stopPty();
   stopMcpHost();
 });

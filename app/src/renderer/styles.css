@@ -160,6 +160,66 @@ body.artifact-collapsed #chat-pane {
   flex: 1 1 100%;
 }
 
+/* Viewer mode — drop the chat pane and its divider; show the terminal pane
+   in their place. Footer bar stays so the Local/Cloud toggle, Galaxy badge,
+   and cwd indicator are still reachable. */
+body.viewer-mode #chat-pane,
+body.viewer-mode #divider {
+  display: none;
+}
+body.viewer-mode #terminal-pane {
+  display: flex;
+  flex: 0 0 50%;
+  min-width: 320px;
+  background: #1a1d2a;
+}
+body.viewer-mode #terminal-divider {
+  display: block;
+  width: 4px;
+  cursor: col-resize;
+  background: var(--border);
+  flex-shrink: 0;
+}
+body.viewer-mode #artifact-pane {
+  flex: 1 1 auto;
+}
+/* Hide footer controls that depend on a chat/brain session. */
+body.viewer-mode #agent-status,
+body.viewer-mode #agent-heartbeat,
+body.viewer-mode #model-indicator,
+body.viewer-mode #usage-bar {
+  display: none;
+}
+
+/* Terminal pane default (non-viewer) — hidden. Becomes visible only when
+   body has .viewer-mode. */
+#terminal-pane {
+  display: none;
+}
+#terminal-divider {
+  display: none;
+}
+#terminal-mount {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+}
+#terminal-mount .xterm {
+  height: 100%;
+}
+#terminal-restart {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 8px;
+}
+#terminal-restart:hover {
+  color: var(--text);
+}
+
 /* ── Files sidebar ────────────────────────────────────────────────────────── */
 
 #files-pane {

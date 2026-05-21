@@ -118,6 +118,12 @@ export interface OrbitAPI {
     forwardId: string,
     payload: { ok: true; result?: unknown } | { ok: false; error: string },
   ): void;
+  // Terminal pane (claude / codex / gemini / aider / bash in a PTY)
+  ptyInput(data: string): void;
+  ptyResize(cols: number, rows: number): void;
+  ptyRestart(): Promise<{ ok: true } | { ok: false; error: string }>;
+  onPtyData(callback: (data: string) => void): () => void;
+  onPtyExit(callback: (info: { code: number; signal: number | null }) => void): () => void;
 }
 
 const api: OrbitAPI = {
@@ -222,6 +228,20 @@ const api: OrbitAPI = {
 
   respondToMcpToolCall: (forwardId, payload) => {
     ipcRenderer.send("mcp:tool-response", { forwardId, ...payload });
+  },
+
+  ptyInput: (data) => ipcRenderer.send("pty:input", data),
+  ptyResize: (cols, rows) => ipcRenderer.send("pty:resize", { cols, rows }),
+  ptyRestart: () => ipcRenderer.invoke("pty:restart"),
+  onPtyData: (callback) => {
+    const handler = (_e: unknown, data: string) => callback(data);
+    ipcRenderer.on("pty:data", handler);
+    return () => ipcRenderer.removeListener("pty:data", handler);
+  },
+  onPtyExit: (callback) => {
+    const handler = (_e: unknown, info: { code: number; signal: number | null }) => callback(info);
+    ipcRenderer.on("pty:exit", handler);
+    return () => ipcRenderer.removeListener("pty:exit", handler);
   },
 };
 
