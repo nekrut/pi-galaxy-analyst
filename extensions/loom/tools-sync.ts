@@ -129,4 +129,49 @@ that weren't pushed yet.`,
             }
         },
     });
+
+    pi.registerTool({
+        name: "notebook_link_galaxy_page",
+        label: "Link notebook to existing Galaxy page",
+        description: `Bind the local notebook.md to an existing Galaxy page without pushing
+or pulling content. Inserts a loom-galaxy-page block with the page's id,
+slug, server URL, and latest revision id. Use this when an analysis was
+started in the Galaxy UI and the user wants Loom to take over editing.`,
+        parameters: Type.Object({
+            page_id: Type.String({
+                description: "Encoded page id (or slug) to link to.",
+            }),
+            history_id: Type.Optional(
+                Type.String({
+                    description:
+                        "History id; only needed if Galaxy's page response doesn't include one.",
+                }),
+            ),
+        }),
+        async execute(_callId, params, _signal, _onUpdate, _ctx) {
+            try {
+                const result = await linkGalaxyPage(params.page_id, {
+                    historyId: params.history_id,
+                });
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: JSON.stringify(
+                                {
+                                    page_id: result.pageId,
+                                    latest_revision_id: result.latestRevisionId,
+                                },
+                                null,
+                                2,
+                            ),
+                        },
+                    ],
+                    details: { pageId: result.pageId },
+                };
+            } catch (e) {
+                return errorContent(e);
+            }
+        },
+    });
 }
