@@ -15,6 +15,7 @@ import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { getRecentActivityEvents } from "./activity";
 import { loadConfig } from "./config";
 import { listEnabledSkillRepos } from "./skills";
+import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -73,6 +74,38 @@ operating policies above.
 ${truncated ? "_(showing head + tail; middle elided)_\n\n" : ""}\`\`\`markdown
 ${excerpt}
 \`\`\`
+`;
+}
+
+/**
+ * Surface the loom-galaxy-page binding to the agent at session start so it
+ * knows which page push/pull would touch and which tool fits which direction.
+ */
+export function buildGalaxyPageBindingBlock(): string {
+  const nbPath = getNotebookPath();
+  if (!nbPath) return "";
+  let content: string;
+  try {
+    content = fs.readFileSync(nbPath, "utf-8");
+  } catch {
+    return "";
+  }
+  const binding = findGalaxyPageBlocks(content)[0];
+  if (!binding) return "";
+  return `
+## Galaxy page binding
+
+This notebook is linked to a Galaxy page on \`${binding.galaxyServerUrl}\`:
+
+- page_id: \`${binding.pageId}\`
+- page_slug: \`${binding.pageSlug ?? "<none>"}\`
+- history_id: \`${binding.historyId}\`
+- last_synced_revision: \`${binding.lastSyncedRevision ?? "<none>"}\`
+
+Use \`notebook_push_to_galaxy\` to share progress with the user (creates a new
+revision of the Galaxy page). Use \`notebook_pull_from_galaxy\` to fetch
+updates the user made on the Galaxy side -- only when the user explicitly
+asks for it, since pull discards local edits since the last sync.
 `;
 }
 
@@ -714,6 +747,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildSkillsContext(),
       buildLocalEnvContext(),
       buildNotebookExcerptBlock(),
+      buildGalaxyPageBindingBlock(),
       buildRecentActivityBlock(),
       buildTeamDispatchContext(),
       buildSessionIndexContext(),
