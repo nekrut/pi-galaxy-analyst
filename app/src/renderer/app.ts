@@ -2232,8 +2232,9 @@ divider.addEventListener("mousedown", (e) => {
 
 document.addEventListener("mousemove", (e) => {
   if (!dragging) return;
-  const appWidth = document.getElementById("app")!.clientWidth;
-  const pct = (e.clientX / appWidth) * 100;
+  const containerWidth = document.getElementById("app")!.getBoundingClientRect().width;
+  const chatLeft = chatPane.getBoundingClientRect().left;
+  const pct = ((e.clientX - chatLeft) / containerWidth) * 100;
   const clamped = Math.max(25, Math.min(75, pct));
   chatPane.style.flex = `0 0 ${clamped}%`;
 });
