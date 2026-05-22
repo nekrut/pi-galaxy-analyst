@@ -94,4 +94,39 @@ any concurrent Galaxy-UI edits since the last sync are overwritten.`,
             }
         },
     });
+
+    pi.registerTool({
+        name: "notebook_pull_from_galaxy",
+        label: "Pull notebook from Galaxy page",
+        description: `Replace the local notebook.md with the body of the linked Galaxy page,
+then re-apply the loom-galaxy-page binding block on top. Requires the
+notebook to already have a binding (use notebook_link_galaxy_page or
+notebook_push_to_galaxy first). Unconditional remote-wins: any local edits
+since the last sync are overwritten, including loom-invocation blocks
+that weren't pushed yet.`,
+        parameters: Type.Object({}),
+        async execute(_callId, _params, _signal, _onUpdate, _ctx) {
+            try {
+                const result = await pullNotebookFromGalaxy();
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: JSON.stringify(
+                                {
+                                    page_id: result.pageId,
+                                    latest_revision_id: result.latestRevisionId,
+                                },
+                                null,
+                                2,
+                            ),
+                        },
+                    ],
+                    details: { pageId: result.pageId },
+                };
+            } catch (e) {
+                return errorContent(e);
+            }
+        },
+    });
 }
