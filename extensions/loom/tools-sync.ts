@@ -13,6 +13,7 @@ import {
     pushNotebookToGalaxy,
     pullNotebookFromGalaxy,
     linkGalaxyPage,
+    resumeGalaxyPage,
 } from "./galaxy-pages-sync";
 
 function errorContent(e: unknown) {
@@ -123,6 +124,56 @@ that weren't pushed yet.`,
                         },
                     ],
                     details: { pageId: result.pageId },
+                };
+            } catch (e) {
+                return errorContent(e);
+            }
+        },
+    });
+
+    pi.registerTool({
+        name: "notebook_resume_from_galaxy",
+        label: "Resume notebook from Galaxy page",
+        description: `One-shot resume of a Galaxy page into the local notebook: writes the
+loom-galaxy-page binding block and replaces local content with the remote
+page body in a single locked operation. Use this when starting a fresh
+Loom session against a page that was created or last edited in the Galaxy
+UI -- it saves the user from having to do notebook_link_galaxy_page then
+notebook_pull_from_galaxy. Refuses to clobber when the notebook is already
+bound to a different page on the same server (use notebook_link_galaxy_page
+to switch explicitly). Idempotent when re-resuming the same page.`,
+        parameters: Type.Object({
+            page_id: Type.String({
+                description: "Encoded page id (or slug) to resume from.",
+            }),
+            history_id: Type.Optional(
+                Type.String({
+                    description:
+                        "History id; only needed if Galaxy's page response doesn't include one.",
+                }),
+            ),
+        }),
+        async execute(_callId, params, _signal, _onUpdate, _ctx) {
+            try {
+                const result = await resumeGalaxyPage(params.page_id, {
+                    historyId: params.history_id,
+                });
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: JSON.stringify(
+                                {
+                                    page_id: result.pageId,
+                                    latest_revision_id: result.latestRevisionId,
+                                    action: result.action,
+                                },
+                                null,
+                                2,
+                            ),
+                        },
+                    ],
+                    details: { pageId: result.pageId, action: result.action },
                 };
             } catch (e) {
                 return errorContent(e);
