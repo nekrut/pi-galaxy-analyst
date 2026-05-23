@@ -15,6 +15,7 @@ import {
     pushNotebookToGalaxy,
     pullNotebookFromGalaxy,
     linkGalaxyPage,
+    resumeGalaxyPage,
 } from "./galaxy-pages-sync";
 
 interface ParsedFlags {
@@ -55,7 +56,7 @@ function parseFlags(input: string): ParsedFlags {
 export function registerSyncCommand(pi: ExtensionAPI): void {
     pi.registerCommand("sync", {
         description:
-            "Sync notebook.md with a Galaxy page. Subcommands: status | push [--history H --title T --slug S --annotation A] | pull | link <page_id> [--history H]",
+            "Sync notebook.md with a Galaxy page. Subcommands: status | push [--history H --title T --slug S --annotation A] | pull | link <page_id> [--history H] | resume <page_id> [--history H]",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         handler: async (args: string, ctx: any) => {
             const trimmed = (args ?? "").trim();
@@ -133,8 +134,27 @@ export function registerSyncCommand(pi: ExtensionAPI): void {
                     return;
                 }
 
+                if (subcommand === "resume") {
+                    const pageId = positional[0];
+                    if (!pageId) {
+                        ctx.ui.notify(
+                            "Usage: /sync resume <page_id> [--history <id>]",
+                            "warning",
+                        );
+                        return;
+                    }
+                    const result = await resumeGalaxyPage(pageId, {
+                        historyId: flags.history,
+                    });
+                    ctx.ui.notify(
+                        `Resumed page ${result.pageId} (${result.action}, revision ${result.latestRevisionId}). Notebook updated.`,
+                        "info",
+                    );
+                    return;
+                }
+
                 ctx.ui.notify(
-                    `Unknown /sync subcommand: ${subcommand}. Use status, push, pull, or link.`,
+                    `Unknown /sync subcommand: ${subcommand}. Use status, push, pull, link, or resume.`,
                     "warning",
                 );
             } catch (e) {

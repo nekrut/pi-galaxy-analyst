@@ -117,4 +117,45 @@ describe("/sync command", () => {
             historyId: "h2",
         });
     });
+
+    it("resume parses page id and optional history, reports action", async () => {
+        vi.mocked(sync.resumeGalaxyPage).mockResolvedValue({
+            pageId: "p7",
+            latestRevisionId: "r7",
+            action: "linked",
+        });
+        const { registerSyncCommand } = await import(
+            "../extensions/loom/sync-command"
+        );
+        const { api, commands } = makeApi();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        registerSyncCommand(api as any);
+
+        const ctx = { ui: { notify: vi.fn() } };
+        await commands.sync.handler("resume p7 --history h7", ctx);
+        expect(sync.resumeGalaxyPage).toHaveBeenCalledWith("p7", {
+            historyId: "h7",
+        });
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+            expect.stringMatching(/Resumed page p7.*linked.*revision r7/),
+            "info",
+        );
+    });
+
+    it("resume without a page id reports usage", async () => {
+        const { registerSyncCommand } = await import(
+            "../extensions/loom/sync-command"
+        );
+        const { api, commands } = makeApi();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        registerSyncCommand(api as any);
+
+        const ctx = { ui: { notify: vi.fn() } };
+        await commands.sync.handler("resume", ctx);
+        expect(sync.resumeGalaxyPage).not.toHaveBeenCalled();
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+            expect.stringMatching(/Usage: \/sync resume/),
+            "warning",
+        );
+    });
 });
