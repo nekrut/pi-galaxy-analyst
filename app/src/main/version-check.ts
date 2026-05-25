@@ -7,6 +7,10 @@ const RELEASES_API = "https://api.github.com/repos/galaxyproject/loom/releases/l
 const RELEASES_PAGE = "https://github.com/galaxyproject/loom/releases/latest";
 const CACHE_FILE = path.join(os.homedir(), ".orbit", "version-check.json");
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// Shorter back-off for failed fetches so a flaky network at startup doesn't
+// hide a real release for 24h, but rate-limit or outage scenarios don't
+// re-hammer GitHub every session either.
+const FAILURE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
 
 export interface VersionCheckResult {
@@ -18,8 +22,11 @@ export interface VersionCheckResult {
 
 interface CacheShape {
   fetchedAt: number;
-  latest: string;
-  releaseUrl: string;
+  latest?: string;
+  releaseUrl?: string;
+  // When true, fetchedAt records a failed fetch attempt; checkLatestVersion
+  // short-circuits to null until FAILURE_TTL_MS elapses.
+  failed?: boolean;
 }
 
 interface SemverParts {
@@ -87,8 +94,9 @@ function readCache(): CacheShape | null {
     const raw = fs.readFileSync(CACHE_FILE, "utf-8");
     const parsed = JSON.parse(raw) as CacheShape;
     if (typeof parsed.fetchedAt !== "number") return null;
-    if (typeof parsed.latest !== "string") return null;
-    if (Date.now() - parsed.fetchedAt > CACHE_TTL_MS) return null;
+    const ttl = parsed.failed ? FAILURE_TTL_MS : CACHE_TTL_MS;
+    if (Date.now() - parsed.fetchedAt > ttl) return null;
+    if (!parsed.failed && typeof parsed.latest !== "string") return null;
     return parsed;
   } catch {
     return null;
@@ -105,19 +113,27 @@ function writeCache(latest: string, releaseUrl: string): void {
   } catch {}
 }
 
+function writeFailureCache(): void {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    fs.writeFileSync(
+      CACHE_FILE,
+      JSON.stringify({ fetchedAt: Date.now(), failed: true } satisfies CacheShape),
+    );
+  } catch {}
+}
+
 async function fetchLatestFromGitHub(): Promise<{ latest: string; releaseUrl: string } | null> {
   // net.fetch routes through Chromium's networking stack — works with the
   // user's system proxy/certs and doesn't require importing the Node https
   // module here. AbortSignal.timeout caps a hung request.
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await net.fetch(RELEASES_API, {
       headers: {
         Accept: "application/vnd.github+json",
         "User-Agent": `Orbit/${app.getVersion()}`,
       },
-      signal: controller.signal,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { tag_name?: string; html_url?: string };
@@ -128,22 +144,24 @@ async function fetchLatestFromGitHub(): Promise<{ latest: string; releaseUrl: st
     };
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
   }
 }
 
 export async function checkLatestVersion(): Promise<VersionCheckResult | null> {
   const current = app.getVersion();
   const cached = readCache();
+  if (cached?.failed) return null;
   let latest: string;
   let releaseUrl: string;
-  if (cached) {
+  if (cached && cached.latest && cached.releaseUrl) {
     latest = cached.latest;
     releaseUrl = cached.releaseUrl;
   } else {
     const fetched = await fetchLatestFromGitHub();
-    if (!fetched) return null;
+    if (!fetched) {
+      writeFailureCache();
+      return null;
+    }
     latest = fetched.latest;
     releaseUrl = fetched.releaseUrl;
     writeCache(latest, releaseUrl);
