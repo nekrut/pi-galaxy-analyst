@@ -98,12 +98,15 @@ frequencies across tissues.
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} — fastp adapter trim + per-base QC
   - Routing: local
   - Tool: fastp
+  - Verification: confirm fastp HTML/JSON report exists and includes per-base quality metrics
 - [x] 2. **Reference index** {#plan-a-step-2} — bwa index of chrM
   - Routing: local
   - Tool: bwa index, samtools faidx
+  - Verification: confirm BWA index sidecar files and `.fai` exist
 - [ ] 3. **Read alignment** {#plan-a-step-3} — BWA-MEM, paired collection
   - Routing: Galaxy
   - Tool: bwa-mem2/2.2.1
+  - Verification: poll Galaxy invocation to `ok` and inspect BAM outputs
 - ...
 
 ### Parameters
