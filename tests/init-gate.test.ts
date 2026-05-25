@@ -284,7 +284,7 @@ describe("checkPreconditions -- happy path", () => {
 ## Plan A: chrM [local]
 
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} -- fastp adapter trim + per-base QC
-  - Verification: confirm FastQC output exists and includes the summary module
+  - Verification: confirm fastp HTML/JSON report exists and includes the summary module
 `);
     const result = checkPreconditions();
     expect(result.ok).toBe(true);
