@@ -15,6 +15,12 @@ on:
 permissions:
   contents: write
 
+# Two pushes (or a re-push) of the same tag would otherwise race to attach
+# artifacts to the draft Release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     strategy:

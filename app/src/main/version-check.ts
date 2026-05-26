@@ -7,6 +7,10 @@ const RELEASES_API = "https://api.github.com/repos/galaxyproject/loom/releases/l
 const RELEASES_PAGE = "https://github.com/galaxyproject/loom/releases/latest";
 const CACHE_FILE = path.join(os.homedir(), ".orbit", "version-check.json");
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// Shorter back-off for failed fetches so a flaky network at startup doesn't
+// hide a real release for 24h, but rate-limit or outage scenarios don't
+// re-hammer GitHub every session either.
+const FAILURE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
 
 export interface VersionCheckResult {
@@ -16,11 +20,12 @@ export interface VersionCheckResult {
   releaseUrl: string;
 }
 
-interface CacheShape {
-  fetchedAt: number;
-  latest: string;
-  releaseUrl: string;
-}
+// Discriminated union: a success entry carries latest/releaseUrl; a failure
+// entry just records when the attempt failed so checkLatestVersion can
+// short-circuit until FAILURE_TTL_MS elapses.
+type CacheShape =
+  | { fetchedAt: number; failed: true }
+  | { fetchedAt: number; failed?: false; latest: string; releaseUrl: string };
 
 interface SemverParts {
   major: number;
@@ -85,23 +90,24 @@ function isNewer(current: string, candidate: string): boolean {
 function readCache(): CacheShape | null {
   try {
     const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-    const parsed = JSON.parse(raw) as CacheShape;
-    if (typeof parsed.fetchedAt !== "number") return null;
-    if (typeof parsed.latest !== "string") return null;
-    if (Date.now() - parsed.fetchedAt > CACHE_TTL_MS) return null;
-    return parsed;
+    const parsed: Record<string, unknown> = JSON.parse(raw);
+    const fetchedAt = parsed.fetchedAt;
+    if (typeof fetchedAt !== "number") return null;
+    const failed = parsed.failed === true;
+    if (Date.now() - fetchedAt > (failed ? FAILURE_TTL_MS : CACHE_TTL_MS)) return null;
+    if (failed) return { fetchedAt, failed: true };
+    const { latest, releaseUrl } = parsed;
+    if (typeof latest !== "string" || typeof releaseUrl !== "string") return null;
+    return { fetchedAt, latest, releaseUrl };
   } catch {
     return null;
   }
 }
 
-function writeCache(latest: string, releaseUrl: string): void {
+function writeCacheEntry(entry: CacheShape): void {
   try {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(
-      CACHE_FILE,
-      JSON.stringify({ fetchedAt: Date.now(), latest, releaseUrl } satisfies CacheShape),
-    );
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(entry));
   } catch {}
 }
 
@@ -109,15 +115,13 @@ async function fetchLatestFromGitHub(): Promise<{ latest: string; releaseUrl: st
   // net.fetch routes through Chromium's networking stack — works with the
   // user's system proxy/certs and doesn't require importing the Node https
   // module here. AbortSignal.timeout caps a hung request.
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await net.fetch(RELEASES_API, {
       headers: {
         Accept: "application/vnd.github+json",
         "User-Agent": `Orbit/${app.getVersion()}`,
       },
-      signal: controller.signal,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { tag_name?: string; html_url?: string };
@@ -128,14 +132,13 @@ async function fetchLatestFromGitHub(): Promise<{ latest: string; releaseUrl: st
     };
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
   }
 }
 
 export async function checkLatestVersion(): Promise<VersionCheckResult | null> {
   const current = app.getVersion();
   const cached = readCache();
+  if (cached?.failed) return null;
   let latest: string;
   let releaseUrl: string;
   if (cached) {
@@ -143,10 +146,13 @@ export async function checkLatestVersion(): Promise<VersionCheckResult | null> {
     releaseUrl = cached.releaseUrl;
   } else {
     const fetched = await fetchLatestFromGitHub();
-    if (!fetched) return null;
+    if (!fetched) {
+      writeCacheEntry({ fetchedAt: Date.now(), failed: true });
+      return null;
+    }
     latest = fetched.latest;
     releaseUrl = fetched.releaseUrl;
-    writeCache(latest, releaseUrl);
+    writeCacheEntry({ fetchedAt: Date.now(), latest, releaseUrl });
   }
   return {
     current,
