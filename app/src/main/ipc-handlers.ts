@@ -345,6 +345,16 @@ export function registerIpcHandlers(agent: AgentManager): void {
     },
   );
 
+  ipcMain.handle("notebook:load", async () => {
+    const nbPath = path.join(agent.getCwd(), "notebook.md");
+    try {
+      const content = fs.readFileSync(nbPath, "utf-8");
+      return { ok: true, content, path: nbPath };
+    } catch {
+      return { ok: false, content: null, path: nbPath };
+    }
+  });
+
   ipcMain.handle("file:open", async (_e, filePath: string) => {
     log("open file:", filePath);
 

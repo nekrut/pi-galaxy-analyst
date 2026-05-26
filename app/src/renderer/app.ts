@@ -808,6 +808,14 @@ window.orbit.onCwdChanged((dir) => {
 // is restored, but the chat panel is empty because it's renderer-only state.
 // Replay prior turns only if the chat is currently blank — otherwise the user
 // is mid-flow (e.g. prefs-save restart) and replay would clobber live UI.
+async function loadNotebookFromDisk(): Promise<void> {
+  const r = await window.orbit.loadNotebook();
+  if (r.ok && r.content) {
+    artifacts.setNotebookMarkdown(`> \`${r.path}\`\n\n${r.content}`);
+    setArtifactCollapsed(false);
+  }
+}
+
 // On wake-from-sleep, auto-restore blank chat and notebook without user action.
 window.orbit.onDisplayResume(() => {
   if (!chat.hasContent()) {
@@ -817,7 +825,11 @@ window.orbit.onDisplayResume(() => {
       }
     });
   }
-  artifacts.reRenderNotebook();
+  if (artifacts.hasNotebookContent()) {
+    artifacts.reRenderNotebook();
+  } else {
+    void loadNotebookFromDisk();
+  }
 });
 
 window.orbit.onSessionHistory((history) => {
@@ -1094,14 +1106,17 @@ function handleSlashCommand(text: string): boolean {
     return true;
   }
 
+  // /notebook: load from disk immediately, then also ask agent for a fresh
+  // widget (which may include a more recent snapshot post-compact).
+  if (cmd === "notebook") {
+    chat.addUserMessage(text);
+    void loadNotebookFromDisk();
+    window.orbit.prompt("/notebook");
+    return true;
+  }
+
   // Loom commands — pass through to agent
-  if (
-    cmd === "plan" ||
-    cmd === "status" ||
-    cmd === "notebook" ||
-    cmd === "decisions" ||
-    cmd === "profiles"
-  ) {
+  if (cmd === "plan" || cmd === "status" || cmd === "decisions" || cmd === "profiles") {
     chat.addUserMessage(text);
     window.orbit.prompt(`/${cmd}`);
     return true;
