@@ -140,6 +140,16 @@ export class ArtifactPanel {
     if (this.lastNotebookMarkdown) this.setNotebookMarkdown(this.lastNotebookMarkdown);
   }
 
+  /**
+   * Drop the cached notebook content + clear the panel. Called on cwd change
+   * so a wake-from-sleep after switching projects doesn't re-render the prior
+   * project's notebook over the new session.
+   */
+  clearNotebook(): void {
+    this.lastNotebookMarkdown = null;
+    this.notebookEl.innerHTML = "";
+  }
+
   hasNotebookContent(): boolean {
     return this.lastNotebookMarkdown !== null;
   }

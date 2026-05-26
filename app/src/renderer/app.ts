@@ -787,9 +787,12 @@ function applyCwdChange(dir: string): void {
   );
   hasShownStartupWelcome = false;
   // Re-root the file tree, close any open viewer, hide the File tab — the
-  // old relPath is meaningless in the new cwd.
+  // old relPath is meaningless in the new cwd. Drop the notebook cache too
+  // so the next display:resume re-renders the *current* cwd's notebook
+  // (loaded fresh via loadNotebookFromDisk) rather than the prior project's.
   fileViewer.close();
   artifacts.hideFileTab();
+  artifacts.clearNotebook();
   filesPanel.reset();
   void filesPanel.refresh();
   void refreshGalaxyInvocations(window.orbit);
