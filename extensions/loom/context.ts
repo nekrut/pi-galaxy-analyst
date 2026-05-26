@@ -131,6 +131,18 @@ ${lines.join("\n")}
  * if Galaxy MCP is registered. Cloud mode is the default and the
  * unrestricted, per-plan-routing behavior.
  */
+function buildActiveModelBlock(): string {
+  const cfg = loadConfig();
+  const active = cfg.llm?.active;
+  const model = active ? cfg.llm?.providers?.[active]?.model : undefined;
+  if (!active) return "";
+  const modelStr = model ? `${model}` : "unknown model";
+  return `## Active LLM
+
+You are **${modelStr}** running via the **${active}** provider. This is your current identity for this session — state it accurately when asked and do not claim to be a different model or provider.
+`;
+}
+
 function buildExecutionModeBlock(): string {
   const cfg = loadConfig();
   if (cfg.executionMode !== "local") return "";
@@ -827,6 +839,7 @@ asks what was said.
 export function setupContextInjection(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, ctx) => {
     const systemPrompt = [
+      buildActiveModelBlock(),
       buildOperatingDisciplineBlock(),
       buildVerificationDisciplineBlock(),
       buildPlanConventionBlock(),
