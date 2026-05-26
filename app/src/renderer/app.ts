@@ -17,7 +17,12 @@ declare global {
 // macOS uses titleBarStyle: 'hiddenInset', which insets the traffic lights
 // over the top-left of the content. Toggle a body class so we can pad the
 // leftmost masthead away from them and skip the padding on other platforms.
-if (navigator.platform.startsWith("Mac")) document.body.classList.add("platform-darwin");
+// navigator.platform is deprecated; prefer userAgentData and fall back for
+// older Chromium / non-Chromium runtimes that may host the renderer.
+const platformString =
+  (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+  navigator.platform;
+if (/mac/i.test(platformString)) document.body.classList.add("platform-darwin");
 
 // ── Components ────────────────────────────────────────────────────────────────
 
