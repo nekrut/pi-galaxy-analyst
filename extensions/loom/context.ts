@@ -537,7 +537,7 @@ the IWC \`bwa-mem-chrM\` workflow. Output: chrM VCF + per-sample QC.
 - [ ] 2. **Align to chrM reference**${anchorOrEmpty("plan-a-step-2", omitAnchors)} — BWA-MEM, sorted BAM out
   - Routing: galaxy
   - Tool: bwa_mem
-  - Verification: poll Galaxy invocation to `ok` and inspect BAM outputs
+  - Verification: poll Galaxy invocation to \`ok\` and inspect BAM outputs
 - [ ] 3. **Call variants**${anchorOrEmpty("plan-a-step-3", omitAnchors)} — bcftools call, filter Q>=30
   - Routing: galaxy
   - Tool: bcftools_call
