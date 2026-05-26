@@ -100,12 +100,17 @@ const PROVIDER_ENV_MAP = {
   xai: "XAI_API_KEY",
 };
 
-// LLM config: set env var if not already present
-if (loomConfig.llm?.apiKey) {
-  const provider = loomConfig.llm.provider || "anthropic";
-  const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
+// LLM config: set env var if not already present. After the multi-provider
+// migration the key lives at llm.providers[active].apiKey instead of the
+// old flat llm.apiKey. apiKeyEncrypted isn't readable here (no Electron
+// safeStorage in the brain process) -- Orbit decrypts and passes via env
+// when it spawns us; standalone CLI usage only works with plaintext keys.
+const activeLlmProvider = loomConfig.llm?.active;
+const activeLlmConfig = activeLlmProvider ? loomConfig.llm?.providers?.[activeLlmProvider] : null;
+if (activeLlmConfig?.apiKey) {
+  const envVar = PROVIDER_ENV_MAP[activeLlmProvider] || "AI_GATEWAY_API_KEY";
   if (!process.env[envVar]) {
-    process.env[envVar] = loomConfig.llm.apiKey;
+    process.env[envVar] = activeLlmConfig.apiKey;
   }
 }
 
@@ -293,15 +298,15 @@ Set up one of the following:
 
 const providerArgs = [];
 if (!hasArg("--provider")) {
-  // Prefer consolidated config
-  if (loomConfig.llm?.provider) {
-    providerArgs.push("--provider", loomConfig.llm.provider);
+  // Prefer consolidated config (multi-provider shape)
+  if (activeLlmProvider) {
+    providerArgs.push("--provider", activeLlmProvider);
     if (
-      loomConfig.llm.model &&
+      activeLlmConfig?.model &&
       !userArgs.includes("--model") &&
       !userArgs.some((a) => a.startsWith("--model="))
     ) {
-      providerArgs.push("--model", loomConfig.llm.model);
+      providerArgs.push("--model", activeLlmConfig.model);
     }
   } else {
     // Fall back to legacy models.json
