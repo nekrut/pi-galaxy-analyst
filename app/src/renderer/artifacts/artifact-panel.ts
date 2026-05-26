@@ -122,7 +122,9 @@ export class ArtifactPanel {
 
   /** Replace the notebook view with rendered markdown. */
   setNotebookMarkdown(markdown: string): void {
-    this.lastNotebookMarkdown = markdown;
+    // Only cache non-empty content so a blank early widget doesn't clobber
+    // a real notebook on the next display:resume re-render.
+    if (markdown.trim()) this.lastNotebookMarkdown = markdown;
     this.notebookEl.innerHTML = "";
     const wrapper = document.createElement("div");
     wrapper.className = "result-block notebook-dump";
@@ -133,9 +135,9 @@ export class ArtifactPanel {
     this.notebookEl.appendChild(wrapper);
   }
 
-  /** Re-render the last known notebook content. No-op if never set. */
+  /** Re-render the last known non-empty notebook content. No-op if never set. */
   reRenderNotebook(): void {
-    if (this.lastNotebookMarkdown !== null) this.setNotebookMarkdown(this.lastNotebookMarkdown);
+    if (this.lastNotebookMarkdown) this.setNotebookMarkdown(this.lastNotebookMarkdown);
   }
 
   hasNotebookContent(): boolean {
