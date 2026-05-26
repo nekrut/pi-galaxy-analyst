@@ -165,8 +165,14 @@ export class ArtifactPanel {
     this.fileEl.classList.toggle("hidden", tab !== "file");
   }
 
-  /** Reset notebook to its empty state and switch to the Notebook tab. */
+  /**
+   * Reset notebook to its empty placeholder + switch to the Notebook tab.
+   * Used on /new and other session-resets where the prior cache no longer
+   * applies -- without nulling lastNotebookMarkdown here, a later wake-from-
+   * sleep would re-render the cleared session's stale notebook.
+   */
   clear(): void {
+    this.lastNotebookMarkdown = null;
     this.notebookEl.innerHTML = NOTEBOOK_EMPTY_HTML;
     this.selectTab("notebook");
   }
