@@ -197,14 +197,20 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   // Replay the current session's chat transcript into the renderer. Used by
-  // the /chat slash command to recover chat after the window blanks out
-  // (e.g. after an accidental file:// navigation). No agent restart — just
-  // re-read session.jsonl and push the ReplaySegment[] back.
+  // the /chat slash command and by display:resume after wake-from-sleep
+  // (recovering chat after the renderer blanks). Reads only from the
+  // AgentManager's pinned session file -- a fresh `/new` start pins null,
+  // so this returns empty rather than surfacing stale per-cwd history.
   ipcMain.handle("chat:replay", async (e) => {
     const window = BrowserWindow.fromWebContents(e.sender);
     if (!window || window.isDestroyed()) return { ok: false, error: "no window" };
+    const pinned = agent.getPinnedSessionFile();
+    if (!pinned) {
+      window.webContents.send("agent:session-history", []);
+      return { ok: true, segments: 0 };
+    }
     try {
-      const history = loadSessionHistory(agent.getCwd());
+      const history = loadSessionHistory(pinned);
       window.webContents.send("agent:session-history", history);
       return { ok: true, segments: history.length };
     } catch (err) {

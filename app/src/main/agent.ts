@@ -6,7 +6,7 @@ import os from "node:os";
 import { app, type BrowserWindow } from "electron";
 import { loadConfig } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
-import { loadSessionHistory } from "./session-replay.js";
+import { loadSessionHistory, newestSessionFile } from "./session-replay.js";
 import { collectDescendantsOf } from "./proc-monitor.js";
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
@@ -173,6 +173,11 @@ export class AgentManager {
   private hasStartedBefore = false; // → use --continue on restart to preserve chat history
   private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
   private nextStartIsFresh = false; // → tells extension to skip notebook auto-load on next start
+  // Session file the current spawn is operating on, set on start() when we
+  // pass --continue. `null` on fresh starts (no --continue) so /chat replay
+  // refuses to surface old per-cwd history that doesn't belong to the live
+  // session. Cleared in stop() so a stale pointer can't leak into the next run.
+  private pinnedSessionFile: string | null = null;
   private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
   private silentRestarting = false; // → suppresses status flicker during MCP bootstrap restart
 
@@ -234,6 +239,16 @@ export class AgentManager {
   }
 
   /**
+   * The on-disk session file the current spawn is replaying from, or null
+   * for fresh starts. /chat replay reads from this rather than re-running
+   * newest-by-mtime on the per-cwd dir -- a fresh start with old sessions
+   * still on disk must not surface them.
+   */
+  getPinnedSessionFile(): string | null {
+    return this.pinnedSessionFile;
+  }
+
+  /**
    * Check if Pi.dev has any saved sessions for the current cwd.
    * Pi stores sessions in ~/.pi/agent/sessions/<encoded-cwd>/ as .jsonl files.
    * Used on first launch to decide whether to pass --continue for a soft resume.
@@ -271,6 +286,12 @@ export class AgentManager {
     this.hasStartedBefore = true;
     this.nextStartSkipContinue = false;
 
+    // Pin the session file this spawn operates on. On --continue we pin the
+    // newest jsonl in the per-cwd dir (same picker the brain will resume
+    // from); on fresh starts we pin null so /chat replay returns empty
+    // instead of surfacing the previous run's transcript.
+    this.pinnedSessionFile = wantsContinue ? newestSessionFile(this.cwd) : null;
+
     const fresh = this.nextStartIsFresh;
     this.nextStartIsFresh = false;
     log("starting agent", {
@@ -306,9 +327,14 @@ export class AgentManager {
     // When resuming with --continue, the agent reloads its in-memory context
     // from the on-disk session but the renderer has no way to see prior turns.
     // Replay them into the chat pane so the UI reflects what the model remembers.
-    if (wantsContinue && !this.silentRestarting && !this.window.isDestroyed()) {
+    if (
+      wantsContinue &&
+      this.pinnedSessionFile &&
+      !this.silentRestarting &&
+      !this.window.isDestroyed()
+    ) {
       try {
-        const history = loadSessionHistory(this.cwd);
+        const history = loadSessionHistory(this.pinnedSessionFile);
         if (history.length > 0) {
           this.window.webContents.send("agent:session-history", history);
         }
@@ -418,6 +444,7 @@ export class AgentManager {
       this.process.kill("SIGTERM");
       this.process = null;
     }
+    this.pinnedSessionFile = null;
     this.setStatus("stopped");
     for (const [id, pending] of this.pendingResponses) {
       log("rejecting pending response:", id);

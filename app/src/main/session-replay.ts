@@ -33,7 +33,7 @@ function sessionsDir(cwd: string): string {
   return path.join(os.homedir(), ".pi", "agent", "sessions", encoded);
 }
 
-function newestSessionFile(cwd: string): string | null {
+export function newestSessionFile(cwd: string): string | null {
   const dir = sessionsDir(cwd);
   if (!fs.existsSync(dir)) return null;
   const files = fs
@@ -54,16 +54,18 @@ function isBootstrapPrompt(text: string): boolean {
 }
 
 /**
- * Read the newest on-disk session for `cwd` and turn it into a compact replay.
+ * Read a specific session file and turn it into a compact replay. The caller
+ * is responsible for picking the right file -- AgentManager pins one on
+ * spawn so `/chat` replay reads the *current* session, not whichever .jsonl
+ * happens to be newest by mtime in the per-cwd directory (which on a fresh
+ * `/new` run would surface the prior session's history).
+ *
  * Returns up to the last `maxSegments` user/assistant turns.
  */
 export function loadSessionHistory(
-  cwd: string,
+  file: string,
   options: { maxSegments?: number } = {},
 ): ReplaySegment[] {
-  const file = newestSessionFile(cwd);
-  if (!file) return [];
-
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
