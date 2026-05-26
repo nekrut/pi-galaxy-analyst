@@ -575,9 +575,10 @@ welcomeSave.addEventListener("click", async () => {
 
   const cfg: Record<string, unknown> = {
     llm: {
-      provider: welcomeProvider.value,
-      model: welcomeModel.value,
-      apiKey,
+      active: welcomeProvider.value,
+      providers: {
+        [welcomeProvider.value]: { model: welcomeModel.value, apiKey },
+      },
     },
   };
 
@@ -616,8 +617,12 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function checkFirstRun(): Promise<void> {
-  const cfg = (await window.orbit.getConfig()) as { llm?: { hasApiKey?: boolean } };
-  if (!cfg.llm?.hasApiKey) {
+  const cfg = (await window.orbit.getConfig()) as {
+    llm?: { active?: string; providers?: Record<string, { hasApiKey?: boolean }> };
+  };
+  const active = cfg.llm?.active;
+  const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
+  if (!hasKey) {
     populateWelcomeModels(welcomeProvider.value);
     welcomeOverlay.classList.remove("hidden");
   }
@@ -724,9 +729,13 @@ renderUsage();
 // Populate model indicator from config at startup so it shows before the first message
 void (async () => {
   try {
-    const cfg = (await window.orbit.getConfig()) as { llm?: { model?: string } };
-    if (cfg.llm?.model) {
-      currentModel = cfg.llm.model;
+    const cfg = (await window.orbit.getConfig()) as {
+      llm?: { active?: string; providers?: Record<string, { model?: string }> };
+    };
+    const activeProvider = cfg.llm?.active;
+    const model = activeProvider ? cfg.llm?.providers?.[activeProvider]?.model : undefined;
+    if (model) {
+      currentModel = model;
       renderModelIndicator();
     }
   } catch {
@@ -1371,8 +1380,8 @@ async function resetSession(): Promise<void> {
 async function switchModelByAlias(originalText: string, alias: string): Promise<void> {
   chat.addUserMessage(originalText);
 
-  const cfg = (await window.orbit.getConfig()) as { llm?: { provider?: string } };
-  const currentProvider = cfg.llm?.provider || "anthropic";
+  const cfg = (await window.orbit.getConfig()) as { llm?: { active?: string } };
+  const currentProvider = cfg.llm?.active || "anthropic";
 
   // Search strategy: prefer current provider, then search all providers.
   // Within each provider: exact id match → id substring → label substring.
@@ -2334,9 +2343,11 @@ function populateModels(provider: string, selected?: string): void {
   }
 }
 
-// Repopulate model dropdown when provider changes
+// Switching provider: save current fields, load new provider's state.
 prefsProvider.addEventListener("change", () => {
-  populateModels(prefsProvider.value);
+  snapshotCurrentProvider();
+  prefsActiveProvider = prefsProvider.value;
+  loadProviderFields(prefsActiveProvider);
 });
 wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus);
 const prefsGalaxyUrl = document.getElementById("prefs-galaxy-url") as HTMLInputElement;
@@ -2435,8 +2446,14 @@ prefsSkillsAddBtn.addEventListener("click", () => {
 
 /** Sentinel mirrors UNCHANGED_SECRET in main/ipc-handlers.ts. */
 const UNCHANGED_SECRET = "__loom_unchanged_secret__";
-/** Tracks whether a key is already on disk so blank-input = unchanged, not clear. */
-let prefsLlmHadKey = false;
+/** Per-provider in-memory state while Preferences is open. */
+interface ProviderState {
+  hadKey: boolean;
+  typedKey: string;
+  model: string;
+}
+let prefsProviderStates: Record<string, ProviderState> = {};
+let prefsActiveProvider = "anthropic";
 let prefsGalaxyHadKey = false;
 
 // Both-or-neither: a half-filled Galaxy profile gets rejected by the brain
@@ -2454,9 +2471,31 @@ function updatePrefsGalaxyValidity(): void {
 prefsGalaxyUrl.addEventListener("input", updatePrefsGalaxyValidity);
 prefsGalaxyKey.addEventListener("input", updatePrefsGalaxyValidity);
 
+/** Snapshot the currently-visible provider fields into prefsProviderStates. */
+function snapshotCurrentProvider(): void {
+  prefsProviderStates[prefsActiveProvider] = {
+    hadKey: prefsProviderStates[prefsActiveProvider]?.hadKey ?? false,
+    typedKey: prefsApiKey.value,
+    model: prefsModel.value,
+  };
+}
+
+/** Load a provider's stored state into the visible fields. */
+function loadProviderFields(provider: string): void {
+  const state = prefsProviderStates[provider] ?? { hadKey: false, typedKey: "", model: "" };
+  populateModels(provider, state.model || undefined);
+  prefsApiKey.value = state.typedKey;
+  prefsApiKey.placeholder = state.hadKey ? "•••••••• (unchanged)" : "";
+  prefsApiKeyStatus.className = "api-key-status";
+  prefsApiKeyStatus.textContent = "";
+}
+
 async function openPreferences(): Promise<void> {
   const config = (await window.orbit.getConfig()) as {
-    llm?: { provider?: string; model?: string; hasApiKey?: boolean };
+    llm?: {
+      active?: string;
+      providers?: Record<string, { model?: string; hasApiKey?: boolean }>;
+    };
     galaxy?: {
       active: string | null;
       profiles: Record<string, { url: string; hasApiKey?: boolean }>;
@@ -2466,13 +2505,18 @@ async function openPreferences(): Promise<void> {
     skills?: { repos?: Array<{ name?: string; url?: string; branch?: string; enabled?: boolean }> };
   };
 
-  prefsProvider.value = config.llm?.provider || "anthropic";
-  populateModels(prefsProvider.value, config.llm?.model);
-  prefsLlmHadKey = Boolean(config.llm?.hasApiKey);
-  prefsApiKey.value = "";
-  prefsApiKey.placeholder = prefsLlmHadKey ? "•••••••• (unchanged)" : "";
-  prefsApiKeyStatus.className = "api-key-status";
-  prefsApiKeyStatus.textContent = "";
+  // Build per-provider in-memory state from masked config.
+  prefsProviderStates = {};
+  for (const [name, p] of Object.entries(config.llm?.providers ?? {})) {
+    prefsProviderStates[name] = {
+      hadKey: Boolean(p.hasApiKey),
+      typedKey: "",
+      model: p.model ?? "",
+    };
+  }
+  prefsActiveProvider = config.llm?.active || "anthropic";
+  prefsProvider.value = prefsActiveProvider;
+  loadProviderFields(prefsActiveProvider);
 
   // Galaxy: use active profile
   const activeProfile = config.galaxy?.active
@@ -2526,8 +2570,13 @@ async function savePreferences(): Promise<void> {
   // Build a delta — only fields the user can edit. Main reconciles secrets
   // against what's on disk; the sentinel preserves a stored key when the
   // user left the input blank.
+  const activeState = prefsProviderStates[prefsActiveProvider] ?? {
+    hadKey: false,
+    typedKey: "",
+    model: "",
+  };
   const typedApiKey = prefsApiKey.value.trim();
-  const llmApiKey = typedApiKey ? typedApiKey : prefsLlmHadKey ? UNCHANGED_SECRET : "";
+  const llmApiKey = typedApiKey ? typedApiKey : activeState.hadKey ? UNCHANGED_SECRET : "";
 
   const typedGalaxyKey = prefsGalaxyKey.value.trim();
   const galaxyUrl = prefsGalaxyUrl.value.trim();
@@ -2541,13 +2590,32 @@ async function savePreferences(): Promise<void> {
     return;
   }
 
-  const selectedModel = prefsModel.value || undefined;
+  // Snapshot the currently-visible fields before building the save payload.
+  snapshotCurrentProvider();
+  const activeProvider = prefsProvider.value;
+  const selectedModel = prefsProviderStates[activeProvider]?.model || prefsModel.value || undefined;
+
+  // Build the full providers map from in-memory state.
+  const providers: Record<string, { apiKey: string; model?: string }> = {};
+  for (const [name, state] of Object.entries(prefsProviderStates)) {
+    const key = state.typedKey.trim()
+      ? state.typedKey.trim()
+      : state.hadKey
+        ? UNCHANGED_SECRET
+        : "";
+    providers[name] = { apiKey: key, model: state.model || undefined };
+  }
+  // Ensure the active provider is always in the map even if brand-new.
+  if (!providers[activeProvider]) {
+    providers[activeProvider] = { apiKey: llmApiKey, model: selectedModel };
+  } else {
+    // llmApiKey is the resolved key for the active provider — use it as override.
+    providers[activeProvider].apiKey = llmApiKey;
+    providers[activeProvider].model = selectedModel;
+  }
+
   const config: Record<string, unknown> = {
-    llm: {
-      provider: prefsProvider.value,
-      model: selectedModel,
-      apiKey: llmApiKey,
-    },
+    llm: { active: activeProvider, providers },
   };
 
   if (galaxyUrl || prefsGalaxyHadKey || typedGalaxyKey) {

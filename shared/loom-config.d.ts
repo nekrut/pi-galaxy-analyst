@@ -1,11 +1,18 @@
+/** Per-provider credentials + preferred model. */
+export interface LlmProviderConfig {
+  /** Plaintext API key. Orbit migrates this to apiKeyEncrypted on startup. */
+  apiKey?: string;
+  /** Base64 ciphertext produced by Electron safeStorage. Orbit-only. */
+  apiKeyEncrypted?: string;
+  model?: string;
+}
+
 export interface LoomConfig {
   llm?: {
-    provider?: string;
-    /** Plaintext API key. Orbit migrates this to apiKeyEncrypted on startup. */
-    apiKey?: string;
-    /** Base64 ciphertext produced by Electron safeStorage. Orbit-only. */
-    apiKeyEncrypted?: string;
-    model?: string;
+    /** Name of the currently-active provider, e.g. "anthropic". */
+    active: string;
+    /** One entry per configured provider. */
+    providers: Record<string, LlmProviderConfig>;
   };
   galaxy?: {
     active: string | null;

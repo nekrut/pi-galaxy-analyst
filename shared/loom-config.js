@@ -58,6 +58,19 @@ export function loadConfig() {
       raw = {};
     }
   }
+  // Migrate flat llm shape (pre-multi-provider) → {active, providers} map.
+  // Old: { llm: { provider, apiKey?, apiKeyEncrypted?, model? } }
+  // New: { llm: { active, providers: { [provider]: { apiKey?, apiKeyEncrypted?, model? } } } }
+  if (raw.llm && !raw.llm.providers) {
+    const old = raw.llm;
+    const provider = old.provider || "anthropic";
+    const entry = {};
+    if (old.apiKey) entry.apiKey = old.apiKey;
+    if (old.apiKeyEncrypted) entry.apiKeyEncrypted = old.apiKeyEncrypted;
+    if (old.model) entry.model = old.model;
+    raw.llm = { active: provider, providers: { [provider]: entry } };
+  }
+
   // Lazy-seed default skills repo if the user hasn't configured any. This
   // also re-seeds galaxy-skills if every repo was removed manually — feels
   // less surprising than silently leaving it absent.

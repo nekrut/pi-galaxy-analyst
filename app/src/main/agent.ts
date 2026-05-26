@@ -25,7 +25,7 @@ function buildSecretEnv(): Record<string, string> {
 
   const llmKey = resolveLlmApiKey(cfg);
   if (llmKey) {
-    const provider = cfg.llm?.provider || "anthropic";
+    const provider = cfg.llm?.active || "anthropic";
     const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
     env[envVar] = llmKey;
   }

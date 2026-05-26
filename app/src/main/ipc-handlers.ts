@@ -19,9 +19,8 @@ export const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 /** Masked shape returned to the renderer — never carries plaintext secrets. */
 interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
   llm?: {
-    provider?: string;
-    model?: string;
-    hasApiKey: boolean;
+    active: string;
+    providers: Record<string, { model?: string; hasApiKey: boolean }>;
   };
   galaxy?: {
     active: string | null;
@@ -34,9 +33,13 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
   const masked: MaskedLoomConfig = { ...rest };
   if (cfg.llm) {
     masked.llm = {
-      provider: cfg.llm.provider,
-      model: cfg.llm.model,
-      hasApiKey: Boolean(cfg.llm.apiKey || cfg.llm.apiKeyEncrypted),
+      active: cfg.llm.active,
+      providers: Object.fromEntries(
+        Object.entries(cfg.llm.providers ?? {}).map(([k, v]) => [
+          k,
+          { model: v.model, hasApiKey: Boolean(v.apiKey || v.apiKeyEncrypted) },
+        ]),
+      ),
     };
   }
   if (cfg.galaxy) {
@@ -62,26 +65,33 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   const canEncrypt = safeStorageAvailable();
   const out: LoomConfig = { ...current, ...(incoming as LoomConfig) };
 
-  // LLM key reconciliation
-  const incomingLlm = (incoming as { llm?: { apiKey?: string } }).llm;
+  // LLM multi-provider reconciliation. The renderer sends:
+  //   { active, providers: { [name]: { apiKey?, model? } } }
+  // where apiKey may be UNCHANGED_SECRET (preserve), "" (clear), or a new value.
+  type IncomingProvider = { apiKey?: string; model?: string };
+  type IncomingLlm = { active?: string; providers?: Record<string, IncomingProvider> };
+  const incomingLlm = (incoming as { llm?: IncomingLlm }).llm;
   if (incomingLlm) {
-    const rawKey = incomingLlm.apiKey;
-    const mergedLlm: LoomConfig["llm"] = {
-      provider: (incoming as { llm?: { provider?: string } }).llm?.provider,
-      model: (incoming as { llm?: { model?: string } }).llm?.model,
-    };
-    if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
-      // Preserve whatever was on disk.
-      if (current.llm?.apiKeyEncrypted) mergedLlm.apiKeyEncrypted = current.llm.apiKeyEncrypted;
-      if (current.llm?.apiKey) mergedLlm.apiKey = current.llm.apiKey;
-    } else if (rawKey === "") {
-      // Explicit clear — drop both fields.
-    } else if (canEncrypt) {
-      mergedLlm.apiKeyEncrypted = encryptSecret(rawKey);
-    } else {
-      mergedLlm.apiKey = rawKey;
+    const mergedProviders: NonNullable<LoomConfig["llm"]>["providers"] = {};
+    for (const [name, p] of Object.entries(incomingLlm.providers ?? {})) {
+      const existing = current.llm?.providers?.[name];
+      const rawKey = p.apiKey;
+      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string } = {};
+      if (p.model !== undefined) entry.model = p.model;
+      if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
+        if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
+        else if (existing?.apiKey) entry.apiKey = existing.apiKey;
+      } else if (rawKey !== "") {
+        if (canEncrypt) entry.apiKeyEncrypted = encryptSecret(rawKey);
+        else entry.apiKey = rawKey;
+      }
+      // empty rawKey ("") = explicit clear — neither field set
+      mergedProviders[name] = entry;
     }
-    out.llm = mergedLlm;
+    out.llm = {
+      active: incomingLlm.active ?? current.llm?.active ?? "anthropic",
+      providers: mergedProviders,
+    };
   }
 
   // Galaxy profile reconciliation (per profile)
