@@ -2233,7 +2233,11 @@ divider.addEventListener("mousedown", (e) => {
 
 document.addEventListener("mousemove", (e) => {
   if (!dragging) return;
-  const containerWidth = document.getElementById("app")!.getBoundingClientRect().width;
+  // chatPane is a flex child of #app-main, so its flex-basis percentage
+  // resolves against #app-main's width (not #app's). These are equal today
+  // because #app-main is the only row in #app, but using #app-main keeps the
+  // math correct if the column-flex parent ever grows a sibling.
+  const containerWidth = document.getElementById("app-main")!.getBoundingClientRect().width;
   const chatLeft = chatPane.getBoundingClientRect().left;
   const pct = ((e.clientX - chatLeft) / containerWidth) * 100;
   const clamped = Math.max(25, Math.min(75, pct));
