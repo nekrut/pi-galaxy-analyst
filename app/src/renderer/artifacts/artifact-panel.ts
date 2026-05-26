@@ -141,9 +141,8 @@ export class ArtifactPanel {
   }
 
   /**
-   * Drop the cached notebook content + clear the panel. Called on cwd change
-   * so a wake-from-sleep after switching projects doesn't re-render the prior
-   * project's notebook over the new session.
+   * Called on cwd change so a wake-from-sleep after switching projects
+   * doesn't re-render the prior project's notebook over the new session.
    */
   clearNotebook(): void {
     this.lastNotebookMarkdown = null;
@@ -167,9 +166,8 @@ export class ArtifactPanel {
 
   /**
    * Reset notebook to its empty placeholder + switch to the Notebook tab.
-   * Used on /new and other session-resets where the prior cache no longer
-   * applies -- without nulling lastNotebookMarkdown here, a later wake-from-
-   * sleep would re-render the cleared session's stale notebook.
+   * Must null the cache too -- a later display:resume would otherwise re-
+   * render the cleared session's stale notebook via reRenderNotebook.
    */
   clear(): void {
     this.lastNotebookMarkdown = null;

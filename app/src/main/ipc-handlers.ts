@@ -72,10 +72,8 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   type IncomingLlm = { active?: string; providers?: Record<string, IncomingProvider> };
   const incomingLlm = (incoming as { llm?: IncomingLlm }).llm;
   if (incomingLlm) {
-    // Seed from disk so a partial payload (e.g. /model switching just the
-    // active provider's model) preserves every other provider's encrypted
-    // blob. Iterating only what the renderer sent would silently wipe
-    // anything it didn't touch.
+    // Seed from disk so a partial payload (e.g. /model switching just one
+    // provider's model) preserves every other provider's encrypted blob.
     const mergedProviders: NonNullable<LoomConfig["llm"]>["providers"] = {
       ...(current.llm?.providers ?? {}),
     };
@@ -196,11 +194,10 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return agent.getCwd();
   });
 
-  // Replay the current session's chat transcript into the renderer. Used by
-  // the /chat slash command and by display:resume after wake-from-sleep
-  // (recovering chat after the renderer blanks). Reads only from the
-  // AgentManager's pinned session file -- a fresh `/new` start pins null,
-  // so this returns empty rather than surfacing stale per-cwd history.
+  // Replay the current session's chat transcript into the renderer. Used
+  // by /chat and by display:resume after wake-from-sleep. Reads only from
+  // the pinned session file, so a fresh /new start (pinned = null) returns
+  // empty instead of surfacing stale per-cwd history.
   ipcMain.handle("chat:replay", async (e) => {
     const window = BrowserWindow.fromWebContents(e.sender);
     if (!window || window.isDestroyed()) return { ok: false, error: "no window" };

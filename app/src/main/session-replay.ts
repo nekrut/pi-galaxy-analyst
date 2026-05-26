@@ -54,11 +54,9 @@ function isBootstrapPrompt(text: string): boolean {
 }
 
 /**
- * Read a specific session file and turn it into a compact replay. The caller
- * is responsible for picking the right file -- AgentManager pins one on
- * spawn so `/chat` replay reads the *current* session, not whichever .jsonl
- * happens to be newest by mtime in the per-cwd directory (which on a fresh
- * `/new` run would surface the prior session's history).
+ * Read a session file and turn it into a compact replay. Caller picks the
+ * file (AgentManager pins one on spawn) -- newest-by-mtime is wrong on a
+ * fresh /new with old sessions still on disk.
  *
  * Returns up to the last `maxSegments` user/assistant turns.
  */

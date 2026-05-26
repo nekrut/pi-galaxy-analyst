@@ -100,11 +100,9 @@ const PROVIDER_ENV_MAP = {
   xai: "XAI_API_KEY",
 };
 
-// LLM config: set env var if not already present. After the multi-provider
-// migration the key lives at llm.providers[active].apiKey instead of the
-// old flat llm.apiKey. apiKeyEncrypted isn't readable here (no Electron
-// safeStorage in the brain process) -- Orbit decrypts and passes via env
-// when it spawns us; standalone CLI usage only works with plaintext keys.
+// apiKeyEncrypted isn't readable here -- no Electron safeStorage in the
+// brain process. Orbit decrypts and passes via env when it spawns us;
+// standalone CLI usage only works with plaintext keys.
 const activeLlmProvider = loomConfig.llm?.active;
 const activeLlmConfig = activeLlmProvider ? loomConfig.llm?.providers?.[activeLlmProvider] : null;
 if (activeLlmConfig?.apiKey) {

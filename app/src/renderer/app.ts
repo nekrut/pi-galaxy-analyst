@@ -786,10 +786,9 @@ function applyCwdChange(dir: string): void {
     `<i>Switched analysis directory to <code>${dir.replace(/</g, "&lt;")}</code>.</i>`,
   );
   hasShownStartupWelcome = false;
-  // Re-root the file tree, close any open viewer, hide the File tab — the
-  // old relPath is meaningless in the new cwd. Drop the notebook cache too
-  // so the next display:resume re-renders the *current* cwd's notebook
-  // (loaded fresh via loadNotebookFromDisk) rather than the prior project's.
+  // Re-root the file tree, close any open viewer, hide the File tab, drop
+  // the notebook cache — none of the prior project's relPath or notebook
+  // apply in the new cwd.
   fileViewer.close();
   artifacts.hideFileTab();
   artifacts.clearNotebook();
@@ -1450,10 +1449,8 @@ async function switchModelByAlias(originalText: string, alias: string): Promise<
     return;
   }
 
-  // Send a partial update -- the reconciler in main preserves every other
-  // provider's encrypted key + model and only overlays what we send here.
-  // Writing the old flat shape (llm.provider/llm.model) would be picked up
-  // by the reconciler as an empty providers map and wipe every saved key.
+  // Partial update -- the reconciler preserves every other provider's
+  // encrypted key + model and only overlays what we send.
   const switchingProvider = chosen.provider !== currentProvider;
   const update = {
     llm: {

@@ -173,10 +173,8 @@ export class AgentManager {
   private hasStartedBefore = false; // → use --continue on restart to preserve chat history
   private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
   private nextStartIsFresh = false; // → tells extension to skip notebook auto-load on next start
-  // Session file the current spawn is operating on, set on start() when we
-  // pass --continue. `null` on fresh starts (no --continue) so /chat replay
-  // refuses to surface old per-cwd history that doesn't belong to the live
-  // session. Cleared in stop() so a stale pointer can't leak into the next run.
+  // Pinned on start() to the .jsonl pi will replay on --continue, or null
+  // on fresh starts so /chat refuses to surface stale per-cwd history.
   private pinnedSessionFile: string | null = null;
   private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
   private silentRestarting = false; // → suppresses status flicker during MCP bootstrap restart
@@ -238,12 +236,7 @@ export class AgentManager {
     return this.process?.pid ?? null;
   }
 
-  /**
-   * The on-disk session file the current spawn is replaying from, or null
-   * for fresh starts. /chat replay reads from this rather than re-running
-   * newest-by-mtime on the per-cwd dir -- a fresh start with old sessions
-   * still on disk must not surface them.
-   */
+  /** Session file the current spawn is replaying from, or null on fresh. */
   getPinnedSessionFile(): string | null {
     return this.pinnedSessionFile;
   }
@@ -286,10 +279,8 @@ export class AgentManager {
     this.hasStartedBefore = true;
     this.nextStartSkipContinue = false;
 
-    // Pin the session file this spawn operates on. On --continue we pin the
-    // newest jsonl in the per-cwd dir (same picker the brain will resume
-    // from); on fresh starts we pin null so /chat replay returns empty
-    // instead of surfacing the previous run's transcript.
+    // Same picker the brain itself will use for --continue, so what main
+    // pins matches what the brain resumes from. Cleared in stop().
     this.pinnedSessionFile = wantsContinue ? newestSessionFile(this.cwd) : null;
 
     const fresh = this.nextStartIsFresh;
