@@ -43,12 +43,24 @@ describe("parseMostRecentPlan", () => {
 ### Steps
 
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} -- fastp adapter trim + per-base QC
+  - Verification: confirm fastp HTML/JSON report exists and includes per-base quality summary
 - [ ] 2. **Reference index** {#plan-a-step-2} -- bwa index of chrM
 `);
     expect(plan).not.toBeNull();
     expect(plan!.title).toBe("A: chrM Variant Calling");
     expect(plan!.routing).toBe("hybrid");
     expect(plan!.nextStep).not.toBeNull();
+    expect(plan!.nextStep!.raw).toContain("QC FASTQ");
+  });
+
+  it("still parses legacy continuation-line routing details", () => {
+    const plan = parseMostRecentPlan(`
+## Plan A: Legacy Format [local]
+
+- [ ] 1. **QC FASTQ** {#plan-a-step-1} -- fastp adapter trim + per-base QC
+     Routing: local
+`);
+    expect(plan).not.toBeNull();
     expect(plan!.nextStep!.raw).toContain("QC FASTQ");
   });
 
@@ -187,6 +199,7 @@ describe("checkPreconditions -- hard failures", () => {
 ## Plan A: Local stuff [local]
 
 - [ ] 1. **Parse data** -- awk magic over CSV
+  - Verification: confirm the parsed CSV exists and has the expected header
 `);
     setGalaxyConnection(false);
     const result = checkPreconditions();
@@ -252,6 +265,17 @@ history_id: f5912ab34
     expect(result.failures.find((f) => f.name === "acceptance")).toBeTruthy();
     expect(result.failures.find((f) => f.name === "acceptance")!.severity).toBe("soft");
   });
+
+  it("does not block execution when verification criteria are missing", () => {
+    writeNotebook(`
+## Plan A: Legacy [local]
+
+- [ ] 1. **Write config** {#plan-a-step-1} -- create the requested config file
+`);
+    const result = checkPreconditions();
+    expect(result.ok).toBe(true);
+    expect(result.failures).toEqual([]);
+  });
 });
 
 describe("checkPreconditions -- happy path", () => {
@@ -260,6 +284,7 @@ describe("checkPreconditions -- happy path", () => {
 ## Plan A: chrM [local]
 
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} -- fastp adapter trim + per-base QC
+  - Verification: confirm fastp HTML/JSON report exists and includes the summary module
 `);
     const result = checkPreconditions();
     expect(result.ok).toBe(true);
@@ -273,6 +298,7 @@ describe("checkPreconditions -- happy path", () => {
 ## Plan A: Aligned [galaxy]
 
 - [ ] 1. **bwa-mem PE** {#plan-a-step-1} -- 4 samples on chrM reference
+  - Verification: poll the Galaxy invocation to completion and inspect BAM outputs
 `);
     setGalaxyConnection(true, "abc123");
     const result = checkPreconditions();
