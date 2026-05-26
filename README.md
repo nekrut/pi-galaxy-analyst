@@ -98,12 +98,15 @@ frequencies across tissues.
 - [ ] 1. **QC FASTQ** {#plan-a-step-1} — fastp adapter trim + per-base QC
   - Routing: local
   - Tool: fastp
+  - Verification: confirm fastp HTML/JSON report exists and includes per-base quality metrics
 - [x] 2. **Reference index** {#plan-a-step-2} — bwa index of chrM
   - Routing: local
   - Tool: bwa index, samtools faidx
+  - Verification: confirm BWA index sidecar files and `.fai` exist
 - [ ] 3. **Read alignment** {#plan-a-step-3} — BWA-MEM, paired collection
   - Routing: Galaxy
   - Tool: bwa-mem2/2.2.1
+  - Verification: poll Galaxy invocation to `ok` and inspect BAM outputs
 - ...
 
 ### Parameters
@@ -116,9 +119,13 @@ frequencies across tissues.
 Conventions:
 
 - Routing tag in the section header: `[local]`, `[hybrid]`, or `[remote]`. Literal so future tooling can grep.
-- Step status by the checkbox: `- [ ]` pending, `- [x]` completed, `- [!]` failed.
+- Step status by the checkbox: `- [ ]` pending, `- [x]` verified completed, `- [!]` failed.
+- If verification is blocked or inconclusive but the step itself has not failed, leave the step pending and record the blocker.
 - Anchors `{#plan-X-step-N}` so Galaxy invocation YAML can reference individual steps.
 - Multiple plans coexist; new plan sections append at the bottom. Old plans aren't deleted.
+
+See [docs/agent/notebook-schema.md](docs/agent/notebook-schema.md) for
+verification evidence requirements.
 
 ### Four-stage approval before notebook write
 
