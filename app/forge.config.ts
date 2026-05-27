@@ -68,16 +68,53 @@ function stageLoomBundle(platform: string, arch: string): void {
 function pruneLoomNodeModules(platform: string, arch: string): void {
   // koffi ships prebuilt .node binaries for ~18 platforms (darwin/linux/
   // win32/freebsd/openbsd/musl x ia32/x64/arm64/...). We only need the
-  // target platform's. Keeping just `<platform>_<arch>` saves ~30MB.
-  const koffiBuild = path.join(LOOM_STAGE_DIR, "node_modules", "koffi", "build", "koffi");
-  if (fs.existsSync(koffiBuild)) {
-    const keepDir = `${platform}_${arch}`;
+  // target platform's. Keeping just `<platform>_<arch>` saves ~30MB, and
+  // -- importantly for the rpm build -- avoids rpmbuild's brp-strip step
+  // choking on foreign-arch ELF/Mach-O binaries it can't parse.
+  // npm hoists most copies to the top-level node_modules but pi-coding-agent
+  // pins its own koffi, so the package can appear nested too. Walk for any.
+  const keepDir = `${platform}_${arch}`;
+  for (const koffiBuild of findKoffiBuildDirs(path.join(LOOM_STAGE_DIR, "node_modules"))) {
     for (const entry of fs.readdirSync(koffiBuild)) {
       if (entry !== keepDir) {
         fs.rmSync(path.join(koffiBuild, entry), { recursive: true, force: true });
       }
     }
   }
+}
+
+function findKoffiBuildDirs(root: string): string[] {
+  // Visits every package under a node_modules tree (including nested
+  // node_modules and scoped packages) and records koffi build dirs. Avoids
+  // walking package internals (src/, dist/, lib/, ...) since koffi can only
+  // live at a package root.
+  const out: string[] = [];
+  function visitNodeModules(nm: string): void {
+    if (!fs.existsSync(nm)) return;
+    for (const e of fs.readdirSync(nm, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      if (e.name.startsWith("@")) {
+        // Scoped: each child is itself a package.
+        const scope = path.join(nm, e.name);
+        for (const child of fs.readdirSync(scope, { withFileTypes: true })) {
+          if (child.isDirectory()) visitPackage(path.join(scope, child.name));
+        }
+      } else {
+        visitPackage(path.join(nm, e.name));
+      }
+    }
+  }
+  function visitPackage(pkgRoot: string): void {
+    if (path.basename(pkgRoot) === "koffi") {
+      const buildDir = path.join(pkgRoot, "build", "koffi");
+      if (fs.existsSync(buildDir)) out.push(buildDir);
+      // koffi has no nested node_modules worth walking.
+      return;
+    }
+    visitNodeModules(path.join(pkgRoot, "node_modules"));
+  }
+  visitNodeModules(root);
+  return out;
 }
 
 function downloadFile(url: string, dest: string): Promise<void> {
