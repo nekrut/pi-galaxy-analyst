@@ -92,3 +92,9 @@ export function isAllowedSkillUrl(url: string): boolean;
  * so a malformed config can't disable the optimization silently.
  */
 export function getDiscoveryMode(): "code" | "full";
+/**
+ * uvx package spec for galaxy-mcp at the given discovery mode. Centralized
+ * so version bumps land in one place instead of drifting between the
+ * initial mcp.json template and the profile re-sync path.
+ */
+export function galaxyMcpUvxSpec(mode: "code" | "full"): string;

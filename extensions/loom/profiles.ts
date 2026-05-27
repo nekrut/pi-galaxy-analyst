@@ -11,7 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { loadConfig, saveConfig, getDiscoveryMode } from "./config";
+import { loadConfig, saveConfig, getDiscoveryMode, galaxyMcpUvxSpec } from "./config";
 
 export interface GalaxyProfile {
   url: string;
@@ -277,9 +277,7 @@ export function syncMcpConfig(url: string): void {
       // sync also silently upgrades older installs that landed before
       // discovery mode existed.
       if (config.mcpServers.galaxy.command === "uvx") {
-        const pkgSpec =
-          discoveryMode === "code" ? "galaxy-mcp[code-mode]>=1.4.0" : "galaxy-mcp>=1.4.0";
-        config.mcpServers.galaxy.args = [pkgSpec];
+        config.mcpServers.galaxy.args = [galaxyMcpUvxSpec(discoveryMode)];
       }
       // 0600 first so a concurrent reader can't catch the file with a
       // wider mode between writeFile and chmod.

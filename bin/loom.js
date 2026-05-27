@@ -5,7 +5,11 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "fs";
 import { homedir } from "os";
-import { loadConfig as loadLoomConfig, getDiscoveryMode } from "../shared/loom-config.js";
+import {
+  loadConfig as loadLoomConfig,
+  getDiscoveryMode,
+  galaxyMcpUvxSpec,
+} from "../shared/loom-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -159,10 +163,9 @@ if (!isInformationalCommand) {
     // The [code-mode] extra pulls in fastmcp's transform; the env var
     // toggles the server into that surface at import time.
     const discoveryMode = getDiscoveryMode();
-    const pkgSpec = discoveryMode === "code" ? "galaxy-mcp[code-mode]>=1.4.0" : "galaxy-mcp>=1.4.0";
     mcpConfig.mcpServers.galaxy = {
       command: "uvx",
-      args: [pkgSpec],
+      args: [galaxyMcpUvxSpec(discoveryMode)],
       directTools: true,
       env: {
         GALAXY_URL: galaxyUrl,

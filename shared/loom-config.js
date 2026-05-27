@@ -84,6 +84,16 @@ export function getDiscoveryMode() {
   return mode === "full" ? "full" : "code";
 }
 
+/**
+ * uvx package spec for galaxy-mcp at the given discovery mode. Centralized
+ * here so version bumps land in one place instead of drifting between the
+ * initial mcp.json template (bin/loom.js) and the re-sync path
+ * (extensions/loom/profiles.ts).
+ */
+export function galaxyMcpUvxSpec(mode) {
+  return mode === "code" ? "galaxy-mcp[code-mode]>=1.4.0" : "galaxy-mcp>=1.4.0";
+}
+
 export function saveConfig(config) {
   const dir = getConfigDir();
   fs.mkdirSync(dir, { recursive: true });
