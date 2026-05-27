@@ -156,6 +156,13 @@ function openExternalUrlWindow(url: string): void {
   const host = parsed.hostname.toLowerCase();
   const isLoopback = host === "localhost" || host.startsWith("127.") || host === "::1";
 
+  // MCP SSE transport URLs (?session=<uuid>) are internal brain↔server
+  // connections, not user-facing pages — swallow them silently.
+  if (isLoopback && parsed.searchParams.has("session")) {
+    log("openExternalUrlWindow suppressed MCP session URL:", url);
+    return;
+  }
+
   if ((proto === "http:" || proto === "https:") && isLoopback) {
     const win = new BrowserWindow({
       width: 1400,
