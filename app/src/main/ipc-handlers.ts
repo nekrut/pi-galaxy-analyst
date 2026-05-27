@@ -81,7 +81,10 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
       const existing = current.llm?.providers?.[name];
       const rawKey = p.apiKey;
       const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string } = {};
+      // Preserve existing model if the incoming entry doesn't carry one --
+      // a partial save (e.g. rotate-just-the-key) shouldn't wipe the model.
       if (p.model !== undefined) entry.model = p.model;
+      else if (existing?.model) entry.model = existing.model;
       if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
         if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
         else if (existing?.apiKey) entry.apiKey = existing.apiKey;
