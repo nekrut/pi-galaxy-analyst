@@ -333,6 +333,51 @@ solves on fresh envs).
 and be killed partway. When you do need a bound, pick generously: 300 s
 for quick commands, 3600 s for short pipelines, 86400 s for overnight.
 Prefer **omitting \`timeout\` entirely** over capping too low.
+
+### Long-running jobs — always background them
+
+If a job will take **more than ~30 seconds** (foldseek ProstT5, mmseqs2
+all-vs-all, MCL on large graphs, STAR genome indexing, assembly, any
+deep-learning inference step), **never block the bash tool on it**.
+A blocked tool holds the entire chat turn; the user cannot send messages,
+the display going to sleep will blank the UI, and a crash or abort kills
+the job mid-run.
+
+**Pattern — launch, record, poll:**
+
+\`\`\`bash
+# 1. Launch in background, redirect output to a log
+nohup .loom/env/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 &
+JOB_PID=$!
+echo $JOB_PID > foldseek_work/job.pid
+echo "Launched foldseek PID $JOB_PID — tail foldseek_work/run.log to monitor"
+\`\`\`
+
+\`\`\`bash
+# 2. Poll in a later bash call (separate tool invocation, minutes later)
+JOB_PID=$(cat foldseek_work/job.pid 2>/dev/null)
+if kill -0 "$JOB_PID" 2>/dev/null; then
+  echo "Still running (PID $JOB_PID)"
+  tail -5 foldseek_work/run.log
+else
+  echo "Finished"
+  ls -lh foldseek_work/vir_struct_cluster_cluster.tsv 2>/dev/null || echo "output missing — check log for errors"
+  tail -20 foldseek_work/run.log
+fi
+\`\`\`
+
+After launching, **return to the user immediately** with a message like
+"foldseek is running in the background (PID 12345). I'll check back in
+a few minutes — or you can ask me to check now." Write the PID and log
+path to the notebook so the session is recoverable after a restart.
+
+**Signals that a job needs backgrounding** (non-exhaustive):
+- Any neural-network inference (ProstT5, ESM, AlphaFold, etc.)
+- mmseqs2 / foldseek on > ~500 sequences
+- MCL clustering on large graphs
+- STAR / hisat2 genome index generation
+- genome assembly (hifiasm, flye, canu)
+- conda env creation on a fresh analysis
 `;
 }
 
