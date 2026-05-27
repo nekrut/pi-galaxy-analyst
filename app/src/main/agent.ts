@@ -158,6 +158,7 @@ function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
   // Set the shell-kind marker the extension reads, plus the optional
   // fresh-session sentinel for /new flows.
   env.LOOM_SHELL_KIND = "orbit";
+  env.LOOM_ORBIT_EMBEDDED = "1";
   if (fresh) env.LOOM_FRESH_SESSION = "1";
   // Prepend the bundled uv directory to PATH when packaged so MCP servers
   // configured with `command: "uvx"` (Galaxy MCP) find the shipped binary.
