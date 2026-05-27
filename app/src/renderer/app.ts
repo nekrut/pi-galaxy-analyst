@@ -124,6 +124,36 @@ let currentModel: string | null = null;
 let sessionCostFromPi: number | null = null;
 let turnCostFromPi: number = 0;
 
+// ── Cost persistence across renderer reloads (sleep/wake GPU reset) ──────────
+// Cost state is in-memory and wiped on renderer reload. Persist to
+// localStorage keyed by cwd so it survives display-sleep recovery reloads.
+
+function costKey(cwd: string): string {
+  return `orbit.cost.${cwd}`;
+}
+function saveCostState(cwd: string): void {
+  localStorage.setItem(
+    costKey(cwd),
+    JSON.stringify({ sessionUsage: { ...sessionUsage }, sessionCostFromPi }),
+  );
+}
+function restoreCostState(cwd: string): void {
+  try {
+    const raw = localStorage.getItem(costKey(cwd));
+    if (!raw) return;
+    const s = JSON.parse(raw) as { sessionUsage: Usage; sessionCostFromPi: number | null };
+    sessionUsage.input = s.sessionUsage.input ?? 0;
+    sessionUsage.output = s.sessionUsage.output ?? 0;
+    sessionUsage.cacheRead = s.sessionUsage.cacheRead ?? 0;
+    sessionUsage.cacheWrite = s.sessionUsage.cacheWrite ?? 0;
+    sessionCostFromPi = s.sessionCostFromPi ?? null;
+    renderUsage();
+  } catch {}
+}
+function clearCostState(cwd: string): void {
+  localStorage.removeItem(costKey(cwd));
+}
+
 /** Match a model ID against the pricing table (handles date suffixes). */
 function findPricing(
   model: string,
@@ -722,6 +752,9 @@ function commitTurnUsage(): void {
   turnUsage.cacheWrite = 0;
   turnCostFromPi = 0;
   renderUsage();
+  try {
+    saveCostState(cwdPathEl.textContent || "");
+  } catch {}
 }
 
 renderUsage();
@@ -751,6 +784,7 @@ async function refreshCwd(): Promise<void> {
     cwdPathEl.textContent = cwd;
     cwdPathEl.title = cwd;
     chat.setCwd(cwd);
+    restoreCostState(cwd);
   } catch {
     /* getCwd not available yet */
   }
@@ -769,6 +803,10 @@ function resetUiForFreshContext(): void {
   turnUsage.cacheRead = 0;
   turnUsage.cacheWrite = 0;
   perModelUsage.clear();
+  sessionCostFromPi = null;
+  try {
+    clearCostState(cwdPathEl.textContent || "");
+  } catch {}
   renderUsage();
   streaming = false;
   sendBtn.classList.remove("hidden");
