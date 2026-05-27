@@ -199,6 +199,42 @@ if (!isInformationalCommand) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// pi-web-access default: skip the curator browser popup.
+//
+// pi-web-access ships with the brain and exposes a web_search tool. Its
+// default workflow ("summary-review") opens a curator window in the system
+// browser on every search so the user can prune results before the LLM sees
+// them. In Orbit the chat is the UI, so popping a separate browser tab on
+// every search is jarring -- and on a fresh install with no Exa/Gemini key,
+// the search still routes through Exa MCP (https://mcp.exa.ai/mcp, no auth)
+// so the popup is the only thing standing between the user and a working
+// zero-config web search. Default workflow:"none" returns raw results inline
+// for the LLM to summarize. Users who want the curator back can flip it on
+// with `/curator on` or by setting "workflow":"summary-review" in this file.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const webSearchConfigPath = join(homedir(), ".pi", "web-search.json");
+
+if (!isInformationalCommand) {
+  let webSearchConfig = {};
+  let parseOk = true;
+  if (existsSync(webSearchConfigPath)) {
+    try {
+      webSearchConfig = JSON.parse(readFileSync(webSearchConfigPath, "utf-8"));
+    } catch {
+      // Don't clobber a file we can't parse -- pi-web-access surfaces a
+      // more useful error on its own when it tries to load this.
+      parseOk = false;
+    }
+  }
+  if (parseOk && webSearchConfig.workflow === undefined) {
+    webSearchConfig.workflow = "none";
+    mkdirSync(dirname(webSearchConfigPath), { recursive: true });
+    writeFileSync(webSearchConfigPath, JSON.stringify(webSearchConfig, null, 2));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Pre-flight: ensure at least one LLM provider is configured
 // ─────────────────────────────────────────────────────────────────────────────
 
