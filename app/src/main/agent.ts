@@ -6,7 +6,7 @@ import os from "node:os";
 import { app, type BrowserWindow } from "electron";
 import { loadConfig } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
-import { loadSessionHistory } from "./session-replay.js";
+import { loadSessionHistory, newestSessionFile } from "./session-replay.js";
 import { collectDescendantsOf } from "./proc-monitor.js";
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
@@ -25,7 +25,7 @@ function buildSecretEnv(): Record<string, string> {
 
   const llmKey = resolveLlmApiKey(cfg);
   if (llmKey) {
-    const provider = cfg.llm?.provider || "anthropic";
+    const provider = cfg.llm?.active || "anthropic";
     const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
     env[envVar] = llmKey;
   }
@@ -173,6 +173,14 @@ export class AgentManager {
   private hasStartedBefore = false; // → use --continue on restart to preserve chat history
   private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
   private nextStartIsFresh = false; // → tells extension to skip notebook auto-load on next start
+  // --continue: pinned eagerly to newestSessionFile(cwd) -- pi's own picker
+  // will resume the same file under normal use.
+  // fresh start: pinned null; start() unlinks any stale cwd/session.jsonl
+  // before spawn, and getReplaySessionFile lazily adopts the new link the
+  // brain creates in session_start. Avoids racing the old child's post-
+  // SIGTERM session_shutdown writes (which only append to the *old* .jsonl,
+  // not the symlink).
+  private pinnedSessionFile: string | null = null;
   private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
   private silentRestarting = false; // → suppresses status flicker during MCP bootstrap restart
 
@@ -234,6 +242,29 @@ export class AgentManager {
   }
 
   /**
+   * The session file /chat should replay. Returns the pinned file when set
+   * (--continue path), otherwise lazily adopts via cwd/session.jsonl -- the
+   * symlink Loom's session-lifecycle creates on session_start. Returns null
+   * if neither applies; /chat then sends an empty history rather than
+   * surfacing a stale prior-run session.
+   */
+  getReplaySessionFile(): string | null {
+    if (this.pinnedSessionFile) return this.pinnedSessionFile;
+    const linkPath = path.join(this.cwd, "session.jsonl");
+    try {
+      const stat = fs.lstatSync(linkPath);
+      if (!stat.isSymbolicLink()) return null;
+      const target = fs.readlinkSync(linkPath);
+      const absTarget = path.isAbsolute(target) ? target : path.join(this.cwd, target);
+      if (!fs.existsSync(absTarget)) return null;
+      this.pinnedSessionFile = absTarget;
+      return absTarget;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Check if Pi.dev has any saved sessions for the current cwd.
    * Pi stores sessions in ~/.pi/agent/sessions/<encoded-cwd>/ as .jsonl files.
    * Used on first launch to decide whether to pass --continue for a soft resume.
@@ -271,6 +302,20 @@ export class AgentManager {
     this.hasStartedBefore = true;
     this.nextStartSkipContinue = false;
 
+    // Pin matches pi's --continue choice in normal use. Cleared in stop().
+    this.pinnedSessionFile = wantsContinue ? newestSessionFile(this.cwd) : null;
+    if (!wantsContinue) {
+      // Drop any stale cwd/session.jsonl symlink so a link appearing later
+      // is necessarily from this spawn's session_start, not the prior run.
+      const linkPath = path.join(this.cwd, "session.jsonl");
+      try {
+        const stat = fs.lstatSync(linkPath);
+        if (stat.isSymbolicLink()) fs.unlinkSync(linkPath);
+      } catch {
+        // No link / not accessible -- nothing to do
+      }
+    }
+
     const fresh = this.nextStartIsFresh;
     this.nextStartIsFresh = false;
     log("starting agent", {
@@ -306,9 +351,14 @@ export class AgentManager {
     // When resuming with --continue, the agent reloads its in-memory context
     // from the on-disk session but the renderer has no way to see prior turns.
     // Replay them into the chat pane so the UI reflects what the model remembers.
-    if (wantsContinue && !this.silentRestarting && !this.window.isDestroyed()) {
+    if (
+      wantsContinue &&
+      this.pinnedSessionFile &&
+      !this.silentRestarting &&
+      !this.window.isDestroyed()
+    ) {
       try {
-        const history = loadSessionHistory(this.cwd);
+        const history = loadSessionHistory(this.pinnedSessionFile);
         if (history.length > 0) {
           this.window.webContents.send("agent:session-history", history);
         }
@@ -418,6 +468,7 @@ export class AgentManager {
       this.process.kill("SIGTERM");
       this.process = null;
     }
+    this.pinnedSessionFile = null;
     this.setStatus("stopped");
     for (const [id, pending] of this.pendingResponses) {
       log("rejecting pending response:", id);

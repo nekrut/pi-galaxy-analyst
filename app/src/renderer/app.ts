@@ -575,9 +575,10 @@ welcomeSave.addEventListener("click", async () => {
 
   const cfg: Record<string, unknown> = {
     llm: {
-      provider: welcomeProvider.value,
-      model: welcomeModel.value,
-      apiKey,
+      active: welcomeProvider.value,
+      providers: {
+        [welcomeProvider.value]: { model: welcomeModel.value, apiKey },
+      },
     },
   };
 
@@ -616,8 +617,12 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function checkFirstRun(): Promise<void> {
-  const cfg = (await window.orbit.getConfig()) as { llm?: { hasApiKey?: boolean } };
-  if (!cfg.llm?.hasApiKey) {
+  const cfg = (await window.orbit.getConfig()) as {
+    llm?: { active?: string; providers?: Record<string, { hasApiKey?: boolean }> };
+  };
+  const active = cfg.llm?.active;
+  const hasKey = active ? Boolean(cfg.llm?.providers?.[active]?.hasApiKey) : false;
+  if (!hasKey) {
     populateWelcomeModels(welcomeProvider.value);
     welcomeOverlay.classList.remove("hidden");
   }
@@ -724,9 +729,13 @@ renderUsage();
 // Populate model indicator from config at startup so it shows before the first message
 void (async () => {
   try {
-    const cfg = (await window.orbit.getConfig()) as { llm?: { model?: string } };
-    if (cfg.llm?.model) {
-      currentModel = cfg.llm.model;
+    const cfg = (await window.orbit.getConfig()) as {
+      llm?: { active?: string; providers?: Record<string, { model?: string }> };
+    };
+    const activeProvider = cfg.llm?.active;
+    const model = activeProvider ? cfg.llm?.providers?.[activeProvider]?.model : undefined;
+    if (model) {
+      currentModel = model;
       renderModelIndicator();
     }
   } catch {
@@ -777,8 +786,9 @@ function applyCwdChange(dir: string): void {
     `<i>Switched analysis directory to <code>${dir.replace(/</g, "&lt;")}</code>.</i>`,
   );
   hasShownStartupWelcome = false;
-  // Re-root the file tree, close any open viewer, hide the File tab — the
-  // old relPath is meaningless in the new cwd.
+  // Re-root the file tree, close any open viewer, hide the File tab. The
+  // notebook cache was already nulled by artifacts.clear() inside the
+  // resetUiForFreshContext() call above.
   fileViewer.close();
   artifacts.hideFileTab();
   filesPanel.reset();
@@ -799,6 +809,30 @@ window.orbit.onCwdChanged((dir) => {
 // is restored, but the chat panel is empty because it's renderer-only state.
 // Replay prior turns only if the chat is currently blank — otherwise the user
 // is mid-flow (e.g. prefs-save restart) and replay would clobber live UI.
+async function loadNotebookFromDisk(): Promise<void> {
+  const r = await window.orbit.loadNotebook();
+  if (r.ok && r.content) {
+    artifacts.setNotebookMarkdown(`> \`${r.path}\`\n\n${r.content}`);
+    setArtifactCollapsed(false);
+  }
+}
+
+// On wake-from-sleep, auto-restore blank chat and notebook without user action.
+window.orbit.onDisplayResume(() => {
+  if (!chat.hasContent()) {
+    void window.orbit.replayChat().then((r) => {
+      if (r.ok && r.segments > 0) {
+        chat.addInfoMessage("<i>— Session restored after display sleep —</i>");
+      }
+    });
+  }
+  if (artifacts.hasNotebookContent()) {
+    artifacts.reRenderNotebook();
+  } else {
+    void loadNotebookFromDisk();
+  }
+});
+
 window.orbit.onSessionHistory((history) => {
   if (history.length === 0) return;
   if (chat.hasContent()) return;
@@ -1073,14 +1107,17 @@ function handleSlashCommand(text: string): boolean {
     return true;
   }
 
+  // /notebook: load from disk immediately, then also ask agent for a fresh
+  // widget (which may include a more recent snapshot post-compact).
+  if (cmd === "notebook") {
+    chat.addUserMessage(text);
+    void loadNotebookFromDisk();
+    window.orbit.prompt("/notebook");
+    return true;
+  }
+
   // Loom commands — pass through to agent
-  if (
-    cmd === "plan" ||
-    cmd === "status" ||
-    cmd === "notebook" ||
-    cmd === "decisions" ||
-    cmd === "profiles"
-  ) {
+  if (cmd === "plan" || cmd === "status" || cmd === "decisions" || cmd === "profiles") {
     chat.addUserMessage(text);
     window.orbit.prompt(`/${cmd}`);
     return true;
@@ -1371,8 +1408,8 @@ async function resetSession(): Promise<void> {
 async function switchModelByAlias(originalText: string, alias: string): Promise<void> {
   chat.addUserMessage(originalText);
 
-  const cfg = (await window.orbit.getConfig()) as { llm?: { provider?: string } };
-  const currentProvider = cfg.llm?.provider || "anthropic";
+  const cfg = (await window.orbit.getConfig()) as { llm?: { active?: string } };
+  const currentProvider = cfg.llm?.active || "anthropic";
 
   // Search strategy: prefer current provider, then search all providers.
   // Within each provider: exact id match → id substring → label substring.
@@ -1411,23 +1448,16 @@ async function switchModelByAlias(originalText: string, alias: string): Promise<
     return;
   }
 
-  // Save updated config
-  const current = (await window.orbit.getConfig()) as Record<string, unknown>;
-  const llm = ((current.llm as Record<string, unknown> | undefined) || {}) as Record<
-    string,
-    unknown
-  >;
-
+  // Partial update -- the reconciler preserves every other provider's
+  // encrypted key + model and only overlays what we send.
   const switchingProvider = chosen.provider !== currentProvider;
-  if (switchingProvider) {
-    llm.provider = chosen.provider;
-    // Don't clobber the existing API key — if the user has none for the new provider,
-    // the agent restart will fail with a clear error and they can set it in Preferences.
-  }
-  llm.model = chosen.model.id;
-  current.llm = llm;
-
-  const result = await window.orbit.saveConfig(current);
+  const update = {
+    llm: {
+      active: chosen.provider,
+      providers: { [chosen.provider]: { model: chosen.model.id } },
+    },
+  };
+  const result = await window.orbit.saveConfig(update);
   if (!result.success) {
     chat.addErrorMessage(`Failed to save config: ${result.error}`);
     return;
@@ -2334,11 +2364,20 @@ function populateModels(provider: string, selected?: string): void {
   }
 }
 
-// Repopulate model dropdown when provider changes
+// Switching provider: save current fields, load new provider's state.
 prefsProvider.addEventListener("change", () => {
-  populateModels(prefsProvider.value);
+  snapshotCurrentProvider();
+  prefsActiveProvider = prefsProvider.value;
+  loadProviderFields(prefsActiveProvider);
 });
 wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus);
+// Clear the "✓ Key stored" indicator as soon as the user starts typing.
+prefsApiKey.addEventListener("input", () => {
+  if (prefsApiKeyStatus.classList.contains("stored")) {
+    prefsApiKeyStatus.className = "api-key-status";
+    prefsApiKeyStatus.textContent = "";
+  }
+});
 const prefsGalaxyUrl = document.getElementById("prefs-galaxy-url") as HTMLInputElement;
 const prefsGalaxyKey = document.getElementById("prefs-galaxy-key") as HTMLInputElement;
 const prefsGalaxyError = document.getElementById("prefs-galaxy-error")!;
@@ -2435,8 +2474,14 @@ prefsSkillsAddBtn.addEventListener("click", () => {
 
 /** Sentinel mirrors UNCHANGED_SECRET in main/ipc-handlers.ts. */
 const UNCHANGED_SECRET = "__loom_unchanged_secret__";
-/** Tracks whether a key is already on disk so blank-input = unchanged, not clear. */
-let prefsLlmHadKey = false;
+/** Per-provider in-memory state while Preferences is open. */
+interface ProviderState {
+  hadKey: boolean;
+  typedKey: string;
+  model: string;
+}
+let prefsProviderStates: Record<string, ProviderState> = {};
+let prefsActiveProvider = "anthropic";
 let prefsGalaxyHadKey = false;
 
 // Both-or-neither: a half-filled Galaxy profile gets rejected by the brain
@@ -2454,9 +2499,37 @@ function updatePrefsGalaxyValidity(): void {
 prefsGalaxyUrl.addEventListener("input", updatePrefsGalaxyValidity);
 prefsGalaxyKey.addEventListener("input", updatePrefsGalaxyValidity);
 
+/** Snapshot the currently-visible provider fields into prefsProviderStates. */
+function snapshotCurrentProvider(): void {
+  prefsProviderStates[prefsActiveProvider] = {
+    hadKey: prefsProviderStates[prefsActiveProvider]?.hadKey ?? false,
+    typedKey: prefsApiKey.value,
+    model: prefsModel.value,
+  };
+}
+
+/** Load a provider's stored state into the visible fields. */
+function loadProviderFields(provider: string): void {
+  const state = prefsProviderStates[provider] ?? { hadKey: false, typedKey: "", model: "" };
+  populateModels(provider, state.model || undefined);
+  prefsApiKey.value = state.typedKey;
+  prefsApiKey.placeholder = state.hadKey ? "leave blank to keep existing key" : "";
+  if (state.hadKey && !state.typedKey) {
+    prefsApiKeyStatus.className = "api-key-status stored";
+    prefsApiKeyStatus.textContent =
+      "✓ Key stored — leave blank to keep, or enter a new key to replace";
+  } else {
+    prefsApiKeyStatus.className = "api-key-status";
+    prefsApiKeyStatus.textContent = "";
+  }
+}
+
 async function openPreferences(): Promise<void> {
   const config = (await window.orbit.getConfig()) as {
-    llm?: { provider?: string; model?: string; hasApiKey?: boolean };
+    llm?: {
+      active?: string;
+      providers?: Record<string, { model?: string; hasApiKey?: boolean }>;
+    };
     galaxy?: {
       active: string | null;
       profiles: Record<string, { url: string; hasApiKey?: boolean }>;
@@ -2466,13 +2539,18 @@ async function openPreferences(): Promise<void> {
     skills?: { repos?: Array<{ name?: string; url?: string; branch?: string; enabled?: boolean }> };
   };
 
-  prefsProvider.value = config.llm?.provider || "anthropic";
-  populateModels(prefsProvider.value, config.llm?.model);
-  prefsLlmHadKey = Boolean(config.llm?.hasApiKey);
-  prefsApiKey.value = "";
-  prefsApiKey.placeholder = prefsLlmHadKey ? "•••••••• (unchanged)" : "";
-  prefsApiKeyStatus.className = "api-key-status";
-  prefsApiKeyStatus.textContent = "";
+  // Build per-provider in-memory state from masked config.
+  prefsProviderStates = {};
+  for (const [name, p] of Object.entries(config.llm?.providers ?? {})) {
+    prefsProviderStates[name] = {
+      hadKey: Boolean(p.hasApiKey),
+      typedKey: "",
+      model: p.model ?? "",
+    };
+  }
+  prefsActiveProvider = config.llm?.active || "anthropic";
+  prefsProvider.value = prefsActiveProvider;
+  loadProviderFields(prefsActiveProvider);
 
   // Galaxy: use active profile
   const activeProfile = config.galaxy?.active
@@ -2526,8 +2604,13 @@ async function savePreferences(): Promise<void> {
   // Build a delta — only fields the user can edit. Main reconciles secrets
   // against what's on disk; the sentinel preserves a stored key when the
   // user left the input blank.
+  const activeState = prefsProviderStates[prefsActiveProvider] ?? {
+    hadKey: false,
+    typedKey: "",
+    model: "",
+  };
   const typedApiKey = prefsApiKey.value.trim();
-  const llmApiKey = typedApiKey ? typedApiKey : prefsLlmHadKey ? UNCHANGED_SECRET : "";
+  const llmApiKey = typedApiKey ? typedApiKey : activeState.hadKey ? UNCHANGED_SECRET : "";
 
   const typedGalaxyKey = prefsGalaxyKey.value.trim();
   const galaxyUrl = prefsGalaxyUrl.value.trim();
@@ -2541,13 +2624,32 @@ async function savePreferences(): Promise<void> {
     return;
   }
 
-  const selectedModel = prefsModel.value || undefined;
+  // Snapshot the currently-visible fields before building the save payload.
+  snapshotCurrentProvider();
+  const activeProvider = prefsProvider.value;
+  const selectedModel = prefsProviderStates[activeProvider]?.model || prefsModel.value || undefined;
+
+  // Build the full providers map from in-memory state.
+  const providers: Record<string, { apiKey: string; model?: string }> = {};
+  for (const [name, state] of Object.entries(prefsProviderStates)) {
+    const key = state.typedKey.trim()
+      ? state.typedKey.trim()
+      : state.hadKey
+        ? UNCHANGED_SECRET
+        : "";
+    providers[name] = { apiKey: key, model: state.model || undefined };
+  }
+  // Ensure the active provider is always in the map even if brand-new.
+  if (!providers[activeProvider]) {
+    providers[activeProvider] = { apiKey: llmApiKey, model: selectedModel };
+  } else {
+    // llmApiKey is the resolved key for the active provider — use it as override.
+    providers[activeProvider].apiKey = llmApiKey;
+    providers[activeProvider].model = selectedModel;
+  }
+
   const config: Record<string, unknown> = {
-    llm: {
-      provider: prefsProvider.value,
-      model: selectedModel,
-      apiKey: llmApiKey,
-    },
+    llm: { active: activeProvider, providers },
   };
 
   if (galaxyUrl || prefsGalaxyHadKey || typedGalaxyKey) {

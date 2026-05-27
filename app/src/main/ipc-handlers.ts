@@ -19,9 +19,8 @@ export const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 /** Masked shape returned to the renderer — never carries plaintext secrets. */
 interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
   llm?: {
-    provider?: string;
-    model?: string;
-    hasApiKey: boolean;
+    active: string;
+    providers: Record<string, { model?: string; hasApiKey: boolean }>;
   };
   galaxy?: {
     active: string | null;
@@ -34,9 +33,13 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
   const masked: MaskedLoomConfig = { ...rest };
   if (cfg.llm) {
     masked.llm = {
-      provider: cfg.llm.provider,
-      model: cfg.llm.model,
-      hasApiKey: Boolean(cfg.llm.apiKey || cfg.llm.apiKeyEncrypted),
+      active: cfg.llm.active,
+      providers: Object.fromEntries(
+        Object.entries(cfg.llm.providers ?? {}).map(([k, v]) => [
+          k,
+          { model: v.model, hasApiKey: Boolean(v.apiKey || v.apiKeyEncrypted) },
+        ]),
+      ),
     };
   }
   if (cfg.galaxy) {
@@ -62,26 +65,40 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   const canEncrypt = safeStorageAvailable();
   const out: LoomConfig = { ...current, ...(incoming as LoomConfig) };
 
-  // LLM key reconciliation
-  const incomingLlm = (incoming as { llm?: { apiKey?: string } }).llm;
+  // LLM multi-provider reconciliation. The renderer sends:
+  //   { active, providers: { [name]: { apiKey?, model? } } }
+  // where apiKey may be UNCHANGED_SECRET (preserve), "" (clear), or a new value.
+  type IncomingProvider = { apiKey?: string; model?: string };
+  type IncomingLlm = { active?: string; providers?: Record<string, IncomingProvider> };
+  const incomingLlm = (incoming as { llm?: IncomingLlm }).llm;
   if (incomingLlm) {
-    const rawKey = incomingLlm.apiKey;
-    const mergedLlm: LoomConfig["llm"] = {
-      provider: (incoming as { llm?: { provider?: string } }).llm?.provider,
-      model: (incoming as { llm?: { model?: string } }).llm?.model,
+    // Seed from disk so a partial payload (e.g. /model switching just one
+    // provider's model) preserves every other provider's encrypted blob.
+    const mergedProviders: NonNullable<LoomConfig["llm"]>["providers"] = {
+      ...(current.llm?.providers ?? {}),
     };
-    if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
-      // Preserve whatever was on disk.
-      if (current.llm?.apiKeyEncrypted) mergedLlm.apiKeyEncrypted = current.llm.apiKeyEncrypted;
-      if (current.llm?.apiKey) mergedLlm.apiKey = current.llm.apiKey;
-    } else if (rawKey === "") {
-      // Explicit clear — drop both fields.
-    } else if (canEncrypt) {
-      mergedLlm.apiKeyEncrypted = encryptSecret(rawKey);
-    } else {
-      mergedLlm.apiKey = rawKey;
+    for (const [name, p] of Object.entries(incomingLlm.providers ?? {})) {
+      const existing = current.llm?.providers?.[name];
+      const rawKey = p.apiKey;
+      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string } = {};
+      // Preserve existing model if the incoming entry doesn't carry one --
+      // a partial save (e.g. rotate-just-the-key) shouldn't wipe the model.
+      if (p.model !== undefined) entry.model = p.model;
+      else if (existing?.model) entry.model = existing.model;
+      if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
+        if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
+        else if (existing?.apiKey) entry.apiKey = existing.apiKey;
+      } else if (rawKey !== "") {
+        if (canEncrypt) entry.apiKeyEncrypted = encryptSecret(rawKey);
+        else entry.apiKey = rawKey;
+      }
+      // empty rawKey ("") = explicit clear — neither field set
+      mergedProviders[name] = entry;
     }
-    out.llm = mergedLlm;
+    out.llm = {
+      active: incomingLlm.active ?? current.llm?.active ?? "anthropic",
+      providers: mergedProviders,
+    };
   }
 
   // Galaxy profile reconciliation (per profile)
@@ -180,15 +197,20 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return agent.getCwd();
   });
 
-  // Replay the current session's chat transcript into the renderer. Used by
-  // the /chat slash command to recover chat after the window blanks out
-  // (e.g. after an accidental file:// navigation). No agent restart — just
-  // re-read session.jsonl and push the ReplaySegment[] back.
+  // Replay the current session's chat transcript into the renderer. Used
+  // by /chat and by display:resume after wake-from-sleep. Reads only from
+  // the pinned session file, so a fresh /new start (pinned = null) returns
+  // empty instead of surfacing stale per-cwd history.
   ipcMain.handle("chat:replay", async (e) => {
     const window = BrowserWindow.fromWebContents(e.sender);
     if (!window || window.isDestroyed()) return { ok: false, error: "no window" };
+    const file = agent.getReplaySessionFile();
+    if (!file) {
+      window.webContents.send("agent:session-history", []);
+      return { ok: true, segments: 0 };
+    }
     try {
-      const history = loadSessionHistory(agent.getCwd());
+      const history = loadSessionHistory(file);
       window.webContents.send("agent:session-history", history);
       return { ok: true, segments: history.length };
     } catch (err) {
@@ -334,6 +356,16 @@ export function registerIpcHandlers(agent: AgentManager): void {
       }
     },
   );
+
+  ipcMain.handle("notebook:load", async () => {
+    const nbPath = path.join(agent.getCwd(), "notebook.md");
+    try {
+      const content = fs.readFileSync(nbPath, "utf-8");
+      return { ok: true, content, path: nbPath };
+    } catch {
+      return { ok: false, content: null, path: nbPath };
+    }
+  });
 
   ipcMain.handle("file:open", async (_e, filePath: string) => {
     log("open file:", filePath);

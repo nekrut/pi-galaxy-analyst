@@ -82,11 +82,13 @@ export interface OrbitAPI {
   ): () => void;
   getAgentStatus(): Promise<{ status: "running" | "stopped" | "error"; message?: string }>;
   onCwdChanged(callback: (dir: string) => void): () => void;
+  onDisplayResume(callback: () => void): () => void;
   onOpenPreferences(callback: () => void): () => void;
   onShowSlashCommands(callback: () => void): () => void;
   onProcUpdate(callback: (procs: ProcInfo[]) => void): () => void;
   onSessionHistory(callback: (history: ReplaySegment[]) => void): () => void;
   replayChat(): Promise<{ ok: true; segments: number } | { ok: false; error: string }>;
+  loadNotebook(): Promise<{ ok: boolean; content: string | null; path: string }>;
   getReportSysinfo(): Promise<{
     appVersion: string;
     electronVersion: string;
@@ -180,6 +182,12 @@ const api: OrbitAPI = {
     return () => ipcRenderer.removeListener("agent:cwd-changed", handler);
   },
 
+  onDisplayResume: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("display:resume", handler);
+    return () => ipcRenderer.removeListener("display:resume", handler);
+  },
+
   onOpenPreferences: (callback) => {
     const handler = () => callback();
     ipcRenderer.on("menu:open-preferences", handler);
@@ -199,6 +207,7 @@ const api: OrbitAPI = {
   },
 
   replayChat: () => ipcRenderer.invoke("chat:replay"),
+  loadNotebook: () => ipcRenderer.invoke("notebook:load"),
 
   getReportSysinfo: () => ipcRenderer.invoke("report:sysinfo"),
   openIssueReport: (payload) => ipcRenderer.invoke("report:open-issue", payload),

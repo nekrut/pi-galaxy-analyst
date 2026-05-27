@@ -131,6 +131,18 @@ ${lines.join("\n")}
  * if Galaxy MCP is registered. Cloud mode is the default and the
  * unrestricted, per-plan-routing behavior.
  */
+function buildActiveModelBlock(): string {
+  const cfg = loadConfig();
+  const active = cfg.llm?.active;
+  const model = active ? cfg.llm?.providers?.[active]?.model : undefined;
+  if (!active) return "";
+  const modelStr = model ? `${model}` : "unknown model";
+  return `## Active LLM
+
+You are **${modelStr}** running via the **${active}** provider. This is your current identity for this session — state it accurately when asked and do not claim to be a different model or provider.
+`;
+}
+
 function buildExecutionModeBlock(): string {
   const cfg = loadConfig();
   if (cfg.executionMode !== "local") return "";
@@ -370,8 +382,9 @@ If a tool call fails because a credential is missing or wrong:
   for headless setups. Galaxy MCP is registered automatically when the
   key is present; no chat paste needed.
 - **LLM providers** — same path: Orbit's Preferences → API Key, or
-  \`~/.loom/config.json\`'s \`llm.apiKey\` field. The renderer encrypts
-  via Electron \`safeStorage\` if available.
+  \`~/.loom/config.json\`'s \`llm.providers\` map (one entry per provider,
+  pointed to by \`llm.active\`). The renderer encrypts via Electron
+  \`safeStorage\` if available.
 - **Other MCP credentials** — point at the relevant config file or
   environment variable; never invite a paste.
 
@@ -907,6 +920,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, ctx) => {
     const omitAnchors = isLlama4Family(ctx.model);
     const systemPrompt = [
+      buildActiveModelBlock(),
       buildOperatingDisciplineBlock(),
       buildVerificationDisciplineBlock(),
       buildPlanConventionBlock({ omitAnchors }),
