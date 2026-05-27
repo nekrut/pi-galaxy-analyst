@@ -984,8 +984,10 @@ window.orbit.onDisplayResume(() => {
   // Re-sync streaming UI with actual agent state. If the agent is mid-turn
   // (running a long tool like foldseek), restore the abort button so the
   // user isn't stuck with a yellow send button and no way to interrupt.
-  void window.orbit.getAgentStatus().then(({ status }) => {
-    if (status === "running" && !streaming) {
+  // Key on `turnActive`, not `status === "running"`: status === "running"
+  // only means the brain process is alive, which is true between turns too.
+  void window.orbit.getAgentStatus().then(({ turnActive }) => {
+    if (turnActive && !streaming) {
       streaming = true;
       sendBtn.classList.add("hidden");
       abortBtn.classList.remove("hidden");

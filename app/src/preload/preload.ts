@@ -91,7 +91,11 @@ export interface OrbitAPI {
   onAgentStatus(
     callback: (status: "running" | "stopped" | "error", msg?: string) => void,
   ): () => void;
-  getAgentStatus(): Promise<{ status: "running" | "stopped" | "error"; message?: string }>;
+  getAgentStatus(): Promise<{
+    status: "running" | "stopped" | "error";
+    message?: string;
+    turnActive: boolean;
+  }>;
   onCwdChanged(callback: (dir: string) => void): () => void;
   onDisplayResume(callback: () => void): () => void;
   onOpenPreferences(callback: () => void): () => void;
