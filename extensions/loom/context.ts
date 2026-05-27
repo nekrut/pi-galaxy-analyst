@@ -321,63 +321,67 @@ Common thread flags:
 | fastqc     | \`-t N\`              |
 | cutadapt   | \`-j N\`              |
 
-### Bash timeouts on long-running tools
+### Bash timeouts and long-running jobs
 
 Pi's \`bash\` tool's \`timeout\` is **optional** and in **seconds**. When
 omitted, the command runs to completion — correct default for
 bioinformatics pipelines whose runtime you cannot reliably predict
-(PGGB / assembly / minimap2 / bwa-on-WGS / long variant calling, conda
-solves on fresh envs).
+(minimap2 / bwa-on-WGS / variant calling, fresh-env conda solves,
+short-pipeline assembly).
 
 **Do not guess-cap at 3600 s.** Real pangenome builds will cross an hour
 and be killed partway. When you do need a bound, pick generously: 300 s
 for quick commands, 3600 s for short pipelines, 86400 s for overnight.
 Prefer **omitting \`timeout\` entirely** over capping too low.
 
-### Long-running jobs — always background them
+**Background jobs likely to run 10+ minutes** so the user isn't held
+hostage to a single bash call. A blocked tool holds the chat turn: the
+user cannot send messages, display sleep can interrupt UI updates, and
+a crash or abort kills the job mid-run. Signals to background:
 
-If a job will take **more than ~30 seconds** (foldseek ProstT5, mmseqs2
-all-vs-all, MCL on large graphs, STAR genome indexing, assembly, any
-deep-learning inference step), **never block the bash tool on it**.
-A blocked tool holds the entire chat turn; the user cannot send messages,
-the display going to sleep will blank the UI, and a crash or abort kills
-the job mid-run.
+- Neural-network inference (foldseek ProstT5, ESM, AlphaFold)
+- mmseqs2 / foldseek on > ~500 sequences
+- MCL clustering on large graphs
+- STAR / hisat2 genome index generation
+- Genome assembly (hifiasm, flye, canu)
+- PGGB pangenome builds
+
+Routine multi-package conda installs and standard fastp / bwa / samtools
+steps stay in the synchronous-bash path — backgrounding them just bloats
+the activity stream.
 
 **Pattern — launch, record, poll:**
 
 \`\`\`bash
-# 1. Launch in background, redirect output to a log
-nohup .loom/env/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 &
-JOB_PID=$!
-echo $JOB_PID > foldseek_work/job.pid
-echo "Launched foldseek PID $JOB_PID — tail foldseek_work/run.log to monitor"
+# 1. Launch in background. \`disown\` detaches from the tool shell so the
+# job survives this tool invocation. The \`&& touch ... .done\` sentinel
+# is more reliable than \`kill -0 $PID\` (PID reuse over hour-scale jobs).
+mkdir -p foldseek_work
+nohup sh -c '.loom/env/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 \\
+  && touch foldseek_work/.done' > /dev/null 2>&1 &
+disown
+echo "Launched foldseek — tail foldseek_work/run.log to monitor"
 \`\`\`
 
 \`\`\`bash
 # 2. Poll in a later bash call (separate tool invocation, minutes later)
-JOB_PID=$(cat foldseek_work/job.pid 2>/dev/null)
-if kill -0 "$JOB_PID" 2>/dev/null; then
-  echo "Still running (PID $JOB_PID)"
-  tail -5 foldseek_work/run.log
-else
+if [ -f foldseek_work/.done ]; then
   echo "Finished"
-  ls -lh foldseek_work/vir_struct_cluster_cluster.tsv 2>/dev/null || echo "output missing — check log for errors"
+  ls -lh foldseek_work/vir_struct_cluster_cluster.tsv 2>/dev/null \\
+    || echo "output missing — check log for errors"
   tail -20 foldseek_work/run.log
+else
+  echo "Still running"
+  tail -5 foldseek_work/run.log
 fi
 \`\`\`
 
 After launching, **return to the user immediately** with a message like
-"foldseek is running in the background (PID 12345). I'll check back in
-a few minutes — or you can ask me to check now." Write the PID and log
-path to the notebook so the session is recoverable after a restart.
-
-**Signals that a job needs backgrounding** (non-exhaustive):
-- Any neural-network inference (ProstT5, ESM, AlphaFold, etc.)
-- mmseqs2 / foldseek on > ~500 sequences
-- MCL clustering on large graphs
-- STAR / hisat2 genome index generation
-- genome assembly (hifiasm, flye, canu)
-- conda env creation on a fresh analysis
+"foldseek is running in the background — I'll check back in a few
+minutes, or you can ask me to check now." Append a brief
+\`## Background jobs\` breadcrumb to \`notebook.md\` with the job name,
+start time, and log path so the work is recoverable across renderer
+reloads (skip the PID — it's meaningless after a restart).
 `;
 }
 
