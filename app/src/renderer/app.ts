@@ -2006,13 +2006,20 @@ window.orbit.onAgentEvent((event) => {
       chat.hideThinking();
       const name = (event as { toolName?: string }).toolName || "tool";
       const id = (event as { toolCallId?: string }).toolCallId || name;
+      const startArgs = (event as { args?: Record<string, unknown> }).args;
       // Per-tool chat cards are noisy and duplicate what the Activity tab
       // shows (shell stream + activity.jsonl). Only team_dispatch keeps a
       // chat card because its collapsible per-turn body is genuinely useful.
       if (name === "team_dispatch") {
         chat.addToolCard(id, name);
       }
-      setStatusBadge("running", `running: ${name}`);
+      // Enrich the status badge with the command/path so users can see what
+      // is running without switching to the Activity tab.
+      const preview = formatArgsPreview(startArgs);
+      const badgeLabel = preview
+        ? `${name}: ${preview.length > 60 ? preview.slice(0, 60) + "…" : preview}`
+        : `running: ${name}`;
+      setStatusBadge("running", badgeLabel);
       break;
     }
 
