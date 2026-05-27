@@ -230,17 +230,18 @@ function checkLLMProvider() {
   // safeStorage lives in the Orbit main process. Point the user at the two
   // working paths instead of falling through to the generic error.
   if (activeLlmConfig?.apiKeyEncrypted) {
+    const envVar = PROVIDER_ENV_MAP[activeLlmProvider] || "AI_GATEWAY_API_KEY";
     console.error(`loom: your ~/.loom/config.json has an encrypted API key
-(apiKeyEncrypted), but the standalone CLI cannot decrypt it — that only
-works inside Orbit.
+(apiKeyEncrypted) for provider "${activeLlmProvider}", but the standalone
+CLI cannot decrypt it -- that only works inside Orbit.
 
 Do one of the following:
 
-  • Launch via Orbit (\`cd app && npm start\`), which decrypts and injects
-    ANTHROPIC_API_KEY (or the provider-specific variable) into the brain.
+  * Launch via Orbit (\`cd app && npm start\`), which decrypts and injects
+    ${envVar} into the brain.
 
-  • Export the key for this shell:
-      export ANTHROPIC_API_KEY=sk-ant-...
+  * Export the key for this shell:
+      export ${envVar}=...
 `);
     process.exit(1);
   }
@@ -270,8 +271,10 @@ Set up one of the following:
      Create ~/.loom/config.json:
      {
        "llm": {
-         "provider": "anthropic",
-         "apiKey": "sk-ant-..."
+         "active": "anthropic",
+         "providers": {
+           "anthropic": { "apiKey": "sk-ant-..." }
+         }
        }
      }
 
