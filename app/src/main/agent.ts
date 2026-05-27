@@ -174,13 +174,12 @@ export class AgentManager {
   private nextStartSkipContinue = false; // → restart in a new cwd without resuming old chat
   private nextStartIsFresh = false; // → tells extension to skip notebook auto-load on next start
   // Pinned on start() to the .jsonl pi will replay on --continue, or null
-  // on fresh starts so /chat refuses to surface stale per-cwd history.
-  // For fresh starts we lazily adopt a file the brain writes after spawn
-  // (mtime > spawnStartedAtMs) the first time /chat asks for it; the
-  // timestamp is what tells us a session file is *this* spawn's, not a
-  // leftover from a previous run in the same cwd.
+  // on fresh starts. For fresh starts we lazily adopt via the cwd/session.jsonl
+  // symlink that session-lifecycle.ts (re)creates on session_start -- start()
+  // deletes the stale symlink before spawn, so any link present afterwards
+  // must be from this spawn. Avoids racing the old child's post-SIGTERM
+  // session_shutdown writes (which append to the *old* file's mtime).
   private pinnedSessionFile: string | null = null;
-  private spawnStartedAtMs = 0;
   private mcpBootstrapRestartDone = false; // → guard: only auto-restart once per app lifetime
   private silentRestarting = false; // → suppresses status flicker during MCP bootstrap restart
 
@@ -243,24 +242,25 @@ export class AgentManager {
 
   /**
    * The session file /chat should replay. Returns the pinned file when set
-   * (--continue path), otherwise lazily adopts a newest-by-mtime file the
-   * brain has written *after* spawn (fresh-start path, once the new session
-   * has real content). Returns null if neither applies -- /chat then sends
-   * an empty history rather than surfacing a stale prior-run session.
+   * (--continue path), otherwise lazily adopts via cwd/session.jsonl -- the
+   * symlink Loom's session-lifecycle creates on session_start. Returns null
+   * if neither applies; /chat then sends an empty history rather than
+   * surfacing a stale prior-run session.
    */
   getReplaySessionFile(): string | null {
     if (this.pinnedSessionFile) return this.pinnedSessionFile;
-    const newest = newestSessionFile(this.cwd);
-    if (!newest) return null;
+    const linkPath = path.join(this.cwd, "session.jsonl");
     try {
-      if (fs.statSync(newest).mtimeMs > this.spawnStartedAtMs) {
-        this.pinnedSessionFile = newest;
-        return newest;
-      }
+      const stat = fs.lstatSync(linkPath);
+      if (!stat.isSymbolicLink()) return null;
+      const target = fs.readlinkSync(linkPath);
+      const absTarget = path.isAbsolute(target) ? target : path.join(this.cwd, target);
+      if (!fs.existsSync(absTarget)) return null;
+      this.pinnedSessionFile = absTarget;
+      return absTarget;
     } catch {
-      // statSync race -- file disappeared between readdir and stat; treat as "no replay yet"
+      return null;
     }
-    return null;
   }
 
   /**
@@ -303,7 +303,17 @@ export class AgentManager {
 
     // Pin matches pi's --continue choice in normal use. Cleared in stop().
     this.pinnedSessionFile = wantsContinue ? newestSessionFile(this.cwd) : null;
-    this.spawnStartedAtMs = Date.now();
+    if (!wantsContinue) {
+      // Drop any stale cwd/session.jsonl symlink so a link appearing later
+      // is necessarily from this spawn's session_start, not the prior run.
+      const linkPath = path.join(this.cwd, "session.jsonl");
+      try {
+        const stat = fs.lstatSync(linkPath);
+        if (stat.isSymbolicLink()) fs.unlinkSync(linkPath);
+      } catch {
+        // No link / not accessible -- nothing to do
+      }
+    }
 
     const fresh = this.nextStartIsFresh;
     this.nextStartIsFresh = false;
