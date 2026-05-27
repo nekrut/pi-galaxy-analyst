@@ -100,12 +100,18 @@ const PROVIDER_ENV_MAP = {
   xai: "XAI_API_KEY",
 };
 
+// Providers that authenticate via OAuth (~/.pi/agent/auth.json) instead of env vars.
+const OAUTH_PROVIDERS = new Set(["openai-codex"]);
+
 // apiKeyEncrypted isn't readable here -- no Electron safeStorage in the
 // brain process. Orbit decrypts and passes via env when it spawns us;
-// standalone CLI usage only works with plaintext keys.
+// standalone CLI usage only works with plaintext keys. OAuth providers
+// skip env injection entirely: a stale apiKey on the entry shouldn't leak
+// under a misrouted env variable when the brain will authenticate via
+// ~/.pi/agent/auth.json anyway.
 const activeLlmProvider = loomConfig.llm?.active;
 const activeLlmConfig = activeLlmProvider ? loomConfig.llm?.providers?.[activeLlmProvider] : null;
-if (activeLlmConfig?.apiKey) {
+if (activeLlmConfig?.apiKey && !OAUTH_PROVIDERS.has(activeLlmProvider)) {
   const envVar = PROVIDER_ENV_MAP[activeLlmProvider] || "AI_GATEWAY_API_KEY";
   if (!process.env[envVar]) {
     process.env[envVar] = activeLlmConfig.apiKey;
@@ -201,7 +207,27 @@ function checkLLMProvider() {
   if (userArgs.some((a) => skipFlags.some((f) => a.startsWith(f)))) return;
   if (hasArg("--provider")) return;
 
-  // Consolidated config has an API key
+  // OAuth providers authenticate via ~/.pi/agent/auth.json, not config keys.
+  // Short-circuit on a present credential for the active provider; stale
+  // plaintext / encrypted fields on the entry are ignored entirely so they
+  // can't mask a missing OAuth login or falsely trigger the encrypted-key
+  // exit below.
+  if (activeLlmProvider && OAUTH_PROVIDERS.has(activeLlmProvider)) {
+    const authPath = join(agentDir, "auth.json");
+    if (existsSync(authPath)) {
+      try {
+        const auth = JSON.parse(readFileSync(authPath, "utf-8"));
+        if (auth && auth[activeLlmProvider]) return;
+      } catch {}
+    }
+    console.error(`loom: provider "${activeLlmProvider}" requires an OAuth sign-in.
+Launch via Orbit (\`cd app && npm start\`) and sign in from Preferences,
+or unset the active provider in ~/.loom/config.json.
+`);
+    process.exit(1);
+  }
+
+  // Consolidated config has an API key (non-OAuth providers only)
   if (activeLlmConfig?.apiKey) return;
 
   const providerEnvVars = [
