@@ -4,7 +4,8 @@ name: release
 # via workflow_dispatch (handy for re-running on the same tag without
 # inventing a new one).
 # Builds platform-specific Orbit installers and attaches them to a draft
-# GitHub Release. Promote the draft to a published release manually.
+# GitHub Release (promote the draft manually), and publishes the @galaxyproject/loom
+# npm package via OIDC trusted publishing (no token, no 2FA prompt).
 
 on:
   push:
@@ -102,3 +103,54 @@ jobs:
             artifacts/**/*.deb
             artifacts/**/*.rpm
           fail_on_unmatched_files: true
+
+  # Publish the @galaxyproject/loom npm package (the Loom CLI -- not Orbit) via
+  # OIDC trusted publishing. No NPM_TOKEN and no 2FA OTP: GitHub mints a
+  # short-lived id-token that npm verifies against the package's configured
+  # trusted publisher (npmjs.com -> package Settings -> Trusted Publisher,
+  # pointing at this repo + release.yml). Runs only on tag pushes so a
+  # workflow_dispatch re-run (used to re-attach Orbit artifacts) doesn't try to
+  # republish an existing version. Independent of the Orbit build -- they're
+  # separate channels; the prepublishOnly hook (typecheck + tests + smoke-pack)
+  # gates quality.
+  publish-npm:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # OIDC trusted publishing needs npm >= 11.5.1; Node 22 still ships npm 10.x.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install deps
+        run: npm ci
+
+      # Prerelease versions (0.1.0-alpha.4) publish under the prerelease channel
+      # (alpha) so they never land on the `latest` dist-tag; a plain semver
+      # (0.1.0) publishes to `latest`.
+      - name: Determine dist-tag from version
+        id: disttag
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$VERSION" == *-* ]]; then
+            TAG="${VERSION#*-}"
+            TAG="${TAG%%.*}"
+          else
+            TAG="latest"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION with dist-tag '$TAG'"
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public --tag "${{ steps.disttag.outputs.tag }}"
