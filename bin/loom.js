@@ -101,6 +101,7 @@ const PROVIDER_ENV_MAP = {
   mistral: "MISTRAL_API_KEY",
   groq: "GROQ_API_KEY",
   xai: "XAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
 };
 
 // Providers that authenticate via OAuth (~/.pi/agent/auth.json) instead of env vars.
