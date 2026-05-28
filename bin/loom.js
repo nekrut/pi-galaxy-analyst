@@ -340,6 +340,7 @@ or unset the active provider in ~/.loom/config.json.
     "GROQ_API_KEY",
     "MISTRAL_API_KEY",
     "XAI_API_KEY",
+    "DEEPSEEK_API_KEY",
     "OPENROUTER_API_KEY",
     "CEREBRAS_API_KEY",
     "AI_GATEWAY_API_KEY",
