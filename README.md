@@ -278,7 +278,17 @@ Orbit runs on Windows inside WSL2. From an elevated PowerShell:
 wsl --install --web-download -d Ubuntu
 ```
 
-Reboot, set up your Ubuntu user, then inside the Ubuntu terminal:
+Reboot, set up your Ubuntu user, then inside the Ubuntu terminal.
+
+**Option A — install the packaged `.deb` (recommended):**
+
+```bash
+curl -fsSL https://github.com/galaxyproject/loom/releases/latest/download/orbit_amd64.deb -o /tmp/orbit.deb
+sudo apt install /tmp/orbit.deb
+orbit
+```
+
+**Option B — build from source:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/galaxyproject/pi-galaxy-analyst/main/scripts/setup-wsl.sh | bash
