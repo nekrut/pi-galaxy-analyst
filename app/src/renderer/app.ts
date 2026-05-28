@@ -967,7 +967,7 @@ async function loadNotebookFromDisk(): Promise<void> {
   }
 }
 
-// On wake-from-sleep, auto-restore blank chat and notebook without user action.
+// On wake-from-sleep, auto-restore blank chat, notebook, and streaming UI state.
 window.orbit.onDisplayResume(() => {
   if (!chat.hasContent()) {
     void window.orbit.replayChat().then((r) => {
@@ -981,6 +981,19 @@ window.orbit.onDisplayResume(() => {
   } else {
     void loadNotebookFromDisk();
   }
+  // Re-sync streaming UI with actual agent state. If the agent is mid-turn
+  // (running a long tool like foldseek), restore the abort button so the
+  // user isn't stuck with a yellow send button and no way to interrupt.
+  // Key on `turnActive`, not `status === "running"`: status === "running"
+  // only means the brain process is alive, which is true between turns too.
+  void window.orbit.getAgentStatus().then(({ turnActive }) => {
+    if (turnActive && !streaming) {
+      streaming = true;
+      sendBtn.classList.add("hidden");
+      abortBtn.classList.remove("hidden");
+      setStatusBadge("running", "running...");
+    }
+  });
 });
 
 window.orbit.onSessionHistory((history) => {
@@ -1995,13 +2008,20 @@ window.orbit.onAgentEvent((event) => {
       chat.hideThinking();
       const name = (event as { toolName?: string }).toolName || "tool";
       const id = (event as { toolCallId?: string }).toolCallId || name;
+      const startArgs = (event as { args?: Record<string, unknown> }).args;
       // Per-tool chat cards are noisy and duplicate what the Activity tab
       // shows (shell stream + activity.jsonl). Only team_dispatch keeps a
       // chat card because its collapsible per-turn body is genuinely useful.
       if (name === "team_dispatch") {
         chat.addToolCard(id, name);
       }
-      setStatusBadge("running", `running: ${name}`);
+      // Enrich the status badge with the command/path so users can see what
+      // is running without switching to the Activity tab.
+      const preview = formatArgsPreview(startArgs);
+      const badgeLabel = preview
+        ? `${name}: ${preview.length > 60 ? preview.slice(0, 60) + "…" : preview}`
+        : `running: ${name}`;
+      setStatusBadge("running", badgeLabel);
       break;
     }
 

@@ -173,6 +173,11 @@ export class AgentManager {
   private window: BrowserWindow;
   private status: AgentStatus = "stopped";
   private statusMessage: string | undefined;
+  // `status` only tracks process aliveness; `turnActive` tracks whether the
+  // brain is mid-response. Toggled by parsing agent_start / agent_end events
+  // on stdout so the renderer can re-sync after a reload (display-sleep
+  // recovery) without conflating process-running with turn-running.
+  private turnActive = false;
   private stderr = "";
   private pendingResponses = new Map<string, PendingResponse>();
   private idCounter = 0;
@@ -549,8 +554,8 @@ export class AgentManager {
     return this.status;
   }
 
-  getStatusSnapshot(): { status: AgentStatus; message?: string } {
-    return { status: this.status, message: this.statusMessage };
+  getStatusSnapshot(): { status: AgentStatus; message?: string; turnActive: boolean } {
+    return { status: this.status, message: this.statusMessage, turnActive: this.turnActive };
   }
 
   getStderr(): string {
@@ -560,6 +565,10 @@ export class AgentManager {
   private setStatus(status: AgentStatus, message?: string): void {
     this.status = status;
     this.statusMessage = message;
+    // Process death (clean or otherwise) ends any in-flight turn.
+    if (status === "stopped" || status === "error") {
+      this.turnActive = false;
+    }
     log("status:", status, message || "");
     // During a silent restart we suppress the transient stopped→running flicker;
     // the renderer keeps showing "running" the whole time.
@@ -610,6 +619,12 @@ export class AgentManager {
       }
       this.window.webContents.send("agent:ui-request", data);
       return;
+    }
+
+    if (type === "agent_start") {
+      this.turnActive = true;
+    } else if (type === "agent_end" || type === "error") {
+      this.turnActive = false;
     }
 
     this.window.webContents.send("agent:event", data);
