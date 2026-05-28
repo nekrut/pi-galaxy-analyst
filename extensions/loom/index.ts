@@ -22,7 +22,7 @@ import { registerSessionIndexTools } from "./session-index/tools";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerConfusablesHint } from "./confusables-hint";
 import * as fs from "fs";
-import { getState, getNotebookPath } from "./state";
+import { getState, getNotebookPath, getNotebookWidgetMode, setNotebookWidgetMode } from "./state";
 import {
   loadProfiles,
   saveProfile,
@@ -207,14 +207,22 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // /notebook — view current notebook content
   // ─────────────────────────────────────────────────────────────────────────────
   pi.registerCommand("notebook", {
-    description: "View current notebook content",
+    description: "Toggle the notebook panel",
     handler: async (_args, ctx) => {
+      // Open → close. Marks "hidden" so the panel doesn't auto-reopen on the
+      // next notebook write (see ui-bridge); a second /notebook reopens it.
+      if (getNotebookWidgetMode() === "open") {
+        ctx.ui.setWidget(LoomWidgetKey.Notebook, undefined);
+        setNotebookWidgetMode("hidden");
+        return;
+      }
       const notebookPath = getNotebookPath();
       if (notebookPath && fs.existsSync(notebookPath)) {
         try {
           const content = fs.readFileSync(notebookPath, "utf-8");
           const header = `> \`${notebookPath}\`\n\n`;
           ctx.ui.setWidget(LoomWidgetKey.Notebook, encodeMarkdownWidget(header + content));
+          setNotebookWidgetMode("open");
         } catch (err) {
           ctx.ui.notify(`Failed to read notebook: ${err}`, "error");
         }
