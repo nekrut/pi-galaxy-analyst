@@ -28,6 +28,7 @@ import {
   saveProfile,
   switchProfile,
   profileNameFromUrl,
+  normalizeGalaxyUrl,
   warnOnUnusableActiveProfile,
 } from "./profiles";
 import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
@@ -121,11 +122,14 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const galaxyUrl = await ctx.ui.input("Galaxy Server URL", "https://usegalaxy.org");
-      if (!galaxyUrl) {
+      const galaxyUrlInput = await ctx.ui.input("Galaxy Server URL", "https://usegalaxy.org");
+      if (!galaxyUrlInput) {
         ctx.ui.notify("Connection cancelled", "warning");
         return;
       }
+      // Accept a bare host ("test.galaxyproject.org") by defaulting to https://
+      // instead of rejecting it as an invalid URL.
+      const galaxyUrl = normalizeGalaxyUrl(galaxyUrlInput);
 
       ctx.ui.notify(
         "To get your API key: Log into Galaxy → User → Preferences → Manage API Key",
