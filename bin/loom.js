@@ -5,7 +5,10 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "fs";
 import { homedir } from "os";
-import { loadConfig as loadLoomConfig } from "../shared/loom-config.js";
+import {
+  loadConfig as loadLoomConfig,
+  saveConfig as saveLoomConfig,
+} from "../shared/loom-config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -102,6 +105,51 @@ const PROVIDER_ENV_MAP = {
 
 // Providers that authenticate via OAuth (~/.pi/agent/auth.json) instead of env vars.
 const OAUTH_PROVIDERS = new Set(["openai-codex"]);
+
+function readAuthJson() {
+  const authPath = join(agentDir, "auth.json");
+  if (!existsSync(authPath)) return {};
+  try {
+    return JSON.parse(readFileSync(authPath, "utf-8")) || {};
+  } catch {
+    return {};
+  }
+}
+
+// Can this CLI actually authenticate the given provider? OAuth providers need a
+// credential in auth.json; everyone else needs a plaintext config key or the
+// provider's env var (encrypted config keys aren't decryptable outside Orbit).
+function activeProviderUsable(provider, entry, auth) {
+  if (OAUTH_PROVIDERS.has(provider)) return Boolean(auth[provider]);
+  if (entry?.apiKey) return true;
+  const envVar = PROVIDER_ENV_MAP[provider];
+  return Boolean(envVar && process.env[envVar]);
+}
+
+// Pi's `/login` writes credentials to auth.json but never touches Loom's
+// llm.active, so signing into a new provider mid-session has no effect on the
+// next launch. Bridge that gap: if the configured active provider has no
+// credential this CLI can use, but the user has signed into an OAuth provider,
+// switch llm.active to it and persist so the choice sticks.
+function reconcileActiveProviderWithAuth() {
+  const llm = loomConfig.llm;
+  if (!llm?.active) return;
+  const auth = readAuthJson();
+  if (activeProviderUsable(llm.active, llm.providers?.[llm.active], auth)) return;
+  const candidate = [...OAUTH_PROVIDERS].find((p) => auth[p]);
+  if (!candidate || candidate === llm.active) return;
+  const from = llm.active;
+  llm.active = candidate;
+  llm.providers = llm.providers || {};
+  if (!llm.providers[candidate]) llm.providers[candidate] = {};
+  try {
+    saveLoomConfig(loomConfig);
+    console.error(
+      `loom: active provider "${from}" has no usable credential here; switched to "${candidate}" (signed in via ~/.pi/agent/auth.json).`,
+    );
+  } catch {}
+}
+reconcileActiveProviderWithAuth();
 
 // apiKeyEncrypted isn't readable here -- no Electron safeStorage in the
 // brain process. Orbit decrypts and passes via env when it spawns us;
