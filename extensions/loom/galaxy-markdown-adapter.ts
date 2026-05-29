@@ -1,11 +1,14 @@
 /**
  * Loom <-> Galaxy-flavored-markdown content adapter. notebook.md is canonical.
  *
- * Push replaces each `loom-invocation` fenced block with a hidden HTML-comment
- * carrier holding the literal block, base64-encoded. Galaxy preserves both the
- * markdown body and HTML comments byte-for-byte (verified against 26.1.rc1), so
- * pull restores the original fences exactly. base64 keeps the payload free of
- * `-->` and newlines, so the comment is always single-line and well-formed.
+ * Push replaces each `loom-invocation` fenced block with a hidden carrier holding
+ * the literal block, base64-encoded. The carrier is a CommonMark link-reference
+ * definition (`[loom-invocation:v1]: #loom "<base64>"`): it renders to nothing and
+ * is preserved byte-for-byte on store, so pull restores the original fences exactly.
+ * (HTML comments do NOT work here -- Galaxy's page renderer escapes them to visible
+ * text rather than hiding them, verified live against 26.1.rc1. A reference
+ * definition is pure markdown, so it stays invisible.) base64 keeps the payload free
+ * of quotes and newlines, so the carrier is always one well-formed line.
  *
  * Phase 2 adds a visible ` ```galaxy ` directive alongside the carrier; pull
  * strips those directives (Loom owns the projection under the loom-canonical
@@ -19,11 +22,15 @@ const INV_FENCE_OPEN = "```loom-invocation";
 const FENCE_CLOSE = "```";
 const GALAXY_FENCE_OPEN = "```galaxy";
 
-// Anchored to a whole line (`m` flag): carriers are always emitted as their own
-// line, so this never decodes carrier-like syntax that appears inline in prose
-// (e.g. a notebook documenting Loom's own format). The `g` flag is required to
-// replace every carrier, not just the first.
-const CARRIER_RE = /^<!-- loom-invocation:v1 ([A-Za-z0-9+/=]+) -->$/gm;
+// Anchored to a whole line (`m` flag): the carrier is always its own line, so
+// this never decodes carrier-like syntax that appears inline in prose (e.g. a
+// notebook documenting Loom's own format). The `g` flag replaces every carrier.
+const CARRIER_RE = /^\[loom-invocation:v1\]: #loom "([A-Za-z0-9+/=]+)"$/gm;
+
+/** base64 a loom-invocation block into a (render-invisible) link-reference carrier. */
+function encodeCarrier(block: string): string {
+  return `[loom-invocation:v1]: #loom "${Buffer.from(block, "utf8").toString("base64")}"`;
+}
 
 /**
  * Push (pure, no network): loom-invocation fences -> hidden base64 carriers,
@@ -40,8 +47,7 @@ export function loomToGalaxyMarkdown(body: string): string {
       let end = i + 1;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
       const block = lines.slice(i, end + 1).join("\n");
-      const b64 = Buffer.from(block, "utf8").toString("base64");
-      out.push(`<!-- loom-invocation:v1 ${b64} -->`);
+      out.push(encodeCarrier(block));
       i = end + 1;
     } else {
       out.push(lines[i]);
@@ -124,7 +130,7 @@ export async function loomToGalaxyMarkdownRich(
         end++;
       }
       const block = lines.slice(i, end + 1).join("\n");
-      const carrier = `<!-- loom-invocation:v1 ${Buffer.from(block, "utf8").toString("base64")} -->`;
+      const carrier = encodeCarrier(block);
       // Emit the directive immediately before the carrier with NO extra blank
       // line, so stripping the 3 fence lines on pull restores the carrier in
       // the block's exact original position -- keeping the round trip identical.

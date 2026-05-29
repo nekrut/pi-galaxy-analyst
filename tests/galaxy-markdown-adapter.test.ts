@@ -30,7 +30,7 @@ describe("galaxy-markdown-adapter -- push", () => {
   it("replaces the loom-invocation fence with a hidden carrier and leaves narrative intact", () => {
     const out = loomToGalaxyMarkdown(NOTEBOOK);
     expect(out).not.toContain("```loom-invocation");
-    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     expect(out).toContain("## Plan A: chrM Variant Calling [hybrid]");
     expect(out).toContain("- [x] {#plan-a-step-2} BWA alignment");
     expect(out).toContain("| s1     | 96.2     |");
@@ -50,11 +50,11 @@ describe("galaxy-markdown-adapter -- round trip", () => {
 
   it("does not decode carrier-like syntax that appears inline in prose", () => {
     // A notebook documenting Loom's own format must survive the round trip: an
-    // inline mention of the carrier comment is not a real (standalone-line) carrier.
+    // inline mention of the carrier is not a real (standalone-line) carrier.
     const prose = [
       "# Format docs",
       "",
-      "On push, Loom emits `<!-- loom-invocation:v1 YWJj -->` for each block.",
+      'On push, Loom emits `[loom-invocation:v1]: #loom "YWJj"` for each block.',
       "",
     ].join("\n");
     expect(loomToGalaxyMarkdown(prose)).toBe(prose);
@@ -66,7 +66,7 @@ describe("galaxy-markdown-adapter -- round trip", () => {
       NOTEBOOK +
       "\n\n```loom-invocation\ninvocation_id: def456\ngalaxy_server_url: https://test.galaxyproject.org\nnotebook_anchor: plan-a-step-3\nlabel: calling\nsubmitted_at: 2026-05-29T13:00:00Z\nstatus: in_progress\n```\n";
     const pushed = loomToGalaxyMarkdown(two);
-    expect((pushed.match(/<!-- loom-invocation:v1 /g) ?? []).length).toBe(2);
+    expect((pushed.match(/^\[loom-invocation:v1\]: #loom "/gm) ?? []).length).toBe(2);
     expect(galaxyMarkdownToLoom(pushed)).toBe(two);
   });
 });
@@ -76,7 +76,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
     const out = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => true });
     expect(out).toContain("```galaxy");
     expect(out).toContain("invocation_outputs(invocation_id=abc123)");
-    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     // round trip still restores the original, stripping the directive
     expect(galaxyMarkdownToLoom(out)).toBe(NOTEBOOK);
   });
@@ -84,7 +84,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
   it("omits the directive when the id does not validate, but keeps the carrier", async () => {
     const out = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => false });
     expect(out).not.toContain("```galaxy");
-    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToLoom(out)).toBe(NOTEBOOK);
   });
 
@@ -107,7 +107,7 @@ describe("galaxy-markdown-adapter -- rich push", () => {
     };
     const out = await loomToGalaxyMarkdownRich(noId, validator);
     expect(out).not.toContain("```galaxy");
-    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToLoom(out)).toBe(noId);
   });
 });

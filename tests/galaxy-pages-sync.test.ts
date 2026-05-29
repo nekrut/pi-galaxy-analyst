@@ -105,7 +105,7 @@ describe("pushNotebookToGalaxy", () => {
     await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
 
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
-    expect(sent).toContain("<!-- loom-invocation:v1 ");
+    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
     expect(sent).toContain("invocation_outputs(invocation_id=inv-abc)");
     expect(sent).not.toContain("```loom-invocation");
     // the local notebook stays canonical -- the raw fence, not the projection
