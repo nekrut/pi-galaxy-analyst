@@ -234,8 +234,12 @@ export async function pushNotebookToGalaxy(opts: PushOptions = {}): Promise<Push
   return withNotebookLock(nbPath, async () => {
     const content = await readNotebook(nbPath);
     const existing = findGalaxyPageBlocks(content)[0];
-    // Strip both the binding block and any untrusted-content markers so the
-    // body sent to Galaxy (and re-persisted) is clean -- no marker round-trip.
+    // `stripped` is the canonical local notebook with the binding block and any
+    // untrusted-content markers removed, so the body sent to Galaxy (and
+    // re-persisted locally) is clean -- no marker round-trip. Push projects it to
+    // Galaxy via loomToGalaxyMarkdownRich; the local writeNotebook calls below
+    // persist `stripped` as-is, so notebook.md never holds the projected
+    // (carrier/directive) form.
     const stripped = stripUntrustedMarkers(stripGalaxyPageBlocks(content));
 
     if (existing) {

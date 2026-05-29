@@ -73,7 +73,13 @@ export interface InvocationValidator {
   isValid(invocationId: string): Promise<boolean>;
 }
 
-/** Real validator: a GET that resolves means the id decodes and exists. */
+/**
+ * Real validator: a GET that resolves means the id decodes and exists. It
+ * queries the ambient configured server (galaxyGet reads GALAXY_URL), not a
+ * block's own galaxy_server_url -- so an id from a different server validates
+ * as false and its directive is safely omitted, which is correct under the
+ * single-server push model.
+ */
 export const galaxyInvocationValidator: InvocationValidator = {
   async isValid(invocationId: string): Promise<boolean> {
     try {
