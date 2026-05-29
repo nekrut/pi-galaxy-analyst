@@ -74,4 +74,27 @@ describe("galaxy-markdown-adapter -- rich push", () => {
     expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
     expect(galaxyMarkdownToLoom(out)).toBe(NOTEBOOK);
   });
+
+  it("omits the directive without calling the validator when the block has no invocation_id", async () => {
+    const noId = [
+      "# Notes",
+      "",
+      "```loom-invocation",
+      "galaxy_server_url: https://test.galaxyproject.org",
+      "notebook_anchor: plan-a-step-2",
+      "label: BWA alignment",
+      "status: completed",
+      "```",
+      "",
+    ].join("\n");
+    const validator = {
+      isValid: async () => {
+        throw new Error("validator must not be consulted when there is no invocation_id");
+      },
+    };
+    const out = await loomToGalaxyMarkdownRich(noId, validator);
+    expect(out).not.toContain("```galaxy");
+    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    expect(galaxyMarkdownToLoom(out)).toBe(noId);
+  });
 });
