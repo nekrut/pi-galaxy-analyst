@@ -28,7 +28,7 @@ export const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
   llm?: {
     active: string;
-    providers: Record<string, { model?: string; hasApiKey: boolean }>;
+    providers: Record<string, { model?: string; baseUrl?: string; hasApiKey: boolean }>;
   };
   galaxy?: {
     active: string | null;
@@ -47,6 +47,7 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
           k,
           {
             model: v.model,
+            baseUrl: v.baseUrl,
             // OAuth providers authenticate via ~/.pi/agent/auth.json -- an
             // orphan apiKey on the entry (manual edit, or the legacy-shape
             // migrator) is dead weight, not a real credential. Don't surface
@@ -91,7 +92,7 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   // LLM multi-provider reconciliation. The renderer sends:
   //   { active, providers: { [name]: { apiKey?, model? } } }
   // where apiKey may be UNCHANGED_SECRET (preserve), "" (clear), or a new value.
-  type IncomingProvider = { apiKey?: string; model?: string };
+  type IncomingProvider = { apiKey?: string; model?: string; baseUrl?: string };
   type IncomingLlm = { active?: string; providers?: Record<string, IncomingProvider> };
   const incomingLlm = (incoming as { llm?: IncomingLlm }).llm;
   if (incomingLlm) {
@@ -103,11 +104,14 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
     for (const [name, p] of Object.entries(incomingLlm.providers ?? {})) {
       const existing = current.llm?.providers?.[name];
       const rawKey = p.apiKey;
-      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string } = {};
+      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string; baseUrl?: string } =
+        {};
       // Preserve existing model if the incoming entry doesn't carry one --
       // a partial save (e.g. rotate-just-the-key) shouldn't wipe the model.
       if (p.model !== undefined) entry.model = p.model;
       else if (existing?.model) entry.model = existing.model;
+      if (p.baseUrl !== undefined) entry.baseUrl = p.baseUrl;
+      else if (existing?.baseUrl) entry.baseUrl = existing.baseUrl;
       if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
         if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
         else if (existing?.apiKey) entry.apiKey = existing.apiKey;
