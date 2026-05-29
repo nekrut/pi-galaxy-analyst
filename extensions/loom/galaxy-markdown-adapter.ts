@@ -19,9 +19,18 @@ const INV_FENCE_OPEN = "```loom-invocation";
 const FENCE_CLOSE = "```";
 const GALAXY_FENCE_OPEN = "```galaxy";
 
-const CARRIER_RE = /<!-- loom-invocation:v1 ([A-Za-z0-9+/=]+) -->/g;
+// Anchored to a whole line (`m` flag): carriers are always emitted as their own
+// line, so this never decodes carrier-like syntax that appears inline in prose
+// (e.g. a notebook documenting Loom's own format). The `g` flag is required to
+// replace every carrier, not just the first.
+const CARRIER_RE = /^<!-- loom-invocation:v1 ([A-Za-z0-9+/=]+) -->$/gm;
 
-/** Push: loom-invocation fences -> hidden base64 carriers. Narrative untouched. */
+/**
+ * Push (pure, no network): loom-invocation fences -> hidden base64 carriers,
+ * narrative untouched. The sync helper pushes via loomToGalaxyMarkdownRich
+ * (which also emits validated directives); this plain form is kept for
+ * non-network callers and the round-trip tests.
+ */
 export function loomToGalaxyMarkdown(body: string): string {
   const lines = body.split("\n");
   const out: string[] = [];

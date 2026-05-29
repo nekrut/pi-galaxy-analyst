@@ -48,6 +48,19 @@ describe("galaxy-markdown-adapter -- round trip", () => {
     expect(galaxyMarkdownToLoom(plain)).toBe(plain);
   });
 
+  it("does not decode carrier-like syntax that appears inline in prose", () => {
+    // A notebook documenting Loom's own format must survive the round trip: an
+    // inline mention of the carrier comment is not a real (standalone-line) carrier.
+    const prose = [
+      "# Format docs",
+      "",
+      "On push, Loom emits `<!-- loom-invocation:v1 YWJj -->` for each block.",
+      "",
+    ].join("\n");
+    expect(loomToGalaxyMarkdown(prose)).toBe(prose);
+    expect(galaxyMarkdownToLoom(prose)).toBe(prose);
+  });
+
   it("handles multiple invocation blocks", () => {
     const two =
       NOTEBOOK +
