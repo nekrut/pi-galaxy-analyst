@@ -13,6 +13,8 @@
  * though Phase 1 never emits them -- it keeps pull forward-compatible.
  */
 
+import { galaxyGet } from "./galaxy-api";
+
 const INV_FENCE_OPEN = "```loom-invocation";
 const FENCE_CLOSE = "```";
 const GALAXY_FENCE_OPEN = "```galaxy";
@@ -57,6 +59,66 @@ function stripGalaxyDirectiveBlocks(body: string): string {
     if (lines[i].trim() === GALAXY_FENCE_OPEN) {
       let end = i + 1;
       while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) end++;
+      i = end + 1;
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
+  }
+  return out.join("\n");
+}
+
+/** Decides whether an invocation id is renderable on the connected server. */
+export interface InvocationValidator {
+  isValid(invocationId: string): Promise<boolean>;
+}
+
+/** Real validator: a GET that resolves means the id decodes and exists. */
+export const galaxyInvocationValidator: InvocationValidator = {
+  async isValid(invocationId: string): Promise<boolean> {
+    try {
+      await galaxyGet(`/invocations/${invocationId}`);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
+
+const INV_ID_RE = /^invocation_id:\s*(.+)$/;
+
+/**
+ * Push with rich rendering: each loom-invocation block becomes a hidden carrier
+ * AND, when its id validates, a visible `invocation_outputs` directive. The
+ * directive is gated because Galaxy 400s the whole page on an undecodable id.
+ */
+export async function loomToGalaxyMarkdownRich(
+  body: string,
+  validator: InvocationValidator,
+): Promise<string> {
+  const lines = body.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === INV_FENCE_OPEN) {
+      let end = i + 1;
+      let invId: string | null = null;
+      while (end < lines.length && lines[end].trim() !== FENCE_CLOSE) {
+        const m = lines[end].match(INV_ID_RE);
+        if (m) invId = m[1].trim();
+        end++;
+      }
+      const block = lines.slice(i, end + 1).join("\n");
+      const carrier = `<!-- loom-invocation:v1 ${Buffer.from(block, "utf8").toString("base64")} -->`;
+      // Emit the directive immediately before the carrier with NO extra blank
+      // line, so stripping the 3 fence lines on pull restores the carrier in
+      // the block's exact original position -- keeping the round trip identical.
+      if (invId && (await validator.isValid(invId))) {
+        out.push(GALAXY_FENCE_OPEN);
+        out.push(`invocation_outputs(invocation_id=${invId})`);
+        out.push(FENCE_CLOSE);
+      }
+      out.push(carrier);
       i = end + 1;
     } else {
       out.push(lines[i]);

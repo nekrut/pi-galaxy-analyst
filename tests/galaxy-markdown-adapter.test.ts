@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   loomToGalaxyMarkdown,
   galaxyMarkdownToLoom,
+  loomToGalaxyMarkdownRich,
 } from "../extensions/loom/galaxy-markdown-adapter";
 
 const NOTEBOOK = [
@@ -54,5 +55,23 @@ describe("galaxy-markdown-adapter -- round trip", () => {
     const pushed = loomToGalaxyMarkdown(two);
     expect((pushed.match(/<!-- loom-invocation:v1 /g) ?? []).length).toBe(2);
     expect(galaxyMarkdownToLoom(pushed)).toBe(two);
+  });
+});
+
+describe("galaxy-markdown-adapter -- rich push", () => {
+  it("emits a galaxy directive when the invocation id validates, plus the carrier", async () => {
+    const out = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => true });
+    expect(out).toContain("```galaxy");
+    expect(out).toContain("invocation_outputs(invocation_id=abc123)");
+    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    // round trip still restores the original, stripping the directive
+    expect(galaxyMarkdownToLoom(out)).toBe(NOTEBOOK);
+  });
+
+  it("omits the directive when the id does not validate, but keeps the carrier", async () => {
+    const out = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => false });
+    expect(out).not.toContain("```galaxy");
+    expect(out).toMatch(/<!-- loom-invocation:v1 [A-Za-z0-9+/=]+ -->/);
+    expect(galaxyMarkdownToLoom(out)).toBe(NOTEBOOK);
   });
 });
