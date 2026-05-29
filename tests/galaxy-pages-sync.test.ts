@@ -74,6 +74,45 @@ describe("pushNotebookToGalaxy", () => {
     expect(written).toContain("last_synced_revision: r1");
   });
 
+  it("projects loom-invocation blocks to a carrier + validated directive on the page", async () => {
+    // galaxyGet resolves, so galaxyInvocationValidator reports the id valid and
+    // the rich push emits the directive alongside the hidden carrier.
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({});
+    const notebook = [
+      "# Analysis",
+      "",
+      "```loom-invocation",
+      "invocation_id: inv-abc",
+      'galaxy_server_url: "https://galaxy.example"',
+      "notebook_anchor: plan-a-step-2",
+      "label: BWA alignment",
+      "submitted_at: 2026-05-20T12:00:00Z",
+      "status: completed",
+      "```",
+      "",
+    ].join("\n");
+    vi.mocked(notebookWriter.readNotebook).mockResolvedValue(notebook);
+    vi.mocked(pagesApi.createPage).mockResolvedValue({
+      id: "p1",
+      slug: "analysis",
+      latest_revision_id: "r1",
+      revision_ids: ["r1"],
+      title: "Analysis",
+      create_time: "2026-05-20T00:00:00Z",
+      update_time: "2026-05-20T00:00:00Z",
+    });
+
+    await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
+
+    const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
+    expect(sent).toContain("<!-- loom-invocation:v1 ");
+    expect(sent).toContain("invocation_outputs(invocation_id=inv-abc)");
+    expect(sent).not.toContain("```loom-invocation");
+    // the local notebook stays canonical -- the raw fence, not the projection
+    const writtenLocal = vi.mocked(notebookWriter.writeNotebook).mock.calls[0][1];
+    expect(writtenLocal).toContain("```loom-invocation");
+  });
+
   it("updates the existing page when a binding is present", async () => {
     const initial = [
       "# Analysis",
