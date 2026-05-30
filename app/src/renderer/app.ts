@@ -548,6 +548,16 @@ const welcomeModel = document.getElementById("welcome-model") as HTMLSelectEleme
 const welcomeApiKey = document.getElementById("welcome-api-key") as HTMLInputElement;
 const welcomeApiKeyStatus = document.getElementById("welcome-api-key-status")!;
 const welcomeApiKeyRow = document.getElementById("welcome-api-key-row")!;
+const welcomeBaseUrlRow = document.getElementById("welcome-base-url-row")!;
+const welcomeBaseUrl = document.getElementById("welcome-base-url") as HTMLInputElement;
+const welcomeJetstreamPreset = document.getElementById(
+  "welcome-jetstream-preset",
+) as HTMLButtonElement;
+
+/** Jetstream's public, key-reachable proxy + the models it serves. Shared by the welcome screen and Preferences. */
+const JETSTREAM_BASE_URL = "https://llm.jetstream-cloud.org/api";
+const JETSTREAM_MODELS = ["gpt-oss-120b", "llama-4-scout"];
+
 const welcomeApiKeyHintRow = document.getElementById("welcome-api-key-hint-row")!;
 const welcomeOauthRow = document.getElementById("welcome-oauth-row")!;
 const welcomeOauthHintRow = document.getElementById("welcome-oauth-hint-row")!;
@@ -654,10 +664,30 @@ welcomeProvider.addEventListener("change", () => {
   populateWelcomeModels(welcomeProvider.value);
   void updateWelcomeAuthUi();
 });
-wireApiKeyValidation(welcomeProvider, welcomeApiKey, welcomeApiKeyStatus);
+wireApiKeyValidation(
+  welcomeProvider,
+  welcomeApiKey,
+  welcomeApiKeyStatus,
+  welcomeBaseUrl,
+  welcomeModel,
+);
+
+welcomeJetstreamPreset.addEventListener("click", () => {
+  welcomeBaseUrl.value = JETSTREAM_BASE_URL;
+  welcomeModel.innerHTML = "";
+  for (const id of JETSTREAM_MODELS) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    welcomeModel.appendChild(opt);
+  }
+  welcomeBaseUrl.dispatchEvent(new Event("input"));
+});
 
 async function updateWelcomeAuthUi(): Promise<void> {
   const oauth = isOAuthProvider(welcomeProvider.value);
+  const custom = welcomeProvider.value === "openai-compatible";
+  welcomeBaseUrlRow.classList.toggle("hidden", !custom);
   welcomeApiKeyRow.classList.toggle("hidden", oauth);
   welcomeApiKeyHintRow.classList.toggle("hidden", oauth);
   welcomeOauthRow.classList.toggle("hidden", !oauth);
@@ -702,6 +732,11 @@ welcomeSave.addEventListener("click", async () => {
     welcomeError.textContent = "API key is required";
     return;
   }
+  const custom = welcomeProvider.value === "openai-compatible";
+  if (custom && !welcomeBaseUrl.value.trim()) {
+    welcomeError.textContent = "Enter a base URL (or use the Jetstream preset).";
+    return;
+  }
   if (oauth) {
     const status = await window.orbit.oauthStatus(welcomeProvider.value);
     if (!status.signedIn) {
@@ -724,8 +759,9 @@ welcomeSave.addEventListener("click", async () => {
   // OAuth providers persist their credential in ~/.pi/agent/auth.json (written
   // by the sign-in flow above), not in config.json. Skip writing apiKey for
   // those so a leftover plaintext field doesn't shadow the real auth path.
-  const providerEntry: Record<string, unknown> = { model: welcomeModel.value };
+  const providerEntry: Record<string, unknown> = { model: welcomeModel.value || undefined };
   if (!oauth) providerEntry.apiKey = apiKey;
+  if (welcomeBaseUrl.value.trim()) providerEntry.baseUrl = welcomeBaseUrl.value.trim();
   const cfg: Record<string, unknown> = {
     llm: {
       active: welcomeProvider.value,
@@ -2625,10 +2661,6 @@ const prefsOauthSignOut = document.getElementById("prefs-oauth-signout") as HTML
 const prefsBaseUrlRow = document.getElementById("prefs-base-url-row")!;
 const prefsBaseUrl = document.getElementById("prefs-base-url") as HTMLInputElement;
 const prefsJetstreamPreset = document.getElementById("prefs-jetstream-preset") as HTMLButtonElement;
-
-/** Jetstream's public, key-reachable proxy + the models it serves. */
-const JETSTREAM_BASE_URL = "https://llm.jetstream-cloud.org/api";
-const JETSTREAM_MODELS = ["gpt-oss-120b", "llama-4-scout"];
 
 // Model catalog by provider — labels include cost guidance
 // (in/out price per 1M tokens). Fallback only — populateDynamicModelData()
