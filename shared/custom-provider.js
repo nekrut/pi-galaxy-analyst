@@ -31,10 +31,23 @@ export function synthesizeModelDef(entry) {
 }
 
 /**
+ * Name of the env var Orbit injects with the decrypted active-LLM key. We write
+ * this *name* (not the secret) into the synthesized models.json apiKey field.
+ */
+export const ACTIVE_LLM_API_KEY_ENV = "LOOM_ACTIVE_LLM_API_KEY";
+
+/**
  * Return a NEW models.json config with the custom provider upserted. Other
- * providers are preserved untouched. The provider entry deliberately omits
- * apiKey -- the key is injected at runtime via pi's --api-key flag so it never
- * lands on disk in plaintext.
+ * providers are preserved untouched.
+ *
+ * The apiKey field is set to the *name* of the env var Orbit injects, never the
+ * secret itself. pi's ModelRegistry rejects any custom (non-built-in) provider
+ * that defines models without an apiKey and drops the whole provider, so
+ * omitting it makes `--provider/--model` fail to resolve and the brain won't
+ * launch. pi resolves a bare apiKey string as an env-var lookup at request
+ * time, so the real key is read from LOOM_ACTIVE_LLM_API_KEY in memory and
+ * still never lands on disk. (The runtime --api-key flag, when passed, takes
+ * precedence over this.)
  */
 export function mergeCustomProviderIntoModelsConfig(modelsConfig, providerName, entry) {
   const providers = { ...((modelsConfig && modelsConfig.providers) || {}) };
@@ -42,6 +55,7 @@ export function mergeCustomProviderIntoModelsConfig(modelsConfig, providerName, 
     name: providerName,
     baseUrl: entry.baseUrl,
     api: "openai-completions",
+    apiKey: ACTIVE_LLM_API_KEY_ENV,
     models: [synthesizeModelDef(entry)],
   };
   return { ...modelsConfig, providers };
@@ -82,5 +96,5 @@ export function syncCustomProviderModelsFile(modelsJsonPath, providerName, entry
  * plaintext apiKey on the entry. Returns undefined when neither is present.
  */
 export function resolveActiveLlmApiKey(entry, env) {
-  return (env && env.LOOM_ACTIVE_LLM_API_KEY) || (entry && entry.apiKey);
+  return (env && env[ACTIVE_LLM_API_KEY_ENV]) || (entry && entry.apiKey);
 }

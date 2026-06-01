@@ -17,6 +17,7 @@ export interface ModelsConfig {
   >;
 }
 
+export const ACTIVE_LLM_API_KEY_ENV: "LOOM_ACTIVE_LLM_API_KEY";
 export function isCustomProvider(entry: LlmProviderConfig | undefined): boolean;
 export function synthesizeModelDef(entry: LlmProviderConfig): CustomModelDef;
 export function mergeCustomProviderIntoModelsConfig(

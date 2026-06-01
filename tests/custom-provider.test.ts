@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { ModelRegistry, AuthStorage } from "@earendil-works/pi-coding-agent";
 import {
+  ACTIVE_LLM_API_KEY_ENV,
   isCustomProvider,
   synthesizeModelDef,
   mergeCustomProviderIntoModelsConfig,
@@ -53,9 +55,10 @@ describe("mergeCustomProviderIntoModelsConfig", () => {
     });
     // other providers preserved untouched
     expect(merged.providers.litellm).toEqual(existing.providers.litellm);
-    // new provider is keyless
+    // new provider carries the env-var NAME as apiKey (so pi accepts it), never
+    // a secret -- the real key is resolved from the env var at request time.
     const p = merged.providers["openai-compatible"];
-    expect(p.apiKey).toBeUndefined();
+    expect(p.apiKey).toBe(ACTIVE_LLM_API_KEY_ENV);
     expect(p.baseUrl).toBe("https://llm.jetstream-cloud.org/api");
     expect(p.api).toBe("openai-completions");
     expect(p.models[0].id).toBe("gpt-oss-120b");
@@ -90,7 +93,7 @@ describe("syncCustomProviderModelsFile", () => {
     expect(fs.existsSync(file)).toBe(true);
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
     expect(parsed.providers["openai-compatible"].baseUrl).toBe("https://x/api");
-    expect(parsed.providers["openai-compatible"].apiKey).toBeUndefined();
+    expect(parsed.providers["openai-compatible"].apiKey).toBe(ACTIVE_LLM_API_KEY_ENV);
     // 0600 on POSIX
     if (process.platform !== "win32") {
       expect(fs.statSync(file).mode & 0o777).toBe(0o600);
@@ -114,6 +117,37 @@ describe("syncCustomProviderModelsFile", () => {
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
     expect(parsed.providers.litellm.apiKey).toBe("x");
     expect(parsed.providers["openai-compatible"].baseUrl).toBe("https://x/api");
+  });
+});
+
+describe("synthesized models.json loads through pi's ModelRegistry", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-cp-reg-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // Regression for the keyless entry: pi's ModelRegistry rejects a custom
+  // provider that defines models without an apiKey and drops it, so the brain
+  // couldn't resolve --provider/--model and never launched. The synthesized
+  // entry must register cleanly while keeping the real key off disk.
+  it("registers the custom model without writing the secret to disk", () => {
+    const file = path.join(dir, "models.json");
+    syncCustomProviderModelsFile(file, "openai-compatible", {
+      baseUrl: "https://llm.jetstream-cloud.org/api",
+      model: "gpt-oss-120b",
+      apiKey: "super-secret-should-never-be-written",
+    });
+
+    // the real key never lands on disk
+    expect(fs.readFileSync(file, "utf-8")).not.toContain("super-secret");
+
+    // pi accepts the config (no load error) and the model resolves
+    const reg = ModelRegistry.create(AuthStorage.inMemory(), file);
+    expect(reg.getError()).toBeUndefined();
+    expect(reg.find("openai-compatible", "gpt-oss-120b")).toBeDefined();
   });
 });
 
