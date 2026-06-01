@@ -490,6 +490,30 @@ You'll also need `~/.pi/agent/models.json` for model capability metadata (contex
 
 Or pass flags directly: `loom --provider litellm --model your-model-name`.
 
+## Local execution safety
+
+Loom drives a real coding agent: alongside the Galaxy tools, the model has `bash`, `write`, `edit`, and `read` on your machine. That's the point -- local analysis needs it -- but it means a misreading model, or one that's been prompt-injected by untrusted content (a Galaxy dataset, tool output, a fetched page), could run something destructive as you. This risk is higher with cheaper, less-capable models, which Loom lets you pick to save money.
+
+So Loom gates the model's local actions by default (the "exec-guard"):
+
+- **Workspace jail.** Reads, writes, and edits inside your analysis directory (plus the OS temp dir) are silent; anything that resolves outside -- including via `..`, a symlink, or `~`/`$HOME` -- prompts, or is denied for weak models. So the model reads and writes freely in your project but must ask to reach anything else on disk. Writes to control locations (`.git`, `.loom/`) always prompt, even inside the workspace -- a `.git/hooks` script would run on your next commit.
+- **Risk-classified `bash`.** Read-only/analysis commands (`ls`, `cat`, `grep`, ...) run without friction when they stay in the workspace. Catastrophic patterns (`rm -rf /`, `sudo`, `curl | sh`, `dd of=/dev/...`, fork bombs, ...) are always blocked -- including path-prefixed (`/usr/bin/sudo`), long-flag (`rm --recursive --force /`), wrapper-hidden (`env rm -rf ~`), explicit-home (`rm -rf $HOME`), and multi-line variants, plus any attempt to edit the gate's own config. Anything else prompts -- and any compound, redirected, or multi-line command (`;`, `&&`, `|`, `$(...)`, `>`, a newline) drops to a prompt rather than being trusted.
+- **Sensitive paths.** `~/.ssh`, `~/.aws`, `.env`, `*.pem`/`*.key`, `~/.loom/config.json`, OS keychains, and similar always prompt (or are denied for weak models) even inside the workspace -- whether the model uses `read`, `grep`, `ls`, `find`, or a `cat` in `bash`.
+- **Model-tier aware.** Every model is gated. Weaker models (Haiku / GPT-4o-mini / Flash class, or unknown/local models) get stricter defaults -- more actions are denied outright rather than offered for approval.
+- **Fail-closed.** With no interactive session to approve (headless / scripted runs), anything that would prompt is denied. A one-time consent notice is shown on the first gated action, and every decision is recorded in `activity.jsonl`.
+
+When a command needs approval you can allow it once, allow it for the session, or trust the workspace (which stops prompting for routine commands there).
+
+### Bypassing the gate
+
+If you fully control the environment and want the agent to run unattended (CI, a trusted pipeline, your own box), you can turn the gate off:
+
+- **Config:** set `"guardian": { "dangerouslyBypassPermissions": true }` in `~/.loom/config.json`.
+- **CLI:** `loom --dangerously-bypass-permissions` (one invocation; does not persist). `--safe` (or `LOOM_SAFE=1`) forces the gate back on and wins over everything.
+- **Orbit:** Preferences -> Safety -> "Dangerously bypass permissions" (a native confirm appears first; a red banner stays up while it's active).
+
+Bypass is total -- it removes all prompts and the workspace jail. It can only be enabled by a human through one of those channels: the agent can't turn it on itself, because writing `~/.loom/config.json` is blocked whether it uses the file tools or `bash`, and Orbit's toggle requires an OS-level confirmation the renderer can't forge. The default (`guardian.enabled: true`, not bypassed) is secure; relaxing it is always an explicit choice.
+
 ## Cost tracking
 
 Orbit's footer shows live in-flight cost for the active session (computed from `usage.cost` returned per stream event by pi-ai). For accurate **historical / per-project / per-model** reporting across all your sessions, run [CodeBurn](https://github.com/getagentseal/codeburn) in a separate terminal:
