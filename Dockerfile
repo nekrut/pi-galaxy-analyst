@@ -17,6 +17,10 @@ FROM node:22-slim AS runner
 ENV NODE_ENV=production
 ENV LOOM_MODE=remote
 ENV PORT=3000
+# Reachable via the published port. The server refuses to start on this bind
+# without LOOM_WEB_TOKEN (or LOOM_WEB_ALLOW_INSECURE=1 behind a trusted proxy),
+# so the exposed container is fail-closed rather than an open agent.
+ENV LOOM_WEB_HOST=0.0.0.0
 
 WORKDIR /app
 
@@ -34,5 +38,9 @@ COPY --from=builder /app/web/node_modules ./web/node_modules
 COPY --from=builder /app/web/package.json ./web/package.json
 
 EXPOSE 3000
+
+# Drop root: the agent process holds live Galaxy/LLM credentials, so don't run
+# it as uid 0. The node:slim image ships an unprivileged `node` user.
+USER node
 
 CMD ["node", "web/node_modules/.bin/tsx", "web/server.ts"]

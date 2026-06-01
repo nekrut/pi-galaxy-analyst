@@ -13,7 +13,13 @@ interface PendingRequest {
   reject: (err: Error) => void;
 }
 
-const WS_URL = `ws://${window.location.host}/ws`;
+// Carry a ?token=... from the page URL onto the socket so an exposed server
+// (LOOM_WEB_TOKEN set) accepts us; wss when the page is served over https.
+const WS_PROTO = window.location.protocol === "https:" ? "wss" : "ws";
+const WS_TOKEN = new URLSearchParams(window.location.search).get("token");
+const WS_URL =
+  `${WS_PROTO}://${window.location.host}/ws` +
+  (WS_TOKEN ? `?token=${encodeURIComponent(WS_TOKEN)}` : "");
 let ws: WebSocket;
 let idCounter = 0;
 const pending = new Map<string, PendingRequest>();

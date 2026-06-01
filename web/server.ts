@@ -18,6 +18,7 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 
 import { buildBrainEnv } from "../shared/brain-env.js";
+import { evaluateBind, authorizeWsUpgrade } from "./auth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOOM_BIN = resolve(__dirname, "../bin/loom.js");
@@ -26,6 +27,11 @@ const LOOM_CONFIG_PATH = join(LOOM_CONFIG_DIR, "config.json");
 const DEFAULT_CWD = join(LOOM_CONFIG_DIR, "analyses");
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
+// Bind loopback by default; the WS is an authenticated-agent surface, so an
+// exposed bind requires a token (clients pass ?token=) or an explicit opt-out.
+const HOST = process.env.LOOM_WEB_HOST ?? "127.0.0.1";
+const WEB_TOKEN = process.env.LOOM_WEB_TOKEN;
+const ALLOW_INSECURE = process.env.LOOM_WEB_ALLOW_INSECURE === "1";
 
 const IS_REMOTE_MODE = process.env.LOOM_MODE === "remote";
 const REMOTE_SESSION_CWD = "/tmp/loom-session";
@@ -190,7 +196,22 @@ function sendEvent(event: string, ...payload: unknown[]): void {
 
 const app = express();
 const httpServer = createServer(app);
-const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+const wss = new WebSocketServer({
+  server: httpServer,
+  path: "/ws",
+  verifyClient: (info, done) => {
+    const auth = authorizeWsUpgrade(
+      { origin: info.origin, host: info.req.headers.host, url: info.req.url },
+      WEB_TOKEN,
+    );
+    if (auth.ok) {
+      done(true);
+    } else {
+      log("rejected WebSocket upgrade:", auth.reason);
+      done(false, 401, auth.reason ?? "unauthorized");
+    }
+  },
+});
 
 // Vite dev middleware (serves the renderer with HMR)
 async function setupVite(): Promise<void> {
@@ -355,9 +376,21 @@ async function setupRenderer(): Promise<void> {
 
 // ── Start ────────────────────────────────────────────────────────────────────
 
+const bind = evaluateBind(HOST, WEB_TOKEN, ALLOW_INSECURE);
+if (!bind.ok) {
+  console.error("[server]", bind.error);
+  process.exit(1);
+}
+
 await setupRenderer();
 
-httpServer.listen(PORT, () => {
-  log(`Orbit Web running at http://localhost:${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  log(`Orbit Web running at http://${HOST}:${PORT}`);
   log(`Working directory: ${cwd}`);
+  if (WEB_TOKEN) log("WebSocket auth: shared token required (?token=)");
+  else if (!isLoopbackBind()) log("WebSocket auth: DISABLED (insecure opt-out)");
 });
+
+function isLoopbackBind(): boolean {
+  return HOST === "127.0.0.1" || HOST === "::1" || HOST === "localhost";
+}

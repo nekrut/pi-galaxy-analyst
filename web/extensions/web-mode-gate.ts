@@ -12,7 +12,7 @@
 
 import { resolve, dirname, basename, join } from "node:path";
 import { realpathSync } from "node:fs";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
 const BLOCKED_TOOLS = new Set(["bash", "grep", "find", "ls"]);
