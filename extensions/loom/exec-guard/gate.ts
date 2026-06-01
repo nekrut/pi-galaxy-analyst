@@ -14,6 +14,7 @@ import { createPathResolver } from "./path-jail";
 import { classifyModelTier } from "./model-tier";
 import { decide } from "./policy";
 import { isAutoSandboxActive } from "./runtime-state";
+import { classifyIntent, extractUserIntent } from "./intent-classifier";
 import { CONSENT_VERSION, type PolicyResult } from "./types";
 
 // In-memory "allow for this session" set, keyed by tool + raw input signature.
@@ -84,6 +85,29 @@ export function registerExecGuard(pi: ExtensionAPI): void {
     if (result.decision === "deny") {
       audit(event.toolName, input, result, "blocked");
       return { block: true, reason: result.reason };
+    }
+
+    // Auto mode layer 3: for the unknown-bash residual under an active sandbox,
+    // ask the intent classifier before prompting the human. Aligned with the
+    // user's request -> allow silently; otherwise fall through to the ask below.
+    // Scoped to bash:unknown only -- never sensitive reads, writes, or protected
+    // paths -- and fail-closed (any uncertainty -> the human is asked).
+    if (result.decision === "ask" && result.category === "bash:unknown" && isAutoSandboxActive()) {
+      const verdict = await classifyIntent({
+        model: ctx.model,
+        userIntent: extractUserIntent(ctx.sessionManager.getBranch()),
+        command: String(input.command ?? ""),
+        signal: ctx.signal,
+      });
+      if (verdict.aligned) {
+        audit(
+          event.toolName,
+          input,
+          { ...result, category: "bash:intent-aligned", reason: verdict.reason },
+          "allowed:intent-aligned",
+        );
+        return;
+      }
     }
 
     // ask: session memory first.
