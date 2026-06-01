@@ -112,6 +112,7 @@ export function loadConfig() {
       g.consentAcknowledged && typeof g.consentAcknowledged === "object"
         ? g.consentAcknowledged
         : null,
+    autoMode: g.autoMode === true,
   };
   return raw;
 }

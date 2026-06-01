@@ -9,6 +9,7 @@ export function loadGuardianConfig(): GuardianConfig {
     trustedWorkspaces: g.trustedWorkspaces ?? [],
     extraWorkspaceRoots: g.extraWorkspaceRoots ?? [],
     consentAcknowledged: g.consentAcknowledged ?? null,
+    autoMode: g.autoMode === true,
   };
 }
 
@@ -21,6 +22,17 @@ export function resolveBypass(cfg: GuardianConfig): boolean {
   if (process.env.LOOM_SAFE === "1") return false;
   if (process.env.LOOM_DANGEROUSLY_BYPASS_PERMISSIONS === "1") return true;
   return cfg.dangerouslyBypassPermissions === true;
+}
+
+/**
+ * Auto mode is ON if (env flag OR config) AND NOT force-off via --safe/LOOM_SAFE.
+ * Unlike bypass, auto mode does not weaken the gate -- it adds an OS sandbox under
+ * allowed bash -- so it's a normal toggle, not a human-only one.
+ */
+export function resolveAutoMode(cfg: GuardianConfig): boolean {
+  if (process.env.LOOM_SAFE === "1") return false;
+  if (process.env.LOOM_AUTO === "1") return true;
+  return cfg.autoMode === true;
 }
 
 export function trustWorkspace(dir: string): void {

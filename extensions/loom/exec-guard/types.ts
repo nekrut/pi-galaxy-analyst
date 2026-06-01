@@ -7,6 +7,8 @@ export interface GuardianConfig {
   trustedWorkspaces: string[];
   extraWorkspaceRoots: string[];
   consentAcknowledged: { version: string; at: string } | null;
+  /** Run allowed bash inside an OS sandbox so the gate can prompt less. */
+  autoMode: boolean;
 }
 
 export interface PathResolver {

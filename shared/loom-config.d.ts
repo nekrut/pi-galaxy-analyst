@@ -81,6 +81,12 @@ export interface LoomConfig {
     extraWorkspaceRoots?: string[];
     /** Record of the one-time local-execution consent. */
     consentAcknowledged?: { version: string; at: string } | null;
+    /**
+     * Auto mode: run allowed bash inside an OS sandbox (sandbox-exec / bubblewrap)
+     * so the gate can stop prompting for the broad middle. Off by default; also
+     * settable via --auto / LOOM_AUTO. --safe / LOOM_SAFE forces it back off.
+     */
+    autoMode?: boolean;
   };
 }
 
