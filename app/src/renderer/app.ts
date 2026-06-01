@@ -2471,19 +2471,26 @@ const prefsProvider = document.getElementById("prefs-provider") as HTMLSelectEle
 const prefsModel = document.getElementById("prefs-model") as HTMLSelectElement;
 const prefsBypass = document.getElementById("prefs-bypass") as HTMLInputElement;
 const bypassBanner = document.getElementById("bypass-banner")!;
+const prefsAuto = document.getElementById("prefs-auto") as HTMLInputElement;
+const autoBanner = document.getElementById("auto-banner")!;
 
 function refreshBypassBanner(active: boolean): void {
   bypassBanner.classList.toggle("hidden", !active);
 }
 
-// Reflect the current bypass state from config on startup (banner only).
-async function initBypassBanner(): Promise<void> {
+function refreshAutoBanner(active: boolean): void {
+  autoBanner.classList.toggle("hidden", !active);
+}
+
+// Reflect the current bypass + auto-mode state from config on startup (banners only).
+async function initSafetyBanners(): Promise<void> {
   const cfg = (await window.orbit.getConfig()) as {
-    guardian?: { dangerouslyBypassPermissions?: boolean };
+    guardian?: { dangerouslyBypassPermissions?: boolean; autoMode?: boolean };
   };
   refreshBypassBanner(cfg.guardian?.dangerouslyBypassPermissions === true);
+  refreshAutoBanner(cfg.guardian?.autoMode === true);
 }
-void initBypassBanner();
+void initSafetyBanners();
 
 // The bypass toggle acts immediately (not via Save). Main shows a native
 // confirm before enabling, so renderer-side injection can't flip it silently.
@@ -2799,7 +2806,7 @@ async function openPreferences(): Promise<void> {
     defaultCwd?: string;
     condaBin?: string;
     skills?: { repos?: Array<{ name?: string; url?: string; branch?: string; enabled?: boolean }> };
-    guardian?: { dangerouslyBypassPermissions?: boolean };
+    guardian?: { dangerouslyBypassPermissions?: boolean; autoMode?: boolean };
   };
 
   // Build per-provider in-memory state from masked config.
@@ -2832,6 +2839,7 @@ async function openPreferences(): Promise<void> {
   prefsDefaultCwd.value = config.defaultCwd || "";
   prefsCondaBin.value = config.condaBin || "auto";
   prefsBypass.checked = config.guardian?.dangerouslyBypassPermissions === true;
+  prefsAuto.checked = config.guardian?.autoMode === true;
 
   // Skills: hydrate the editable table from config. The brain seeds
   // galaxy-skills if absent, but we hydrate from whatever's in config so
@@ -2934,6 +2942,10 @@ async function savePreferences(): Promise<void> {
 
   config.defaultCwd = prefsDefaultCwd.value.trim() || undefined;
   config.condaBin = (prefsCondaBin.value as "auto" | "mamba" | "conda") || undefined;
+  // Auto mode rides the normal Save path (which restarts the brain, so the sandbox
+  // engages at the next session_start). Main narrows this to autoMode only and merges
+  // it onto the stored guardian block, so it can't disturb the bypass setting.
+  config.guardian = { autoMode: prefsAuto.checked };
 
   // Skills: persist whatever's in the table, dropping incomplete rows. If the
   // user emptied the list entirely, the brain's loadConfig will lazy-seed
@@ -2973,6 +2985,7 @@ async function savePreferences(): Promise<void> {
   if (result.success) {
     closePreferences();
     void refreshGalaxyStatus();
+    refreshAutoBanner(prefsAuto.checked);
     if (selectedModel) {
       currentModel = selectedModel;
       renderModelIndicator();

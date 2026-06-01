@@ -49,6 +49,11 @@
           ⚠ Permissions bypassed — the AI can run any command without asking.
         </span>
       </div>
+      <!-- Auto-mode indicator. Shown when guardian.autoMode is on. Informational
+           (a good state), not a warning. -->
+      <div id="auto-banner" class="hidden" role="status" aria-live="polite">
+        <span class="auto-banner-text">⚡ Auto mode on — fewer prompts; bash is sandboxed where supported.</span>
+      </div>
       <div id="app-main">
         <!-- Left pane: File tree sidebar -->
         <div id="files-pane" class="pane">
@@ -498,6 +503,18 @@
               <span class="prefs-hint-text">
                 Enabling this takes effect immediately (it does not wait for Save) and persists
                 until you turn it off. A confirmation dialog appears before it's enabled.
+              </span>
+            </div>
+            <div class="prefs-row">
+              <label for="prefs-auto">Auto mode</label>
+              <input id="prefs-auto" type="checkbox" />
+            </div>
+            <div class="prefs-row prefs-hint">
+              <span></span>
+              <span class="prefs-hint-text">
+                Runs the AI's shell commands inside an OS sandbox (macOS / Linux) so the gate can
+                stop asking about harmless out-of-workspace reads. The gate still blocks the
+                dangerous stuff and asks before anything destructive. Applies on Save.
               </span>
             </div>
           </section>
