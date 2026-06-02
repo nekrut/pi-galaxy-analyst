@@ -120,6 +120,11 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     return finalizeAsk(req, "write:escape", `write outside workspace: ${p}`);
   }
 
-  // Everything else (Galaxy/notebook tools, etc.) is allowed.
+  // Everything else is allowed: Galaxy/notebook tools, web fetchers, MCP. These are
+  // the remote/egress surface (notebook_push_to_galaxy, galaxy_upload_*/run_user_tool,
+  // skills_fetch's ~/.loom cache write, the mcp.json sync) and are deliberately OUT of scope
+  // for the working-dir write-jail -- a local write boundary cannot and does not
+  // promise anything about data leaving the machine. Gating egress is separate future
+  // work; do not let this fallthrough be read as "confined".
   return { decision: "allow", category: "other", reason: "non-local-execution tool" };
 }
