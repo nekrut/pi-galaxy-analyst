@@ -179,6 +179,33 @@ describe("decide", () => {
       ).decision,
     ).toBe("ask");
   });
+  it("gates a .git write even when cwd is inside the .git dir (no carve-away)", () => {
+    // adversarial-review regression: the protected floor must not relativize a
+    // real .git away just because the session cwd happens to sit inside it.
+    const gcwd = "/home/alice/project/.git";
+    const gres: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(gcwd) }),
+    };
+    expect(
+      decide(
+        req({ cwd: gcwd, toolName: "write", toolInput: { path: `${gcwd}/hooks/pre-commit` } }),
+        { resolver: gres, home: HOME },
+      ).decision,
+    ).toBe("ask");
+  });
+  it("gates Loom state when cwd is a .loom dir outside the analyses tree", () => {
+    // regression B: a .loom state dir as cwd must not carve its own .loom away.
+    const lcwd = "/home/alice/.loom/sessions/s1";
+    const lres: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(lcwd) }),
+    };
+    expect(
+      decide(req({ cwd: lcwd, toolName: "write", toolInput: { path: `${lcwd}/activity.jsonl` } }), {
+        resolver: lres,
+        home: HOME,
+      }).decision,
+    ).toBe("ask");
+  });
   it("unknown bash -> ask (trusted) / deny (weak)", () => {
     expect(decide(req({ toolInput: { command: "python x.py" } }), deps).decision).toBe("ask");
     expect(

@@ -44,24 +44,40 @@ describe("isProtectedWritePath", () => {
     expect(isProtectedWritePath("/home/alice/project/gitignore.md")).toBe(false);
   });
 
-  // Orbit's default workspace is ~/.loom/analyses/<name>, so the workspace's own
+  // Orbit files analyses under $HOME/.loom/analyses/<name>, so the workspace's own
   // ancestry contains a .loom segment. That ancestor must NOT make every write
-  // "protected" -- only .git/.loom state at or below the workspace root counts.
-  it("ignores a .git/.loom that is merely an ancestor of the workspace", () => {
-    const ws = "/home/alice/.loom/analyses/proj";
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md", ws)).toBe(false);
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/src/run.py", ws)).toBe(false);
+  // "protected" -- only real Loom state / git dirs should gate.
+  it("allows analysis work product under ~/.loom/analyses (ancestor .loom carved out)", () => {
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md", HOME)).toBe(false);
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/src/run.py", HOME)).toBe(false);
   });
-  it("still flags .git/.loom state INSIDE such a workspace", () => {
-    const ws = "/home/alice/.loom/analyses/proj";
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.loom/activity.jsonl", ws)).toBe(
+  it("still flags .git/.loom state nested inside an analysis", () => {
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.loom/activity.jsonl", HOME)).toBe(
       true,
     );
-    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.git/hooks/pre-commit", ws)).toBe(
-      true,
-    );
+    expect(
+      isProtectedWritePath("/home/alice/.loom/analyses/proj/.git/hooks/pre-commit", HOME),
+    ).toBe(true);
   });
-  it("with no workspace root, falls back to the absolute-path check", () => {
+  it("flags Loom home state OUTSIDE the analyses tree", () => {
+    expect(isProtectedWritePath("/home/alice/.loom/sessions/s1/activity.jsonl", HOME)).toBe(true);
+    expect(isProtectedWritePath("/home/alice/.loom/cache/skills/x.md", HOME)).toBe(true);
+    expect(isProtectedWritePath("/home/alice/.loom/config.json", HOME)).toBe(true);
+  });
+  // regression (adversarial review): a .git must never be relativized/carved away,
+  // even when the cwd itself sits inside a .git dir -- hook injection stays gated.
+  it("flags a real .git even when it is the cwd's own ancestor", () => {
+    expect(isProtectedWritePath("/home/alice/project/.git/hooks/pre-commit", HOME)).toBe(true);
+  });
+  // regression: a per-workspace .loom for a normal (non-analyses) cwd still gates.
+  it("flags a per-workspace .loom outside the analyses tree", () => {
+    expect(isProtectedWritePath("/home/alice/myproj/.loom/activity.jsonl", HOME)).toBe(true);
+  });
+  it("folds case on the .git/.loom segment (macOS HFS+)", () => {
+    expect(isProtectedWritePath("/home/alice/project/.Git/hooks/x", HOME)).toBe(true);
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.LOOM/x", HOME)).toBe(true);
+  });
+  it("with no home, falls back to the absolute-path check", () => {
     expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md")).toBe(true);
     expect(isProtectedWritePath("/home/alice/project/.git/config")).toBe(true);
   });

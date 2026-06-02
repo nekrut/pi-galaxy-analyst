@@ -110,14 +110,11 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       return finalizeAsk(req, "write:sensitive", `write to sensitive path ${p}`);
     }
     // Gated even inside the jail: a script under .git/hooks runs on the next git
-    // operation, and .loom/ is Loom's own state -- the README promises these
-    // always prompt, so they must, regardless of being in the workspace. Scoped to
-    // the workspace root so an analysis filed under ~/.loom/analyses doesn't gate
-    // its own notebook on the incidental ancestor .loom segment. Resolve cwd through
-    // the same resolver as `resolved` so both are realpath'd -- otherwise a symlinked
-    // ~/.loom would put them in different spaces and the scoping would silently miss.
-    const workspaceRoot = deps.resolver.contains(req.cwd).resolved;
-    if (isProtectedWritePath(resolved, workspaceRoot)) {
+    // operation, and .loom/ is Loom's own state -- these always prompt, regardless
+    // of being in the workspace. The lone carve-out is the $HOME/.loom/analyses
+    // tree (Orbit's default cwd), where the analysis's own files are work product;
+    // a .git/.loom nested inside an analysis still gates. See isProtectedWritePath.
+    if (isProtectedWritePath(resolved, deps.home)) {
       return finalizeAsk(req, "write:protected", `write to protected path ${p}`);
     }
     if (inside)
