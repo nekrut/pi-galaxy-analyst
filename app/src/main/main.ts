@@ -20,6 +20,7 @@ import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-h
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
+import { parseCliArgs, type CliArgs } from "./cli-args.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
@@ -127,28 +128,6 @@ function startConfigWatcher(): void {
   } catch (err) {
     log("config watcher failed to start:", err);
   }
-}
-
-interface CliArgs {
-  cwd?: string;
-}
-
-/**
- * Parse argv for the small set of switches Orbit accepts. Called from the
- * initial whenReady block and again from the second-instance handler.
- *
- * Recognized: --cwd <path>. Anything else (including Electron's own flags
- * like --no-sandbox we set earlier) is ignored.
- */
-function parseCliArgs(argv: string[]): CliArgs {
-  const out: CliArgs = {};
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--cwd" && i + 1 < argv.length) {
-      out.cwd = argv[i + 1];
-      i++;
-    }
-  }
-  return out;
 }
 
 function getDefaultCwd(cliArgs?: CliArgs): string {
@@ -507,7 +486,7 @@ app.whenReady().then(() => {
 
   buildMenu();
 
-  const cliArgs = parseCliArgs(process.argv.slice(2));
+  const cliArgs = parseCliArgs(process.argv);
   const cwd = getDefaultCwd(cliArgs);
   log("cwd:", cwd);
   createWindow(cwd);
@@ -530,10 +509,9 @@ app.whenReady().then(() => {
 
   app.on("second-instance", async (_event, argv) => {
     log("second-instance argv:", argv);
-    // argv on second-instance is the FULL argv of the second invocation
-    // including the executable path; slice past it the way we do for the
-    // first instance.
-    const args = parseCliArgs(argv.slice(1));
+    // parseCliArgs scans the whole argv, so the executable path at argv[0] is
+    // ignored without a slice -- the same call works for the first instance too.
+    const args = parseCliArgs(argv);
     if (!args.cwd) {
       // Bare second launch -- just surface the window.
       if (mainWindow) {

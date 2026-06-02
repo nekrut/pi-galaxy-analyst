@@ -86,6 +86,13 @@ export function launchOrbit(orbitPath: string, cwd: string): LaunchResult {
     detached: true,
     stdio: "ignore",
   });
+  // spawn reports a failed launch (ENOENT, not executable, damaged bundle) via
+  // an async 'error' event, not a throw -- and on an unref'd child with no
+  // listener that surfaces as an unhandled error. Best-effort note to stderr;
+  // by now the CLI is already tearing down, so there's nothing to recover.
+  child.on("error", (err) => {
+    process.stderr.write(`orbit launch failed: ${err.message}\n`);
+  });
   child.unref();
   return { pid: child.pid };
 }

@@ -94,8 +94,8 @@ describe("findOrbit -- win32", () => {
 });
 
 describe("launchOrbit", () => {
-  it("spawns the orbit binary with --cwd and detaches", () => {
-    const fakeChild = { unref: vi.fn(), pid: 12345 };
+  it("spawns the orbit binary with --cwd, attaches an error handler, and detaches", () => {
+    const fakeChild = { unref: vi.fn(), on: vi.fn(), pid: 12345 };
     vi.mocked(spawn).mockReturnValue(fakeChild as any);
     const result = launchOrbit("/path/to/Orbit", "/Users/me/analysis");
     expect(spawn).toHaveBeenCalledWith(
@@ -103,6 +103,8 @@ describe("launchOrbit", () => {
       ["--cwd", "/Users/me/analysis"],
       expect.objectContaining({ detached: true, stdio: "ignore" }),
     );
+    // a detached child needs an 'error' listener or a failed launch crashes the CLI
+    expect(fakeChild.on).toHaveBeenCalledWith("error", expect.any(Function));
     expect(fakeChild.unref).toHaveBeenCalled();
     expect(result.pid).toBe(12345);
   });
