@@ -1,5 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { submitFeedback, buildBrainSysinfo, summarizeActivityTail } from "./feedback.js";
+import {
+  submitFeedback,
+  buildBrainSysinfo,
+  summarizeActivityTail,
+  appendToOutbox,
+  readLoomVersion,
+} from "./feedback.js";
 import { getRecentActivityEvents } from "./activity.js";
 import { SCHEMA_VERSION } from "../../shared/feedback-contract.js";
 import type { FeedbackPayload } from "../../shared/feedback-contract.js";
@@ -31,9 +37,11 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
 
       const includeDiagnostics = await ctx.ui.confirm(
         "Include diagnostics?",
-        "Attach system info + a summarized recent-activity log to help us debug. No API keys or credentials are sent.",
+        "Attach system info + a one-line-per-event activity summary (no command output or arguments), sent to the Loom team's private feedback store. No API keys or credentials are sent.",
       );
 
+      // The app version always rides along (non-sensitive build metadata) so every
+      // loom-cli row is filterable by release in triage, even without diagnostics.
       const payload: FeedbackPayload = {
         schemaVersion: SCHEMA_VERSION,
         source: "loom-cli",
@@ -45,18 +53,22 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
               sysinfo: buildBrainSysinfo(),
               activityTail: summarizeActivityTail(getRecentActivityEvents(15)),
             }
-          : {}),
+          : { sysinfo: { appVersion: readLoomVersion() } }),
       };
 
       const res = await submitFeedback(payload);
       if (res.ok) {
         ctx.ui.notify("Thanks -- your feedback was sent.", "info");
-      } else {
-        ctx.ui.notify(
-          `Couldn't reach the feedback service (${res.error ?? "unknown error"}). Try again later or use Report in Orbit.`,
-          "error",
-        );
+        return;
       }
+      // Durability: never lose the user's note if the store is unreachable.
+      const saved = appendToOutbox(payload);
+      ctx.ui.notify(
+        saved
+          ? `Couldn't reach the feedback service (${res.error ?? "unknown error"}) -- saved locally, we'll pick it up later.`
+          : `Couldn't reach the feedback service (${res.error ?? "unknown error"}). Please try again later.`,
+        saved ? "warning" : "error",
+      );
     },
   });
 }

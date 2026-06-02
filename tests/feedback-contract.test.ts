@@ -37,4 +37,12 @@ describe("feedback contract", () => {
     expect(validateFeedbackPayload(null)).toBe(false);
     expect(validateFeedbackPayload("nope")).toBe(false);
   });
+
+  it("rejects a wrong schemaVersion, non-string body, or missing clientTs", () => {
+    expect(validateFeedbackPayload({ ...valid, schemaVersion: 2 })).toBe(false);
+    expect(validateFeedbackPayload({ ...valid, body: 123 })).toBe(false);
+    expect(
+      validateFeedbackPayload({ schemaVersion: 1, source: "orbit", title: "t", body: "b" }),
+    ).toBe(false);
+  });
 });
