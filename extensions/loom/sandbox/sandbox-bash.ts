@@ -14,7 +14,7 @@ import type { BashOperations } from "@earendil-works/pi-coding-agent";
  */
 export function createSandboxedBashOps(): BashOperations {
   return {
-    async exec(command, cwd, { onData, signal, timeout }) {
+    async exec(command, cwd, { onData, signal, timeout, env }) {
       if (!existsSync(cwd)) {
         throw new Error(`Working directory does not exist: ${cwd}`);
       }
@@ -22,8 +22,16 @@ export function createSandboxedBashOps(): BashOperations {
       const wrappedCommand = await SandboxManager.wrapWithSandbox(command);
 
       return new Promise((resolve, reject) => {
+        // Abort may have fired before this point (incl. during the async
+        // wrapWithSandbox above); don't spawn a command we'd immediately discard.
+        if (signal?.aborted) {
+          reject(new Error("aborted"));
+          return;
+        }
+
         const child = spawn("bash", ["-c", wrappedCommand], {
           cwd,
+          env,
           detached: true,
           stdio: ["ignore", "pipe", "pipe"],
         });
