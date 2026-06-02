@@ -248,6 +248,36 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // /compact — manually compact the conversation to reclaim context
+  // ─────────────────────────────────────────────────────────────────────────────
+  pi.registerCommand("compact", {
+    description:
+      "Compact the conversation to free up context. Optional: /compact <instructions> to steer the summary.",
+    handler: async (args, ctx) => {
+      const before = ctx.getContextUsage();
+      const beforeStr = before?.tokens != null ? `${before.tokens.toLocaleString()} tokens` : "?";
+      // The notebook is the durable record (snapshotted on session_before_compact),
+      // so the summary can drop verbose tool chatter without losing project state.
+      const customInstructions =
+        args.trim() ||
+        "Preserve the current analysis plan, decisions, and Galaxy invocation state. " +
+          "Verbose tool outputs and dataset previews can be dropped — the notebook holds the durable record.";
+      ctx.ui.notify(`Compacting (was ${beforeStr})…`, "info");
+      ctx.compact({
+        customInstructions,
+        onComplete: () => {
+          const after = ctx.getContextUsage();
+          const afterStr = after?.tokens != null ? `${after.tokens.toLocaleString()} tokens` : "?";
+          ctx.ui.notify(`✅ Compacted: ${beforeStr} → ${afterStr}`, "info");
+        },
+        onError: (err) => {
+          ctx.ui.notify(`Compaction failed: ${err.message}`, "error");
+        },
+      });
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Tool execution lifecycle: show status when Galaxy tools run
   // ─────────────────────────────────────────────────────────────────────────────
   const toolStartTimes = new Map<string, number>();

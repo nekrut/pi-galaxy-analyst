@@ -31,3 +31,4 @@ There are no `analysis_*` plan tools. Plans are markdown sections.
 | `/connect [name]`         | Connect to Galaxy (prompts for credentials, or switches profile)       |
 | `/profiles`               | List saved Galaxy server profiles                                      |
 | `/execute` (alias `/run`) | Tell the agent to run the next pending step in the latest plan section |
+| `/compact [instructions]` | Compact the conversation to reclaim context; optional summary steer    |

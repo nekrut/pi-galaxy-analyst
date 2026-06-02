@@ -12,14 +12,12 @@ import * as fs from "fs";
 import { getState, getNotebookPath } from "./state";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { isSessionIndexEnabled } from "./session-index/is-enabled";
-import { getRecentActivityEvents } from "./activity";
 import { loadConfig } from "./config";
 import { listEnabledSkillRepos } from "./skills";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
-const ACTIVITY_TAIL_COUNT = 10;
 
 /**
  * Read the user-curated notebook.md from disk and return a head + tail
@@ -106,22 +104,6 @@ Use \`notebook_push_to_galaxy\` to share progress with the user (creates a new
 revision of the Galaxy page). Use \`notebook_pull_from_galaxy\` to fetch
 updates the user made on the Galaxy side -- only when the user explicitly
 asks for it, since pull discards local edits since the last sync.
-`;
-}
-
-/**
- * Last few activity events for continuity across restarts.
- */
-function buildRecentActivityBlock(): string {
-  const events = getRecentActivityEvents(ACTIVITY_TAIL_COUNT);
-  if (events.length === 0) return "";
-  const lines = events.map((e) => `- ${e.timestamp} · ${e.kind}`);
-  return `
-## Recent activity
-
-Last ${events.length} event(s):
-
-${lines.join("\n")}
 `;
 }
 
@@ -979,6 +961,13 @@ function isLlama4Family(model: { id?: string; provider?: string } | undefined): 
 
 export function setupContextInjection(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, ctx) => {
+    // The system prompt is sent as one cached block (Anthropic cache_control
+    // sits on the whole system text). Anything that changes turn-to-turn busts
+    // that cache for the entire ~8K-token prefix. So we keep the blocks below
+    // stable within a session — they only change when their inputs do (notebook
+    // edits, model/connection switch). The live activity tail (timestamps that
+    // changed every turn) was deliberately dropped from here; it stays in the
+    // Activity pane and activity.jsonl. The notebook is the durable record.
     const omitAnchors = isLlama4Family(ctx.model);
     const systemPrompt = [
       buildActiveModelBlock(),
@@ -994,7 +983,6 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildLocalEnvContext(),
       buildNotebookExcerptBlock(),
       buildGalaxyPageBindingBlock(),
-      buildRecentActivityBlock(),
       buildTeamDispatchContext(),
       buildSessionIndexContext(),
     ]
