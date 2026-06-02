@@ -5,6 +5,7 @@ import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
 import { FileViewer } from "./files/file-viewer.js";
 import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
+import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
 
@@ -30,6 +31,12 @@ const messagesEl = document.getElementById("messages")!;
 const inputEl = document.getElementById("input") as HTMLTextAreaElement;
 const sendBtn = document.getElementById("send-btn")!;
 const abortBtn = document.getElementById("abort-btn")!;
+const queuedPanelEl = document.getElementById("queued-panel")!;
+const queuedToggleBtn = document.getElementById("queued-toggle") as HTMLButtonElement;
+const queuedCountEl = document.getElementById("queued-count")!;
+const queuedToggleIconEl = document.getElementById("queued-toggle-icon")!;
+const queuedListEl = document.getElementById("queued-list")!;
+const queuedClearBtn = document.getElementById("queued-clear") as HTMLButtonElement;
 const statusBadge = document.getElementById("agent-status")!;
 
 const cwdPathEl = document.getElementById("cwd-path")!;
@@ -904,7 +911,7 @@ function resetUiForFreshContext(opts: { clearPersistedCost?: boolean } = {}): vo
   const { clearPersistedCost = true } = opts;
   chat.clear();
   artifacts.clear();
-  clearPendingMessage();
+  clearQueue();
   sessionUsage.input = 0;
   sessionUsage.output = 0;
   sessionUsage.cacheRead = 0;
@@ -1027,29 +1034,75 @@ refreshCwd();
 
 // ── Chat Input ────────────────────────────────────────────────────────────────
 
-/** Queued message — stashed when user submits while agent is streaming. */
-let pendingMessage: string | null = null;
+/** Queued messages — stashed FIFO when user submits while agent is streaming. */
+const pendingQueue = new PromptQueue();
 
 function updateQueuedIndicator(): void {
-  const indicator = document.getElementById("queued-indicator");
-  if (!indicator) return;
-  if (pendingMessage) {
-    indicator.classList.remove("hidden");
-    indicator.title = `Queued: ${pendingMessage.slice(0, 100)}${pendingMessage.length > 100 ? "…" : ""} (click to cancel)`;
-  } else {
-    indicator.classList.add("hidden");
-  }
+  queuedPanelEl.classList.toggle("hidden", pendingQueue.length === 0);
+  queuedCountEl.textContent = `${pendingQueue.length} queued`;
+  queuedToggleBtn.setAttribute("aria-expanded", String(!pendingQueue.collapsed));
+  queuedToggleIconEl.textContent = pendingQueue.collapsed ? "▸" : "▾";
+  queuedListEl.classList.toggle("hidden", pendingQueue.collapsed);
+
+  const rows = document.createDocumentFragment();
+  pendingQueue.items.forEach((message, index) => {
+    const row = document.createElement("div");
+    row.className = "queued-row";
+    row.role = "listitem";
+
+    const position = document.createElement("span");
+    position.className = "queued-position";
+    position.textContent = `${index + 1}.`;
+
+    const preview = document.createElement("span");
+    preview.className = "queued-preview";
+    preview.textContent = queuedPreview(message);
+    preview.title = message;
+
+    const remove = document.createElement("button");
+    remove.className = "queued-remove";
+    remove.type = "button";
+    remove.dataset.queueIndex = String(index);
+    remove.title = `Remove queued message ${index + 1}`;
+    remove.setAttribute("aria-label", `Remove queued message ${index + 1}`);
+    remove.textContent = "×";
+
+    row.append(position, preview, remove);
+    rows.append(row);
+  });
+  queuedListEl.replaceChildren(rows);
 }
 
-/** Clear any queued message without sending it. */
-function clearPendingMessage(): void {
-  pendingMessage = null;
+function enqueueMessage(text: string): void {
+  pendingQueue.enqueue(text);
   updateQueuedIndicator();
 }
 
-// Click the indicator to cancel the queued message
-document.getElementById("queued-indicator")?.addEventListener("click", () => {
-  clearPendingMessage();
+function removeFromQueue(index: number): void {
+  pendingQueue.remove(index);
+  updateQueuedIndicator();
+}
+
+/** Clear all queued messages without sending them. */
+function clearQueue(): void {
+  pendingQueue.clear();
+  updateQueuedIndicator();
+}
+
+queuedToggleBtn.addEventListener("click", () => {
+  pendingQueue.toggleCollapsed();
+  updateQueuedIndicator();
+});
+
+queuedClearBtn.addEventListener("click", () => {
+  clearQueue();
+});
+
+queuedListEl.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement | null;
+  const remove = target?.closest<HTMLButtonElement>("[data-queue-index]");
+  if (!remove) return;
+  removeFromQueue(Number(remove.dataset.queueIndex));
 });
 
 // Cheaper-model nudge state. Suppress per-session if the user dismisses
@@ -1102,30 +1155,35 @@ function submit(): void {
   // gets the hint inline above the agent's thinking response.
   maybeShowCheaperModelNudge(text);
 
-  // Slash commands — handled locally, no LLM round-trip (allowed even while streaming)
-  if (text.startsWith("/")) {
-    if (handleSlashCommand(text)) {
-      inputEl.value = "";
-      inputEl.style.height = "auto";
-      return;
-    }
-  }
-
   // If the agent is mid-turn, queue the message and flush when agent_end fires.
-  if (streaming) {
-    pendingMessage = text;
+  // Purely local slash commands still run immediately; slash commands that
+  // prompt the agent must join the FIFO queue like any other LLM turn.
+  if (streaming && !isLocalSlashCommand(text)) {
+    enqueueMessage(text);
     inputEl.value = "";
     inputEl.style.height = "auto";
-    updateQueuedIndicator();
     return;
   }
+
+  dispatchSubmittedText(text);
+  inputEl.value = "";
+  inputEl.style.height = "auto";
+}
+
+function dispatchSubmittedText(text: string): void {
+  // Slash commands handled locally may run without an LLM round-trip. Commands
+  // that do call the agent run here only after the current turn is idle.
+  if (text.startsWith("/") && handleSlashCommand(text)) return;
 
   chat.addUserMessage(text);
   chat.showThinking();
   setStatusBadge("thinking", "thinking...");
-  window.orbit.prompt(text);
-  inputEl.value = "";
-  inputEl.style.height = "auto";
+  promptAgent(text);
+}
+
+function promptAgent(message: string): void {
+  const options = streaming ? ({ streamingBehavior: "followUp" } as const) : undefined;
+  void window.orbit.prompt(message, options);
 }
 
 // Plan draft actions from chat cards — forward approve/reject as user messages,
@@ -1150,18 +1208,14 @@ messagesEl.addEventListener("plan-draft-action", (e) => {
   }
 });
 
-/** Flush any queued message after the current turn ends. */
-function flushPendingMessage(): void {
-  if (!pendingMessage) return;
-  const text = pendingMessage;
-  pendingMessage = null;
+/** Flush the next queued message after the current turn ends. */
+function flushNextQueuedMessage(): void {
+  const text = pendingQueue.flushNext();
+  if (!text) return;
   updateQueuedIndicator();
   // Use requestAnimationFrame so the UI updates before we start the next turn
   requestAnimationFrame(() => {
-    chat.addUserMessage(text);
-    chat.showThinking();
-    setStatusBadge("thinking", "thinking...");
-    window.orbit.prompt(text);
+    dispatchSubmittedText(text);
   });
 }
 
@@ -1214,6 +1268,27 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "connect", description: "open Galaxy connection settings" },
   { name: "help", description: "show this help" },
 ];
+
+const LOCAL_SLASH_COMMANDS = new Set([
+  "model",
+  "new",
+  "reset",
+  "clear",
+  "resume",
+  "continue",
+  "chat",
+  "cost",
+  "connect",
+  "help",
+]);
+
+function slashCommandName(text: string): string {
+  return text.slice(1).split(/\s+/)[0] ?? "";
+}
+
+function isLocalSlashCommand(text: string): boolean {
+  return text.startsWith("/") && LOCAL_SLASH_COMMANDS.has(slashCommandName(text));
+}
 
 function escapeHtmlBasic(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1277,14 +1352,14 @@ function handleSlashCommand(text: string): boolean {
   if (cmd === "notebook") {
     chat.addUserMessage(text);
     void loadNotebookFromDisk();
-    window.orbit.prompt("/notebook");
+    promptAgent("/notebook");
     return true;
   }
 
   // Loom commands — pass through to agent
   if (cmd === "plan" || cmd === "status" || cmd === "decisions" || cmd === "profiles") {
     chat.addUserMessage(text);
-    window.orbit.prompt(`/${cmd}`);
+    promptAgent(`/${cmd}`);
     return true;
   }
 
@@ -1374,7 +1449,7 @@ function handleSummarize(raw: string, argStr: string): void {
   );
   chat.showThinking();
   setStatusBadge("thinking", "thinking...");
-  window.orbit.prompt(prompt);
+  promptAgent(prompt);
 }
 
 /**
@@ -1444,7 +1519,7 @@ function handleCost(raw: string): void {
   );
   chat.showThinking();
   setStatusBadge("thinking", "thinking...");
-  window.orbit.prompt(prompt);
+  promptAgent(prompt);
 }
 
 /**
@@ -1901,15 +1976,16 @@ inputEl.addEventListener("blur", () => {
 
 sendBtn.addEventListener("click", submit);
 
-abortBtn.addEventListener("click", () => {
+function abortCurrentTurn(): void {
+  clearQueue();
   window.orbit.abort();
-  clearPendingMessage();
-});
+}
+
+abortBtn.addEventListener("click", abortCurrentTurn);
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && streaming) {
-    window.orbit.abort();
-    clearPendingMessage();
+    abortCurrentTurn();
   }
 });
 
@@ -1944,6 +2020,14 @@ window.orbit.onAgentEvent((event) => {
       startTurnTimer();
       // Don't hide thinking yet — wait for actual text content
       break;
+
+    case "message_start": {
+      const msg = (event as { message?: { role?: string } }).message;
+      if (msg?.role === "user") {
+        chat.finishAssistantMessage();
+      }
+      break;
+    }
 
     case "message_update": {
       // Pi.dev wraps events in assistantMessageEvent
@@ -1993,10 +2077,18 @@ window.orbit.onAgentEvent((event) => {
         commitTurnUsage();
         // Surface assistant-side errors (e.g. 401 invalid API key) so the user
         // isn't staring at a silent UI after a failed call.
-        if (msg.stopReason === "error" && msg.errorMessage) {
+        if (msg.stopReason === "error") {
           chat.hideThinking();
-          chat.addErrorMessage(humanizeAgentError(msg.errorMessage).text);
+          chat.finishAssistantMessage();
+          if (msg.errorMessage) {
+            chat.addErrorMessage(humanizeAgentError(msg.errorMessage).text);
+          }
+          streaming = false;
+          stopTurnTimer();
           setStatusBadge("error");
+          sendBtn.classList.remove("hidden");
+          abortBtn.classList.add("hidden");
+          clearQueue();
         }
       }
       break;
@@ -2061,7 +2153,7 @@ window.orbit.onAgentEvent((event) => {
       chat.finishAssistantMessage();
       // Safety: clear any stuck button busy states if the turn ends without the
       // expected completion event arriving
-      flushPendingMessage();
+      flushNextQueuedMessage();
       hasRevealedActivityThisTurn = false;
       break;
 
@@ -2074,8 +2166,7 @@ window.orbit.onAgentEvent((event) => {
       setStatusBadge("error");
       sendBtn.classList.remove("hidden");
       abortBtn.classList.add("hidden");
-      // Clear any queued message on error so the indicator doesn't get stuck
-      clearPendingMessage();
+      clearQueue();
       break;
     }
   }
@@ -2400,6 +2491,8 @@ window.orbit.onAgentStatus((status, msg) => {
     sendBtn.classList.remove("hidden");
     abortBtn.classList.add("hidden");
     chat.hideThinking();
+    chat.finishAssistantMessage();
+    clearQueue();
   }
 
   // Show cwd welcome once, after the first successful agent start.
