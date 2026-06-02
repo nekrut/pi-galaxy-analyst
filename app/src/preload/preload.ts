@@ -113,6 +113,9 @@ export interface OrbitAPI {
     arch: string;
   }>;
   openIssueReport(payload: { title: string; body: string }): Promise<{ opened: boolean }>;
+  submitFeedback(
+    payload: import("../../../shared/feedback-contract.js").FeedbackPayload,
+  ): Promise<{ ok: boolean; status?: number; id?: string; error?: string }>;
   listAllModels(): Promise<
     | {
         ok: true;
@@ -229,6 +232,7 @@ const api: OrbitAPI = {
 
   getReportSysinfo: () => ipcRenderer.invoke("report:sysinfo"),
   openIssueReport: (payload) => ipcRenderer.invoke("report:open-issue", payload),
+  submitFeedback: (payload) => ipcRenderer.invoke("feedback:submit", payload),
 
   listAllModels: () => ipcRenderer.invoke("models:list-all"),
   checkVersion: () => ipcRenderer.invoke("version:check"),
