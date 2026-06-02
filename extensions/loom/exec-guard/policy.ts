@@ -43,16 +43,13 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       return { decision: "deny", category: "bash:catastrophic", reason: c.reason };
     }
     // Floor: detectable read-args of a "safe" command still face sensitive-read +
-    // the workspace jail. The sensitive floor is never lifted. The out-of-workspace
-    // ask IS relaxed under an active Auto sandbox (trusted models only): the sandbox
-    // denies credential reads and bash network, so a non-sensitive read can't be
-    // exfiltrated -- no need to prompt.
+    // the workspace jail. A read pointed outside the work dir prompts, same as a write.
     for (const p of c.readPaths) {
       const { inside, resolved } = deps.resolver.contains(p);
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `read of sensitive path ${p}`);
       }
-      if (!inside && !(req.autoSandbox && req.modelTier === "trusted")) {
+      if (!inside) {
         return finalizeAsk(req, "read:escape", `read outside workspace: ${p}`);
       }
     }
@@ -90,9 +87,8 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `${req.toolName} of sensitive path ${p}`);
       }
-      // Out-of-workspace reads prompt -- unless an active Auto sandbox has the
-      // exfil path closed (trusted models only). Sensitive paths still floored above.
-      if (!inside && !(req.autoSandbox && req.modelTier === "trusted")) {
+      // Out-of-workspace reads prompt. Sensitive paths are floored above.
+      if (!inside) {
         return finalizeAsk(req, "read:escape", `${req.toolName} outside workspace: ${p}`);
       }
     }
