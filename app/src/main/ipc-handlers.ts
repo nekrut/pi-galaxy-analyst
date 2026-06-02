@@ -9,6 +9,8 @@ import { loadConfig, saveConfig, type LoomConfig } from "./config.js";
 import { encryptSecret, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getProviders, getModels } from "@earendil-works/pi-ai";
 import { checkLatestVersion } from "./version-check.js";
+import { postFeedback } from "./feedback.js";
+import type { FeedbackPayload } from "../../../shared/feedback-contract.js";
 import {
   getOAuthStatus,
   isOAuthProvider,
@@ -549,6 +551,14 @@ export function registerIpcHandlers(agent: AgentManager): void {
     const url = `https://github.com/galaxyproject/loom/issues/new?${params.toString()}`;
     await shell.openExternal(url);
     return { opened: true };
+  });
+
+  // Feedback capture: POST the payload to the orbit-feedback worker. The
+  // endpoint URL (and any shared secret) live in main only -- see feedback.ts --
+  // so a compromised renderer can't redirect it. Returns {ok,...} so the
+  // renderer can fall back to the GitHub-issue flow when the POST fails.
+  ipcMain.handle("feedback:submit", async (_e, payload: FeedbackPayload) => {
+    return await postFeedback(payload);
   });
 
   // Model registry — pulls from pi-ai's bundled list so the dropdown stays
