@@ -10,7 +10,16 @@ import type { BashOperations } from "@earendil-works/pi-coding-agent";
  *
  * Adapted from pi's bundled `examples/extensions/sandbox` reference: detached so
  * the whole process group can be SIGKILL'd on timeout/abort, stdout+stderr piped
- * to onData, and the standard timeout/abort/exit semantics pi expects.
+ * to onData, and the standard timeout/abort/exit semantics pi expects. We can't use
+ * pi's lighter `spawnHook` here -- that hook is synchronous, and `wrapWithSandbox`
+ * is async -- so, like the reference, we supply a custom `exec`.
+ *
+ * Known limitation (inherited from that reference, and bounded by the tool timeout):
+ * completion is detected via `"close"`, so a command that backgrounds a child
+ * holding stdout/stderr can delay resolution until the timeout fires. pi's internal
+ * backend avoids this with an `"exit"`-based wait + detached-PID tracking, but those
+ * helpers aren't exported, so matching them downstream would diverge from the
+ * maintained reference; the proper fix belongs upstream in pi.
  */
 export function createSandboxedBashOps(): BashOperations {
   return {
