@@ -49,10 +49,10 @@
           ⚠ Permissions bypassed — the AI can run any command without asking.
         </span>
       </div>
-      <!-- Auto-mode indicator. Shown when guardian.autoMode is on. Informational
-           (a good state), not a warning. -->
-      <div id="auto-banner" class="hidden" role="status" aria-live="polite">
-        <span class="auto-banner-text">⚡ Auto mode on — fewer prompts; bash is sandboxed where supported.</span>
+      <!-- Bash-sandbox indicator. Shown when guardian.sandbox is on (opt-in).
+           Informational (a good state), not a warning. -->
+      <div id="sandbox-banner" class="hidden" role="status" aria-live="polite">
+        <span class="sandbox-banner-text">Bash sandbox on -- bash confined to the workspace; network limited.</span>
       </div>
       <div id="app-main">
         <!-- Left pane: File tree sidebar -->
@@ -506,15 +506,13 @@
               </span>
             </div>
             <div class="prefs-row">
-              <label for="prefs-auto">Auto mode</label>
-              <input id="prefs-auto" type="checkbox" />
+              <label for="prefs-sandbox">Sandbox bash execution</label>
+              <input id="prefs-sandbox" type="checkbox" />
             </div>
             <div class="prefs-row prefs-hint">
               <span></span>
               <span class="prefs-hint-text">
-                Runs the AI's shell commands inside an OS sandbox (macOS / Linux) so the gate can
-                stop asking about harmless out-of-workspace reads. The gate still blocks the
-                dangerous stuff and asks before anything destructive. Applies on Save.
+                Runs the AI's bash commands inside an OS sandbox: bash writes are confined to your analysis directory and its network is limited. Off by default because it restricts bash network access (e.g. some downloads). Takes effect after Save (restarts the session). Your file edits are confined to the analysis directory regardless of this setting.
               </span>
             </div>
           </section>
