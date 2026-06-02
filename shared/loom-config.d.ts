@@ -8,6 +8,13 @@ export interface LlmProviderConfig {
 }
 
 export interface LoomConfig {
+  /**
+   * Opaque beta-tester code (e.g. "orbit-007"). When set, it rides along on
+   * feedback submissions so the team can attribute reports to a tester. Not a
+   * secret and not PII -- the code<->identity map lives outside the app. Also
+   * settable per-session via the LOOM_TESTER_ID env var.
+   */
+  testerId?: string;
   llm?: {
     /** Name of the currently-active provider, e.g. "anthropic". */
     active: string;

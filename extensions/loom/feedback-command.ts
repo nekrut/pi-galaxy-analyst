@@ -7,6 +7,7 @@ import {
   readLoomVersion,
 } from "./feedback.js";
 import { getRecentActivityEvents } from "./activity.js";
+import { loadConfig } from "./config.js";
 import { SCHEMA_VERSION } from "../../shared/feedback-contract.js";
 import type { FeedbackPayload } from "../../shared/feedback-contract.js";
 
@@ -40,6 +41,10 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
         "Attach system info + a one-line-per-event activity summary (no command output or arguments), sent to the Loom team's private feedback store. No API keys or credentials are sent.",
       );
 
+      // Opaque tester code (config, env override) -- non-secret; lets the team
+      // attribute the report. Omitted from the payload when unset.
+      const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+
       // The app version always rides along (non-sensitive build metadata) so every
       // loom-cli row is filterable by release in triage, even without diagnostics.
       const payload: FeedbackPayload = {
@@ -48,6 +53,7 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
         title: title.trim(),
         body: body.trim(),
         clientTs: new Date().toISOString(),
+        ...(testerId ? { testerId } : {}),
         ...(includeDiagnostics
           ? {
               sysinfo: buildBrainSysinfo(),

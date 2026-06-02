@@ -22,5 +22,7 @@ export function validateFeedbackPayload(obj) {
   if (typeof p.title !== "string" || p.title.trim().length === 0) return false;
   if (typeof p.body !== "string") return false;
   if (typeof p.clientTs !== "string") return false;
+  // testerId is optional; when present it must be a string (opaque tester code).
+  if (p.testerId !== undefined && typeof p.testerId !== "string") return false;
   return true;
 }
