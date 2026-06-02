@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as path from "node:path";
 import { buildSandboxConfig, hostFromUrl } from "../extensions/loom/sandbox/sandbox-config";
 
 describe("hostFromUrl", () => {
@@ -17,7 +18,9 @@ describe("buildSandboxConfig", () => {
     const fs = buildSandboxConfig(base).filesystem!;
     expect(fs.allowWrite).toContain("/home/alice/project");
     expect(fs.allowWrite).toContain("/tmp");
-    expect(fs.allowWrite).toContain("/home/alice/project/.loom");
+    // buildSandboxConfig derives this entry with path.join, so match the same way
+    // (avoids a POSIX-vs-Windows separator mismatch in CI).
+    expect(fs.allowWrite).toContain(path.join("/home/alice/project", ".loom"));
   });
 
   it("denies reading the credential set", () => {
