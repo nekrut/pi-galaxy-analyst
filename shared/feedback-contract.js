@@ -10,7 +10,7 @@ export const FEEDBACK_KEY_HEADER = "X-Orbit-Feedback-Key";
 // Production endpoint base (no trailing slash). Set after `wrangler deploy` of
 // the orbit-feedback worker. Clients may override via the LOOM_FEEDBACK_URL env
 // var for local dev.
-export const FEEDBACK_ENDPOINT_URL = "https://orbit-feedback.PLACEHOLDER.workers.dev";
+export const FEEDBACK_ENDPOINT_URL = "https://orbit-feedback.dannon-baker.workers.dev";
 
 const SOURCES = new Set(["orbit", "loom-cli"]);
 
