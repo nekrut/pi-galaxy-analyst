@@ -529,7 +529,7 @@ app.whenReady().then(() => {
     }
     if (!agentManager) return;
     if (resolvedCwd === agentManager.getCwd()) return;
-    const ok = await confirmCwdChange(mainWindow ?? undefined);
+    const ok = await confirmCwdChange(mainWindow ?? undefined, resolvedCwd);
     if (!ok) return;
     if (agentManager.switchCwd(resolvedCwd)) {
       log("switched cwd from second instance to:", resolvedCwd);
