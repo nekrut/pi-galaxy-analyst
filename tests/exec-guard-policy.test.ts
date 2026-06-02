@@ -113,10 +113,8 @@ describe("decide", () => {
   it("write/edit to a sensitive path is floored even inside the jail", () => {
     // id_rsa lives inside the workspace here, but its credential shape must win.
     expect(
-      decide(
-        req({ toolName: "write", toolInput: { path: "/home/alice/project/id_rsa" } }),
-        deps,
-      ).decision,
+      decide(req({ toolName: "write", toolInput: { path: "/home/alice/project/id_rsa" } }), deps)
+        .decision,
     ).toBe("ask");
     expect(
       decide(
@@ -127,7 +125,11 @@ describe("decide", () => {
     // weak model downgrades the ask to a deny, same as a sensitive read.
     expect(
       decide(
-        req({ toolName: "write", modelTier: "weak", toolInput: { path: "/home/alice/project/.env" } }),
+        req({
+          toolName: "write",
+          modelTier: "weak",
+          toolInput: { path: "/home/alice/project/.env" },
+        }),
         deps,
       ).decision,
     ).toBe("deny");
@@ -147,6 +149,61 @@ describe("decide", () => {
         req({ toolName: "edit", toolInput: { path: "/home/alice/project/.loom/config.json" } }),
         deps,
       ).decision,
+    ).toBe("ask");
+  });
+  it("allows writes when the workspace itself lives under ~/.loom (Orbit default cwd)", () => {
+    // Orbit's DEFAULT_CWD is ~/.loom/analyses, so the analysis workspace sits
+    // under a .loom segment. The notebook the agent edits constantly must be
+    // allowed, while .loom/.git state *inside* the workspace still prompts.
+    const wcwd = "/home/alice/.loom/analyses/proj";
+    const wresolver: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(wcwd) || p.startsWith("/tmp") }),
+    };
+    const wdeps = { resolver: wresolver, home: HOME };
+    expect(
+      decide(
+        req({ cwd: wcwd, toolName: "edit", toolInput: { path: `${wcwd}/notebook.md` } }),
+        wdeps,
+      ).decision,
+    ).toBe("allow");
+    expect(
+      decide(
+        req({ cwd: wcwd, toolName: "write", toolInput: { path: `${wcwd}/.loom/activity.jsonl` } }),
+        wdeps,
+      ).decision,
+    ).toBe("ask");
+    expect(
+      decide(
+        req({ cwd: wcwd, toolName: "write", toolInput: { path: `${wcwd}/.git/hooks/pre-commit` } }),
+        wdeps,
+      ).decision,
+    ).toBe("ask");
+  });
+  it("gates a .git write even when cwd is inside the .git dir (no carve-away)", () => {
+    // adversarial-review regression: the protected floor must not relativize a
+    // real .git away just because the session cwd happens to sit inside it.
+    const gcwd = "/home/alice/project/.git";
+    const gres: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(gcwd) }),
+    };
+    expect(
+      decide(
+        req({ cwd: gcwd, toolName: "write", toolInput: { path: `${gcwd}/hooks/pre-commit` } }),
+        { resolver: gres, home: HOME },
+      ).decision,
+    ).toBe("ask");
+  });
+  it("gates Loom state when cwd is a .loom dir outside the analyses tree", () => {
+    // regression B: a .loom state dir as cwd must not carve its own .loom away.
+    const lcwd = "/home/alice/.loom/sessions/s1";
+    const lres: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(lcwd) }),
+    };
+    expect(
+      decide(req({ cwd: lcwd, toolName: "write", toolInput: { path: `${lcwd}/activity.jsonl` } }), {
+        resolver: lres,
+        home: HOME,
+      }).decision,
     ).toBe("ask");
   });
   it("unknown bash -> ask (trusted) / deny (weak)", () => {
@@ -209,5 +266,4 @@ describe("decide", () => {
       decide(req({ toolInput: { command: "cat /home/alice/project/notes.txt" } }), deps).decision,
     ).toBe("allow");
   });
-
 });
