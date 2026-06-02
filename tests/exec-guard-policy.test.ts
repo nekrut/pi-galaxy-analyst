@@ -113,10 +113,8 @@ describe("decide", () => {
   it("write/edit to a sensitive path is floored even inside the jail", () => {
     // id_rsa lives inside the workspace here, but its credential shape must win.
     expect(
-      decide(
-        req({ toolName: "write", toolInput: { path: "/home/alice/project/id_rsa" } }),
-        deps,
-      ).decision,
+      decide(req({ toolName: "write", toolInput: { path: "/home/alice/project/id_rsa" } }), deps)
+        .decision,
     ).toBe("ask");
     expect(
       decide(
@@ -127,7 +125,11 @@ describe("decide", () => {
     // weak model downgrades the ask to a deny, same as a sensitive read.
     expect(
       decide(
-        req({ toolName: "write", modelTier: "weak", toolInput: { path: "/home/alice/project/.env" } }),
+        req({
+          toolName: "write",
+          modelTier: "weak",
+          toolInput: { path: "/home/alice/project/.env" },
+        }),
         deps,
       ).decision,
     ).toBe("deny");
@@ -146,6 +148,34 @@ describe("decide", () => {
       decide(
         req({ toolName: "edit", toolInput: { path: "/home/alice/project/.loom/config.json" } }),
         deps,
+      ).decision,
+    ).toBe("ask");
+  });
+  it("allows writes when the workspace itself lives under ~/.loom (Orbit default cwd)", () => {
+    // Orbit's DEFAULT_CWD is ~/.loom/analyses, so the analysis workspace sits
+    // under a .loom segment. The notebook the agent edits constantly must be
+    // allowed, while .loom/.git state *inside* the workspace still prompts.
+    const wcwd = "/home/alice/.loom/analyses/proj";
+    const wresolver: PathResolver = {
+      contains: (p) => ({ resolved: p, inside: p.startsWith(wcwd) || p.startsWith("/tmp") }),
+    };
+    const wdeps = { resolver: wresolver, home: HOME };
+    expect(
+      decide(
+        req({ cwd: wcwd, toolName: "edit", toolInput: { path: `${wcwd}/notebook.md` } }),
+        wdeps,
+      ).decision,
+    ).toBe("allow");
+    expect(
+      decide(
+        req({ cwd: wcwd, toolName: "write", toolInput: { path: `${wcwd}/.loom/activity.jsonl` } }),
+        wdeps,
+      ).decision,
+    ).toBe("ask");
+    expect(
+      decide(
+        req({ cwd: wcwd, toolName: "write", toolInput: { path: `${wcwd}/.git/hooks/pre-commit` } }),
+        wdeps,
       ).decision,
     ).toBe("ask");
   });
@@ -209,5 +239,4 @@ describe("decide", () => {
       decide(req({ toolInput: { command: "cat /home/alice/project/notes.txt" } }), deps).decision,
     ).toBe("allow");
   });
-
 });

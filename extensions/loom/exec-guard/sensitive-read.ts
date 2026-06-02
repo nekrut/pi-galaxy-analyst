@@ -33,7 +33,17 @@ export function isSensitivePath(absPath: string, home: string): boolean {
 // (hooks run on the next git operation; config can redirect hooksPath) or under
 // `.loom` (Loom's own session state) should never be written by the model
 // silently -- it uses git commands for repo ops, not the write tool.
-export function isProtectedWritePath(absPath: string): boolean {
-  const segments = path.normalize(absPath).split(path.sep);
+//
+// `workspaceRoot` matters because Orbit's default workspace is ~/.loom/analyses/<name>,
+// so the workspace's own ancestry already contains a `.loom` segment. Only `.git`/`.loom`
+// at or below the workspace root should gate; an ancestor `.loom` (the path *to* the
+// workspace) is incidental and must not flag every write. When the path is inside the
+// workspace we evaluate segments relative to its root; otherwise we check the absolute
+// path so escapes to some other repo's .git / Loom's home state stay gated.
+export function isProtectedWritePath(absPath: string, workspaceRoot?: string): boolean {
+  const norm = path.normalize(absPath);
+  const considered =
+    workspaceRoot && within(norm, workspaceRoot) ? path.relative(workspaceRoot, norm) : norm;
+  const segments = considered.split(path.sep);
   return segments.includes(".git") || segments.includes(".loom");
 }

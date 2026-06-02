@@ -43,4 +43,26 @@ describe("isProtectedWritePath", () => {
     // not fooled by a substring -- only a real path segment counts
     expect(isProtectedWritePath("/home/alice/project/gitignore.md")).toBe(false);
   });
+
+  // Orbit's default workspace is ~/.loom/analyses/<name>, so the workspace's own
+  // ancestry contains a .loom segment. That ancestor must NOT make every write
+  // "protected" -- only .git/.loom state at or below the workspace root counts.
+  it("ignores a .git/.loom that is merely an ancestor of the workspace", () => {
+    const ws = "/home/alice/.loom/analyses/proj";
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md", ws)).toBe(false);
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/src/run.py", ws)).toBe(false);
+  });
+  it("still flags .git/.loom state INSIDE such a workspace", () => {
+    const ws = "/home/alice/.loom/analyses/proj";
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.loom/activity.jsonl", ws)).toBe(
+      true,
+    );
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/.git/hooks/pre-commit", ws)).toBe(
+      true,
+    );
+  });
+  it("with no workspace root, falls back to the absolute-path check", () => {
+    expect(isProtectedWritePath("/home/alice/.loom/analyses/proj/notebook.md")).toBe(true);
+    expect(isProtectedWritePath("/home/alice/project/.git/config")).toBe(true);
+  });
 });
