@@ -578,7 +578,10 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // so a compromised renderer can't redirect it. Returns {ok,...} so the
   // renderer can fall back to the GitHub-issue flow when the POST fails.
   ipcMain.handle("feedback:submit", async (_e, payload: FeedbackPayload) => {
-    return await postFeedback(payload);
+    // Stamp the opaque tester code from config in main (authoritative; the
+    // renderer never sets it). Non-secret; lets the team attribute the report.
+    const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+    return await postFeedback(testerId ? { ...payload, testerId } : payload);
   });
 
   // Model registry — pulls from pi-ai's bundled list so the dropdown stays

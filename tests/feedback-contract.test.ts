@@ -45,4 +45,9 @@ describe("feedback contract", () => {
       validateFeedbackPayload({ schemaVersion: 1, source: "orbit", title: "t", body: "b" }),
     ).toBe(false);
   });
+
+  it("accepts an optional string testerId and rejects a non-string one", () => {
+    expect(validateFeedbackPayload({ ...valid, testerId: "orbit-007" })).toBe(true);
+    expect(validateFeedbackPayload({ ...valid, testerId: 7 })).toBe(false);
+  });
 });

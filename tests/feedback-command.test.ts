@@ -10,6 +10,7 @@ vi.mock("../extensions/loom/feedback.js", () => ({
   readLoomVersion: () => "0.0.0-test",
 }));
 vi.mock("../extensions/loom/activity.js", () => ({ getRecentActivityEvents: () => [] }));
+vi.mock("../extensions/loom/config.js", () => ({ loadConfig: () => ({ testerId: "orbit-007" }) }));
 
 const { registerFeedbackCommand } = await import("../extensions/loom/feedback-command.js");
 
@@ -62,6 +63,14 @@ describe("/feedback", () => {
     expect(payload.title).toBe("My title");
     expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("Thanks"), "info");
     expect(appendToOutbox).not.toHaveBeenCalled();
+  });
+
+  it("stamps the testerId from config onto the payload", async () => {
+    submitFeedback.mockResolvedValue({ ok: true, id: "z" });
+    const { pi, commands } = makeApi();
+    registerFeedbackCommand(pi as any);
+    await commands.get("feedback")!.handler(undefined, { hasUI: true, ui: uiMock() });
+    expect(submitFeedback.mock.calls[0][0].testerId).toBe("orbit-007");
   });
 
   it("stamps appVersion even when diagnostics are declined", async () => {
