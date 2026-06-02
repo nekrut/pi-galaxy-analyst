@@ -20,6 +20,7 @@ import { registerFilesIpc, startFilesWatcher, stopFilesWatcher } from "./files-h
 import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
+import { parseCliArgs, type CliArgs } from "./cli-args.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
@@ -28,6 +29,15 @@ app.commandLine.appendSwitch("no-sandbox");
 // fails with ESRCH on /dev/shm under restrictive AppArmor profiles
 // (Ubuntu 24.04+) and breaks DevTools and the PDF viewer.
 app.commandLine.appendSwitch("no-zygote");
+
+// Only one Orbit per machine. A second `Orbit --cwd X` invocation hands its
+// argv to the running instance via the `second-instance` event; if we can't
+// get the lock, quit immediately so the running instance handles the request.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+  process.exit(0);
+}
 
 // Custom scheme for serving files out of the current analysis cwd. The renderer
 // rewrites relative <img src> in notebook.md to orbit-artifact://cwd/<path>, and
@@ -120,9 +130,9 @@ function startConfigWatcher(): void {
   }
 }
 
-function getDefaultCwd(): string {
-  // Priority: env var > brain config.defaultCwd > hardcoded default
-  let cwd = process.env.LOOM_CWD;
+function getDefaultCwd(cliArgs?: CliArgs): string {
+  // Priority: --cwd CLI arg > LOOM_CWD env > brain config.defaultCwd > hardcoded.
+  let cwd = cliArgs?.cwd || process.env.LOOM_CWD;
   if (!cwd) {
     try {
       const configPath = path.join(LOOM_DIR, "config.json");
@@ -476,7 +486,8 @@ app.whenReady().then(() => {
 
   buildMenu();
 
-  const cwd = getDefaultCwd();
+  const cliArgs = parseCliArgs(process.argv);
+  const cwd = getDefaultCwd(cliArgs);
   log("cwd:", cwd);
   createWindow(cwd);
 
@@ -493,6 +504,37 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow(cwd);
+    }
+  });
+
+  app.on("second-instance", async (_event, argv) => {
+    log("second-instance argv:", argv);
+    // parseCliArgs scans the whole argv, so the executable path at argv[0] is
+    // ignored without a slice -- the same call works for the first instance too.
+    const args = parseCliArgs(argv);
+    if (!args.cwd) {
+      // Bare second launch -- just surface the window.
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+      return;
+    }
+    const resolvedCwd = args.cwd.startsWith("~")
+      ? path.join(os.homedir(), args.cwd.slice(1))
+      : args.cwd;
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    if (!agentManager) return;
+    if (resolvedCwd === agentManager.getCwd()) return;
+    const ok = await confirmCwdChange(mainWindow ?? undefined, resolvedCwd);
+    if (!ok) return;
+    if (agentManager.switchCwd(resolvedCwd)) {
+      log("switched cwd from second instance to:", resolvedCwd);
+      mainWindow?.webContents.send("agent:cwd-changed", resolvedCwd);
+      if (mainWindow) startFilesWatcher(mainWindow, resolvedCwd);
     }
   });
 });

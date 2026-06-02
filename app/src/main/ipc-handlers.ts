@@ -173,7 +173,12 @@ function promptPayload(message: string, options?: AgentPromptOptions): Record<st
  * a fresh agent session and clear the current chat/plan/notebook view.
  * Returns true if the user confirmed.
  */
-export async function confirmCwdChange(window?: BrowserWindow): Promise<boolean> {
+export async function confirmCwdChange(
+  window?: BrowserWindow,
+  targetCwd?: string,
+): Promise<boolean> {
+  const consequence =
+    "The current chat, plan, and notebook view will be cleared from this window. The previous session remains on disk and can be resumed by opening that directory again.";
   const result = await dialog.showMessageBox(window!, {
     type: "warning",
     buttons: ["Cancel", "Continue"],
@@ -181,8 +186,9 @@ export async function confirmCwdChange(window?: BrowserWindow): Promise<boolean>
     cancelId: 0,
     title: "Change analysis directory?",
     message: "Changing the analysis directory will start a new agent session.",
-    detail:
-      "The current chat, plan, and notebook view will be cleared from this window. The previous session remains on disk and can be resumed by opening that directory again.",
+    // When the target is known up front (e.g. a `--cwd` hand-off from another
+    // process), show WHERE -- otherwise the user is approving a blind switch.
+    detail: targetCwd ? `New directory:\n${targetCwd}\n\n${consequence}` : consequence,
   });
   return result.response === 1;
 }
