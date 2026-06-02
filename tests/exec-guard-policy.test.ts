@@ -109,6 +109,28 @@ describe("decide", () => {
       "allow",
     );
   });
+  it("write/edit to a sensitive path is floored even inside the jail", () => {
+    // id_rsa lives inside the workspace here, but its credential shape must win.
+    expect(
+      decide(
+        req({ toolName: "write", toolInput: { path: "/home/alice/project/id_rsa" } }),
+        deps,
+      ).decision,
+    ).toBe("ask");
+    expect(
+      decide(
+        req({ toolName: "edit", toolInput: { path: "/home/alice/project/secrets.pem" } }),
+        deps,
+      ).decision,
+    ).toBe("ask");
+    // weak model downgrades the ask to a deny, same as a sensitive read.
+    expect(
+      decide(
+        req({ toolName: "write", modelTier: "weak", toolInput: { path: "/home/alice/project/.env" } }),
+        deps,
+      ).decision,
+    ).toBe("deny");
+  });
   it("write to .git or .loom prompts even inside the workspace", () => {
     expect(
       decide(
@@ -146,6 +168,18 @@ describe("decide", () => {
     expect(
       decide(req({ interactive: false, toolInput: { command: "python x.py" } }), deps).decision,
     ).toBe("deny");
+  });
+  it("file-tool dispatch is case-insensitive (a capitalized Write can't escape the jail)", () => {
+    expect(
+      decide(req({ toolName: "Write", toolInput: { path: "/etc/cron.d/x" } }), deps).decision,
+    ).toBe("ask"); // not "allow" via the other-tool fallthrough
+    expect(
+      decide(req({ toolName: "EDIT", toolInput: { path: "/home/alice/project/id_rsa" } }), deps)
+        .decision,
+    ).toBe("ask");
+    expect(
+      decide(req({ toolName: "READ", toolInput: { path: "/etc/hosts" } }), deps).decision,
+    ).toBe("ask");
   });
   it("non-bash, non-file tools (galaxy_*) are allowed", () => {
     expect(decide(req({ toolName: "galaxy_search_tools", toolInput: {} }), deps).decision).toBe(

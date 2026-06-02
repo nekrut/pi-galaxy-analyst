@@ -36,7 +36,12 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     return { decision: "allow", category: "bypass", reason: "permissions bypassed" };
   }
 
-  if (req.toolName === "bash") {
+  // pi emits its built-in file tools lowercase ("bash"/"read"/"write"/"edit"); we
+  // normalize so a future capitalized or renamed emission can't slip past the jail
+  // into the "other -> allow" bucket. (Verified: pi has exactly write+edit, lowercase.)
+  const toolName = req.toolName.toLowerCase();
+
+  if (toolName === "bash") {
     const command = pick(req.toolInput, "command") ?? "";
     const c = classifyBash(command, deps.home);
     if (c.kind === "catastrophic") {
@@ -80,7 +85,7 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     return finalizeAsk(req, "bash:unknown", c.reason);
   }
 
-  if (FILE_READ_TOOLS.has(req.toolName)) {
+  if (FILE_READ_TOOLS.has(toolName)) {
     const p = pick(req.toolInput, "path");
     if (p) {
       const { inside, resolved } = deps.resolver.contains(p);
@@ -95,10 +100,15 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     return { decision: "allow", category: "read:ok", reason: "non-sensitive read" };
   }
 
-  if (FILE_WRITE_TOOLS.has(req.toolName)) {
+  if (FILE_WRITE_TOOLS.has(toolName)) {
     const p = pick(req.toolInput, "path");
     if (!p) return finalizeAsk(req, "write:no-path", "write with no resolvable path");
     const { inside, resolved } = deps.resolver.contains(p);
+    // Credential-shaped writes are floored regardless of jail membership, mirroring
+    // the read branch -- a secret dropped inside the workspace is still a secret.
+    if (isSensitivePath(resolved, deps.home)) {
+      return finalizeAsk(req, "write:sensitive", `write to sensitive path ${p}`);
+    }
     // Gated even inside the jail: a script under .git/hooks runs on the next git
     // operation, and .loom/ is Loom's own state -- the README promises these
     // always prompt, so they must, regardless of being in the workspace.
