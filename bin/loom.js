@@ -256,7 +256,7 @@ if (!isInformationalCommand) {
   if (hasGalaxyCredentials) {
     mcpConfig.mcpServers.galaxy = {
       command: "uvx",
-      args: ["galaxy-mcp>=1.4.0"],
+      args: ["galaxy-mcp>=1.6.0"],
       directTools: true,
       env: {
         GALAXY_URL: galaxyUrl,
