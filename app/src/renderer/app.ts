@@ -45,6 +45,9 @@ const cwdPathEl = document.getElementById("cwd-path")!;
 const cwdChangeBtn = document.getElementById("cwd-change")!;
 const usageTokensEl = document.getElementById("usage-tokens")!;
 const usageCostEl = document.getElementById("usage-cost")!;
+const contextFillEl = document.getElementById("context-fill")!;
+const contextFillBarEl = document.getElementById("context-fill-bar")!;
+const contextFillPctEl = document.getElementById("context-fill-pct")!;
 const modelIndicatorEl = document.getElementById("model-indicator")!;
 const modelIndicatorNameEl = document.getElementById("model-indicator-name")!;
 
@@ -112,6 +115,32 @@ let PRICING: Record<string, { in: number; out: number; cacheRead?: number; cache
     "qwen3:8b": { in: 0, out: 0 },
   };
 
+// Per-model context-window size (tokens). Fallback only — overwritten by
+// populateDynamicModelData() from pi-ai's registry. Powers the footer's
+// context-fill indicator. Honest-window caveat: the registry value for
+// openai-codex models (e.g. gpt-5.5 = 272000) reflects the API model's max,
+// which can exceed the ChatGPT-subscription endpoint's real limit, so the bar
+// may under-report on that path. Documented; not special-cased.
+let CONTEXT_WINDOWS: Record<string, number> = {
+  // Anthropic
+  "claude-opus-4-8": 200_000,
+  "claude-opus-4-7": 200_000,
+  "claude-opus-4-6": 200_000,
+  "claude-opus-4-5": 200_000,
+  "claude-sonnet-4-6": 200_000,
+  "claude-sonnet-4-5": 200_000,
+  "claude-haiku-4-5": 200_000,
+  // OpenAI
+  "gpt-4o": 128_000,
+  "gpt-4o-mini": 128_000,
+  "gpt-4-turbo": 128_000,
+  o1: 200_000,
+  "o1-mini": 128_000,
+  // Google
+  "gemini-2.5-pro": 1_048_576,
+  "gemini-2.5-flash": 1_048_576,
+};
+
 interface Usage {
   input: number;
   output: number;
@@ -125,6 +154,12 @@ const turnUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 // produced them (the user can switch models mid-session).
 const perModelUsage = new Map<string, Usage>();
 let currentModel: string | null = null;
+
+// Current context occupancy: input + cacheRead of the LATEST assistant turn's
+// usage (the size of the last request sent to the model). This is NOT the
+// cumulative sessionUsage — it's the live "how full is the window right now"
+// numerator for the context-fill indicator. Reset on new session.
+let contextTokens = 0;
 
 // Pi's AssistantMessage.usage carries a `cost` object calculated upstream
 // from its authoritative rate table (`calculateCost` in pi-ai/models.js).
@@ -248,6 +283,50 @@ function renderUsage(): void {
     usageCostEl.textContent = "";
     usageCostEl.classList.add("hidden");
   }
+}
+
+/** Resolve a model id to its context-window size (tokens), or null if unknown. */
+function contextWindowFor(model: string | null): number | null {
+  if (!model) return null;
+  const exact = CONTEXT_WINDOWS[model];
+  if (typeof exact === "number" && exact > 0) return exact;
+  // Prefix match (e.g. claude-opus-4-8-20250514 → claude-opus-4-8).
+  for (const key of Object.keys(CONTEXT_WINDOWS)) {
+    if (model.startsWith(key)) {
+      const w = CONTEXT_WINDOWS[key];
+      if (w > 0) return w;
+    }
+  }
+  return null;
+}
+
+// Context-fill indicator: shows how full the current model's context window is,
+// so the user sees an impending overflow before it happens. The numerator is
+// the LATEST turn's request size (contextTokens), NOT cumulative sessionUsage.
+// Hidden when the window is unknown (no divide-by-zero / NaN). Honest-window
+// caveat: openai-codex models' registry window may exceed the real ChatGPT
+// endpoint limit, so the bar can under-report on that path (see CONTEXT_WINDOWS).
+function updateContextFill(): void {
+  // Local is named windowSize (not `window`) to avoid shadowing the global
+  // window object the renderer uses for window.orbit.* calls.
+  const windowSize = contextWindowFor(currentModel);
+  if (!windowSize || contextTokens <= 0) {
+    contextFillEl.classList.add("hidden");
+    contextFillEl.classList.remove("warn", "danger");
+    return;
+  }
+  const ratio = contextTokens / windowSize;
+  const pct = Math.min(100, Math.round(ratio * 100));
+  contextFillEl.classList.remove("hidden");
+  contextFillBarEl.style.width = `${Math.min(100, ratio * 100)}%`;
+  contextFillPctEl.textContent = `${pct}%`;
+  contextFillEl.classList.toggle("danger", ratio >= 0.9);
+  contextFillEl.classList.toggle("warn", ratio >= 0.7 && ratio < 0.9);
+  // currentModel is always non-null here: contextWindowFor returns null for a
+  // null model, which the early return above already handled.
+  contextFillEl.title =
+    `Context: ${contextTokens.toLocaleString()} / ${windowSize.toLocaleString()} tokens (${pct}%)` +
+    `\nmodel: ${currentModel}`;
 }
 
 /** Format a long model id into a short display label, e.g. claude-sonnet-4-6 → "Sonnet 4.6". */
@@ -834,6 +913,7 @@ async function populateDynamicModelData(): Promise<void> {
     if (!res.ok) return;
     const newModels: Record<string, ModelChoice[]> = {};
     const newPricing: typeof PRICING = {};
+    const newWindows: typeof CONTEXT_WINDOWS = {};
     for (const [provider, entries] of Object.entries(res.providers)) {
       newModels[provider] = entries.map((e) => ({ id: e.id, label: e.label }));
       for (const e of entries) {
@@ -843,6 +923,9 @@ async function populateDynamicModelData(): Promise<void> {
           cacheRead: e.pricing.cacheRead,
           cacheWrite: e.pricing.cacheWrite,
         };
+        if (typeof e.contextWindow === "number" && e.contextWindow > 0) {
+          newWindows[e.id] = e.contextWindow;
+        }
       }
     }
     if (Object.keys(newModels).length === 0) return; // never replace with empty
@@ -850,6 +933,9 @@ async function populateDynamicModelData(): Promise<void> {
     // IPC (e.g. deepseek before main process restarts) survive.
     MODELS_BY_PROVIDER = { ...MODELS_BY_PROVIDER, ...newModels };
     PRICING = { ...PRICING, ...newPricing };
+    CONTEXT_WINDOWS = { ...CONTEXT_WINDOWS, ...newWindows };
+    // A late registry load may add the current model's window → refresh.
+    updateContextFill();
   } catch {
     /* keep hardcoded fallback */
   }
@@ -864,6 +950,11 @@ function captureUsage(event: Record<string, unknown>): void {
   if (msg.model && typeof msg.model === "string" && msg.model !== currentModel) {
     currentModel = msg.model;
     renderModelIndicator();
+    // Window changed → the prior model's request size is meaningless for the new
+    // model, so reset and recompute (hides the bar until the new model's usage
+    // arrives, which on Anthropic lands in this same event below).
+    contextTokens = 0;
+    updateContextFill();
   }
 
   const u = msg.usage as (Partial<Usage> & { cost?: { total?: number } }) | undefined;
@@ -877,6 +968,23 @@ function captureUsage(event: Record<string, unknown>): void {
   // Pi's rolling cost for this message (authoritative, computed in pi-ai).
   if (typeof u.cost?.total === "number") {
     turnCostFromPi = u.cost.total;
+  }
+
+  // Current context occupancy = this turn's request (prompt) size. In pi-ai's
+  // Usage, input/cacheRead/cacheWrite are DISJOINT: input = uncached prompt,
+  // cacheRead = cache hits, cacheWrite = cache-creation tokens. The full prompt
+  // size is the sum of all three (pi-ai's totalTokens is this sum plus output).
+  // On a cache-creation turn (fresh session / first large prompt) the bulk lands
+  // in cacheWrite, so omitting it would under-report exactly the large turns this
+  // indicator must warn about. Update only when we have a usable signal so a
+  // partial event doesn't zero it.
+  if (
+    typeof u.input === "number" ||
+    typeof u.cacheRead === "number" ||
+    typeof u.cacheWrite === "number"
+  ) {
+    contextTokens = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+    updateContextFill();
   }
 }
 
@@ -938,6 +1046,9 @@ void (async () => {
     if (model) {
       currentModel = model;
       renderModelIndicator();
+      // No request has been sent on this model yet → hide/reset the fill bar.
+      contextTokens = 0;
+      updateContextFill();
     }
   } catch {
     /* getConfig may not be available yet */
@@ -977,6 +1088,8 @@ function resetUiForFreshContext(opts: { clearPersistedCost?: boolean } = {}): vo
   turnUsage.cacheWrite = 0;
   perModelUsage.clear();
   sessionCostFromPi = null;
+  contextTokens = 0;
+  updateContextFill();
   if (clearPersistedCost) {
     try {
       clearCostState(cwdPathEl.textContent || "");
@@ -1760,6 +1873,10 @@ async function switchModelByAlias(originalText: string, alias: string): Promise<
 
   currentModel = chosen.model.id;
   renderModelIndicator();
+  // Manual switch: the stale request size is for the old model's window; reset
+  // so the bar re-populates correctly on the new model's first turn.
+  contextTokens = 0;
+  updateContextFill();
 
   if (switchingProvider) {
     chat.addInfoMessage(
@@ -3173,6 +3290,9 @@ async function savePreferences(): Promise<void> {
     if (selectedModel) {
       currentModel = selectedModel;
       renderModelIndicator();
+      // Manual switch: reset so the bar re-populates on the new model's next turn.
+      contextTokens = 0;
+      updateContextFill();
     }
     // Info card, not a fake user prompt — was getting numbered as a real
     // user submission and inflating the prompt counter.

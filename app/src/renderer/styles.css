@@ -836,6 +836,45 @@ body.platform-darwin #files-title {
   display: none;
 }
 
+/* Context-fill indicator: a small track + fill bar plus a percentage,
+   showing how full the current model's context window is. Color-only state
+   variants (warn/danger) atop the shared .footer-control base; dimensions
+   never change. Hidden via the .hidden convention when the window is unknown. */
+#context-fill.hidden {
+  display: none;
+}
+#context-fill-track {
+  display: inline-block;
+  width: 42px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+#context-fill-bar {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+#context-fill-pct {
+  white-space: nowrap;
+}
+#context-fill.warn #context-fill-bar {
+  background: var(--galaxy-gold-dark);
+}
+#context-fill.warn {
+  color: var(--galaxy-gold-dark);
+}
+#context-fill.danger #context-fill-bar {
+  background: #ff817b;
+}
+#context-fill.danger {
+  color: #ff817b;
+}
+
 /* Segmented Local|Cloud control — single rounded-rect container with two
    inner buttons, the active one filled with var(--accent). */
 .footer-control-segmented {

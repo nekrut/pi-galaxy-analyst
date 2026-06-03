@@ -621,7 +621,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
       "deepseek",
     ]);
     type Pricing = { input: number; output: number; cacheRead?: number; cacheWrite?: number };
-    type Entry = { id: string; label: string; pricing: Pricing };
+    type Entry = { id: string; label: string; pricing: Pricing; contextWindow?: number };
     const out: Record<string, Entry[]> = {};
     try {
       for (const provider of getProviders()) {
@@ -640,6 +640,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
               cacheRead: m.cost.cacheRead,
               cacheWrite: m.cost.cacheWrite,
             },
+            // Model's max context window (tokens). Powers the renderer's
+            // context-fill indicator. May be undefined for some providers.
+            contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : undefined,
           };
         });
       }
