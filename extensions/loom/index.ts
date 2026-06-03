@@ -248,6 +248,74 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // /compact — manually compact the conversation to reclaim context
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Guards a second Loom /compact from racing the first: pi's compact() has no
+  // internal concurrency guard (it just resets its abort controller), so a
+  // concurrent call orphans the in-flight run. This only covers Loom-initiated
+  // compactions -- pi's own auto-compaction isn't observable from an extension
+  // (ExtensionContext exposes no isCompacting), so that race is left to pi.
+  // Cleared in both completion callbacks and on a synchronous compact() throw.
+  let compactionInFlight = false;
+  pi.registerCommand("compact", {
+    description:
+      "Compact the conversation to free up context. Optional: /compact <instructions> to steer the summary.",
+    handler: async (args, ctx) => {
+      // No UI (e.g. headless RPC consumers) -> skip notifications; still compact.
+      // Wrapped because ctx.ui/hasUI assert an active context and can throw if the
+      // session was swapped while a compaction was in flight; a dropped toast is fine.
+      const notify = (msg: string, level: "info" | "warning" | "error") => {
+        try {
+          if (ctx.hasUI) ctx.ui.notify(msg, level);
+        } catch {
+          /* stale context after a session swap -- nothing to show */
+        }
+      };
+
+      if (compactionInFlight) {
+        notify("A compaction is already running.", "warning");
+        return;
+      }
+
+      const before = ctx.getContextUsage();
+      const beforeStr = before?.tokens != null ? `${before.tokens.toLocaleString()} tokens` : "?";
+      // The notebook is the durable record (snapshotted on session_before_compact),
+      // so the summary can drop verbose tool chatter without losing project state.
+      const customInstructions =
+        args.trim() ||
+        "Preserve the current analysis plan, decisions, and Galaxy invocation state. " +
+          "Verbose tool outputs and dataset previews can be dropped — the notebook holds the durable record.";
+
+      compactionInFlight = true;
+      notify(`Compacting (was ${beforeStr})…`, "info");
+      try {
+        ctx.compact({
+          customInstructions,
+          onComplete: (result) => {
+            compactionInFlight = false;
+            // getContextUsage() reads null right after compaction (pi only learns the
+            // new size on the next model response), so report the authoritative
+            // before-count from the result; the footer shows the new size next turn.
+            notify(
+              `✅ Compacted (was ${result.tokensBefore.toLocaleString()} tokens). New size shows after the next turn.`,
+              "info",
+            );
+          },
+          onError: (err) => {
+            compactionInFlight = false;
+            notify(`Compaction failed: ${err.message}`, "error");
+          },
+        });
+      } catch (err) {
+        // ctx.compact() asserts an active context synchronously and can throw
+        // before either callback runs; reset the guard so /compact isn't wedged.
+        compactionInFlight = false;
+        notify(`Compaction failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+      }
+    },
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Tool execution lifecycle: show status when Galaxy tools run
   // ─────────────────────────────────────────────────────────────────────────────
   const toolStartTimes = new Map<string, number>();
