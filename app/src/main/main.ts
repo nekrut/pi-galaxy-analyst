@@ -21,6 +21,7 @@ import { ProcMonitor } from "./proc-monitor.js";
 import { migratePlaintextSecrets, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getConfigDir, getConfigPath } from "../../../shared/loom-config.js";
 import { parseCliArgs, type CliArgs } from "./cli-args.js";
+import { initAutoUpdate } from "./auto-update.js";
 
 // Workaround for systems where chrome-sandbox isn't suid root
 app.commandLine.appendSwitch("no-sandbox");
@@ -490,6 +491,7 @@ app.whenReady().then(() => {
   const cwd = getDefaultCwd(cliArgs);
   log("cwd:", cwd);
   createWindow(cwd);
+  initAutoUpdate();
 
   powerMonitor.on("suspend", () => log("[diag] powerMonitor suspend"));
   powerMonitor.on("resume", () => {

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow, shell, app } from "electron";
+import { ipcMain, dialog, BrowserWindow, shell, app, autoUpdater } from "electron";
 import type { AgentManager } from "./agent.js";
 import { startFilesWatcher, resolveWithin } from "./files-handler.js";
 import { loadSessionHistory } from "./session-replay.js";
@@ -560,6 +560,13 @@ export function registerIpcHandlers(agent: AgentManager): void {
         : releasesPage;
     await shell.openExternal(target);
     return { opened: true };
+  });
+
+  // Apply a downloaded macOS update + relaunch. autoUpdater.quitAndInstall is a
+  // no-op unless an update was actually downloaded, so this is safe to call.
+  ipcMain.handle("update:restart", () => {
+    autoUpdater.quitAndInstall();
+    return { restarting: true };
   });
 
   // Issue reporter: opens a pre-filled GitHub "new issue" URL in the user's

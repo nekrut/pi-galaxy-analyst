@@ -144,6 +144,10 @@ export interface OrbitAPI {
     releaseUrl: string;
   } | null>;
   openReleasePage(url?: string): Promise<{ opened: boolean }>;
+  restartToUpdate(): Promise<{ restarting: boolean }>;
+  onUpdateDownloaded(cb: (info: { version: string }) => void): void;
+  onUpdateError(cb: (info: { message: string }) => void): void;
+  platform: string;
 }
 
 const api: OrbitAPI = {
@@ -245,6 +249,14 @@ const api: OrbitAPI = {
   listAllModels: () => ipcRenderer.invoke("models:list-all"),
   checkVersion: () => ipcRenderer.invoke("version:check"),
   openReleasePage: (url) => ipcRenderer.invoke("version:open-release", url),
+  restartToUpdate: () => ipcRenderer.invoke("update:restart"),
+  onUpdateDownloaded: (cb) => {
+    ipcRenderer.on("update:downloaded", (_e, info) => cb(info));
+  },
+  onUpdateError: (cb) => {
+    ipcRenderer.on("update:error", (_e, info) => cb(info));
+  },
+  platform: process.platform,
   onSessionHistory: (callback) => {
     const handler = (_e: unknown, history: ReplaySegment[]) => callback(history);
     ipcRenderer.on("agent:session-history", handler);

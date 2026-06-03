@@ -26,11 +26,17 @@
            and finds a newer tag than app.getVersion(). No auto-install for
            unsigned macOS builds; clicking the link opens the Releases page. -->
       <div id="update-banner" class="hidden" role="status" aria-live="polite">
-        <span class="update-banner-text">
+        <span class="update-banner-text" id="update-banner-text-link">
           A new Orbit release is available (<span id="update-banner-version"></span>).
+        </span>
+        <span class="update-banner-text hidden" id="update-banner-text-restart">
+          Orbit <span id="update-banner-restart-version"></span> downloaded.
         </span>
         <button id="update-banner-link" class="update-banner-link" type="button">
           Open release page
+        </button>
+        <button id="update-banner-restart" class="update-banner-link hidden" type="button">
+          Restart to install
         </button>
         <button
           id="update-banner-dismiss"
@@ -52,7 +58,9 @@
       <!-- Bash-sandbox indicator. Shown when guardian.sandbox is on (opt-in).
            Informational (a good state), not a warning. -->
       <div id="sandbox-banner" class="hidden" role="status" aria-live="polite">
-        <span class="sandbox-banner-text">Bash sandbox on -- bash confined to the workspace; network limited.</span>
+        <span class="sandbox-banner-text"
+          >Bash sandbox on -- bash confined to the workspace; network limited.</span
+        >
       </div>
       <div id="app-main">
         <!-- Left pane: File tree sidebar -->
@@ -537,7 +545,11 @@
             <div class="prefs-row prefs-hint">
               <span></span>
               <span class="prefs-hint-text">
-                Runs the AI's bash commands inside an OS sandbox: bash writes are confined to your analysis directory and its network is limited. Off by default because it restricts bash network access (e.g. some downloads). Takes effect after Save (restarts the session). Your file edits are confined to the analysis directory regardless of this setting.
+                Runs the AI's bash commands inside an OS sandbox: bash writes are confined to your
+                analysis directory and its network is limited. Off by default because it restricts
+                bash network access (e.g. some downloads). Takes effect after Save (restarts the
+                session). Your file edits are confined to the analysis directory regardless of this
+                setting.
               </span>
             </div>
           </section>
