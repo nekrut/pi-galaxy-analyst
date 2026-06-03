@@ -29,13 +29,20 @@ function buildSecretEnv(): Record<string, string> {
 
   const provider = cfg.llm?.active || "anthropic";
   const llmKey = resolveLlmApiKey(cfg);
+  const isCustom = Boolean(cfg.llm?.providers?.[provider]?.baseUrl);
   // OAuth providers ignore env-var keys -- the brain reads ~/.pi/agent/auth.json.
   // If the user switched away from an API-key provider the old key is still in
   // config.json (preserved on purpose so they can switch back); don't leak it
   // into the env under a misrouted variable name.
   if (llmKey && !OAUTH_PROVIDERS.has(provider)) {
-    const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
-    env[envVar] = llmKey;
+    if (isCustom) {
+      // Custom OpenAI-compatible endpoint: the brain converts this into
+      // pi's --api-key (a built-in env var wouldn't map to the provider).
+      env.LOOM_ACTIVE_LLM_API_KEY = llmKey;
+    } else {
+      const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
+      env[envVar] = llmKey;
+    }
   }
 
   const galaxyKey = resolveGalaxyApiKey(cfg);

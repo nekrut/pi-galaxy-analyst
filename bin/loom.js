@@ -12,6 +12,11 @@ import {
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
 import { pickChannel } from "../shared/version-compare.js";
+import {
+  isCustomProvider,
+  syncCustomProviderModelsFile,
+  resolveActiveLlmApiKey,
+} from "../shared/custom-provider.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -171,6 +176,11 @@ function readAuthJson() {
 // provider's env var (encrypted config keys aren't decryptable outside Orbit).
 function activeProviderUsable(provider, entry, auth) {
   if (OAUTH_PROVIDERS.has(provider)) return Boolean(auth[provider]);
+  // Custom OpenAI-compatible providers resolve their key from the injected
+  // env var (Orbit) or a plaintext config key (CLI) -- same logic as
+  // checkLLMProvider. Without this, a keyless-on-disk custom provider looks
+  // unusable and the reconciler could silently switch llm.active away from it.
+  if (isCustomProvider(entry)) return Boolean(resolveActiveLlmApiKey(entry, process.env));
   if (entry?.apiKey) return true;
   const envVar = PROVIDER_ENV_MAP[provider];
   return Boolean(envVar && process.env[envVar]);
@@ -209,10 +219,25 @@ reconcileActiveProviderWithAuth();
 // ~/.pi/agent/auth.json anyway.
 const activeLlmProvider = loomConfig.llm?.active;
 const activeLlmConfig = activeLlmProvider ? loomConfig.llm?.providers?.[activeLlmProvider] : null;
-if (activeLlmConfig?.apiKey && !OAUTH_PROVIDERS.has(activeLlmProvider)) {
+if (
+  activeLlmConfig?.apiKey &&
+  !OAUTH_PROVIDERS.has(activeLlmProvider) &&
+  !isCustomProvider(activeLlmConfig)
+) {
   const envVar = PROVIDER_ENV_MAP[activeLlmProvider] || "AI_GATEWAY_API_KEY";
   if (!process.env[envVar]) {
     process.env[envVar] = activeLlmConfig.apiKey;
+  }
+}
+
+// Custom OpenAI-compatible provider: register it in ~/.pi/agent/models.json so
+// pi can resolve --provider/--model. The key is NOT written here; it's supplied
+// at runtime via --api-key below.
+if (!isInformationalCommand && activeLlmProvider && isCustomProvider(activeLlmConfig)) {
+  try {
+    syncCustomProviderModelsFile(join(agentDir, "models.json"), activeLlmProvider, activeLlmConfig);
+  } catch (err) {
+    console.error(`loom: failed to sync custom provider into models.json: ${err}`);
   }
 }
 
@@ -379,6 +404,12 @@ or unset the active provider in ~/.loom/config.json.
     process.exit(1);
   }
 
+  // Custom OpenAI-compatible provider: usable when a key is resolvable from the
+  // injected env var (Orbit) or a plaintext config key (standalone CLI).
+  if (isCustomProvider(activeLlmConfig) && resolveActiveLlmApiKey(activeLlmConfig, process.env)) {
+    return;
+  }
+
   // Consolidated config has an API key (non-OAuth providers only)
   if (activeLlmConfig?.apiKey) return;
 
@@ -488,6 +519,12 @@ if (!hasArg("--provider")) {
     ) {
       providerArgs.push("--model", activeLlmConfig.model);
     }
+    // Custom endpoints have no built-in key resolution; hand pi the key at
+    // runtime so it stays in memory (setRuntimeApiKey) rather than on disk.
+    if (isCustomProvider(activeLlmConfig) && !hasArg("--api-key")) {
+      const key = resolveActiveLlmApiKey(activeLlmConfig, process.env);
+      if (key) providerArgs.push("--api-key", key);
+    }
   } else {
     // Fall back to legacy models.json
     const modelsPath = join(agentDir, "models.json");
@@ -522,7 +559,6 @@ const args = [
   ...providerArgs,
   ...userArgs,
 ];
-
 if (await handleInformationalCommand()) {
   process.exit(0);
 }

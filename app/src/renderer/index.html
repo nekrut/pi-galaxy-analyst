@@ -408,6 +408,7 @@
                 <option value="xai">xAI</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="ollama">Ollama (local)</option>
+                <option value="openai-compatible">OpenAI-compatible endpoint</option>
               </select>
             </div>
             <div class="prefs-row">
@@ -422,6 +423,24 @@
                 execution; reach for flagship (Opus / o1 class) only when you hit complex reasoning.
                 Prices in the dropdown are per 1M tokens (input/output).
               </span>
+            </div>
+            <div class="prefs-row hidden" id="prefs-base-url-row">
+              <label for="prefs-base-url">Base URL</label>
+              <div class="prefs-row-with-btn">
+                <input
+                  id="prefs-base-url"
+                  type="text"
+                  placeholder="https://host/v1 (OpenAI-compatible)"
+                />
+                <button
+                  id="prefs-jetstream-preset"
+                  class="plan-btn"
+                  type="button"
+                  title="Fill Jetstream defaults"
+                >
+                  Jetstream
+                </button>
+              </div>
             </div>
             <div class="prefs-row" id="prefs-api-key-row">
               <label for="prefs-api-key">API Key</label>
@@ -590,11 +609,30 @@
                 <option value="xai">xAI</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="ollama">Ollama (local)</option>
+                <option value="openai-compatible">OpenAI-compatible endpoint</option>
               </select>
             </div>
             <div class="prefs-row">
               <label for="welcome-model">Model</label>
               <select id="welcome-model"></select>
+            </div>
+            <div class="prefs-row hidden" id="welcome-base-url-row">
+              <label for="welcome-base-url">Base URL</label>
+              <div class="prefs-row-with-btn">
+                <input
+                  id="welcome-base-url"
+                  type="text"
+                  placeholder="https://host/v1 (OpenAI-compatible)"
+                />
+                <button
+                  id="welcome-jetstream-preset"
+                  class="plan-btn"
+                  type="button"
+                  title="Fill Jetstream defaults"
+                >
+                  Jetstream
+                </button>
+              </div>
             </div>
             <div class="prefs-row" id="welcome-api-key-row">
               <label for="welcome-api-key">API Key</label>

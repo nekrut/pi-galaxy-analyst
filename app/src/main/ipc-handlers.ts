@@ -28,7 +28,7 @@ export const UNCHANGED_SECRET = "__loom_unchanged_secret__";
 interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
   llm?: {
     active: string;
-    providers: Record<string, { model?: string; hasApiKey: boolean }>;
+    providers: Record<string, { model?: string; baseUrl?: string; hasApiKey: boolean }>;
   };
   galaxy?: {
     active: string | null;
@@ -47,6 +47,7 @@ function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
           k,
           {
             model: v.model,
+            baseUrl: v.baseUrl,
             // OAuth providers authenticate via ~/.pi/agent/auth.json -- an
             // orphan apiKey on the entry (manual edit, or the legacy-shape
             // migrator) is dead weight, not a real credential. Don't surface
@@ -91,7 +92,7 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
   // LLM multi-provider reconciliation. The renderer sends:
   //   { active, providers: { [name]: { apiKey?, model? } } }
   // where apiKey may be UNCHANGED_SECRET (preserve), "" (clear), or a new value.
-  type IncomingProvider = { apiKey?: string; model?: string };
+  type IncomingProvider = { apiKey?: string; model?: string; baseUrl?: string };
   type IncomingLlm = { active?: string; providers?: Record<string, IncomingProvider> };
   const incomingLlm = (incoming as { llm?: IncomingLlm }).llm;
   if (incomingLlm) {
@@ -103,11 +104,14 @@ function reconcileIncomingConfig(incoming: Record<string, unknown>): LoomConfig 
     for (const [name, p] of Object.entries(incomingLlm.providers ?? {})) {
       const existing = current.llm?.providers?.[name];
       const rawKey = p.apiKey;
-      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string } = {};
+      const entry: { apiKey?: string; apiKeyEncrypted?: string; model?: string; baseUrl?: string } =
+        {};
       // Preserve existing model if the incoming entry doesn't carry one --
       // a partial save (e.g. rotate-just-the-key) shouldn't wipe the model.
       if (p.model !== undefined) entry.model = p.model;
       else if (existing?.model) entry.model = existing.model;
+      if (p.baseUrl !== undefined) entry.baseUrl = p.baseUrl;
+      else if (existing?.baseUrl) entry.baseUrl = existing.baseUrl;
       if (rawKey === UNCHANGED_SECRET || rawKey === undefined) {
         if (existing?.apiKeyEncrypted) entry.apiKeyEncrypted = existing.apiKeyEncrypted;
         else if (existing?.apiKey) entry.apiKey = existing.apiKey;
@@ -294,8 +298,13 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
   ipcMain.handle(
     "apiKey:validate",
-    async (_e, provider: string, key: string): Promise<{ valid: boolean; error?: string }> => {
-      return validateApiKey(provider, key);
+    async (
+      _e,
+      provider: string,
+      key: string,
+      baseUrl?: string,
+    ): Promise<{ valid: boolean; error?: string; models?: string[] }> => {
+      return validateApiKey(provider, key, baseUrl);
     },
   );
 
@@ -652,12 +661,37 @@ export function registerIpcHandlers(agent: AgentManager): void {
 async function validateApiKey(
   provider: string,
   key: string,
-): Promise<{ valid: boolean; error?: string }> {
+  baseUrl?: string,
+): Promise<{ valid: boolean; error?: string; models?: string[] }> {
   const trimmed = key.trim();
   if (!trimmed) return { valid: false, error: "Key is empty" };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
+    if (baseUrl) {
+      const trimmedBase = baseUrl.trim().replace(/\/+$/, "");
+      if (!/^https?:\/\//.test(trimmedBase)) {
+        return { valid: false, error: "Base URL must start with http(s)://" };
+      }
+      const res = await fetch(`${trimmedBase}/models`, {
+        headers: { authorization: `Bearer ${trimmed}` },
+        signal: controller.signal,
+      });
+      if (res.status === 401) return { valid: false, error: "Invalid API key (401)" };
+      if (!res.ok) return { valid: false, error: `Unexpected response: HTTP ${res.status}` };
+      try {
+        const body = (await res.json()) as { data?: unknown };
+        const raw = body.data;
+        const models = Array.isArray(raw)
+          ? raw
+              .map((m) => (m && typeof m === "object" ? (m as { id?: unknown }).id : undefined))
+              .filter((id): id is string => typeof id === "string")
+          : [];
+        return { valid: true, models };
+      } catch {
+        return { valid: true };
+      }
+    }
     if (provider === "anthropic") {
       if (!trimmed.startsWith("sk-ant-")) {
         return { valid: false, error: "Anthropic keys start with sk-ant-" };

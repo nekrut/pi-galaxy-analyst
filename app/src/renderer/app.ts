@@ -548,6 +548,16 @@ const welcomeModel = document.getElementById("welcome-model") as HTMLSelectEleme
 const welcomeApiKey = document.getElementById("welcome-api-key") as HTMLInputElement;
 const welcomeApiKeyStatus = document.getElementById("welcome-api-key-status")!;
 const welcomeApiKeyRow = document.getElementById("welcome-api-key-row")!;
+const welcomeBaseUrlRow = document.getElementById("welcome-base-url-row")!;
+const welcomeBaseUrl = document.getElementById("welcome-base-url") as HTMLInputElement;
+const welcomeJetstreamPreset = document.getElementById(
+  "welcome-jetstream-preset",
+) as HTMLButtonElement;
+
+/** Jetstream's public, key-reachable proxy + the models it serves. Shared by the welcome screen and Preferences. */
+const JETSTREAM_BASE_URL = "https://llm.jetstream-cloud.org/api";
+const JETSTREAM_MODELS = ["gpt-oss-120b", "llama-4-scout"];
+
 const welcomeApiKeyHintRow = document.getElementById("welcome-api-key-hint-row")!;
 const welcomeOauthRow = document.getElementById("welcome-oauth-row")!;
 const welcomeOauthHintRow = document.getElementById("welcome-oauth-hint-row")!;
@@ -590,6 +600,8 @@ function wireApiKeyValidation(
   providerEl: HTMLSelectElement,
   keyEl: HTMLInputElement,
   statusEl: HTMLElement,
+  baseUrlEl?: HTMLInputElement,
+  modelEl?: HTMLSelectElement,
 ): void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let seq = 0;
@@ -600,6 +612,7 @@ function wireApiKeyValidation(
   const validateNow = async () => {
     const provider = providerEl.value;
     const key = keyEl.value.trim();
+    const baseUrl = baseUrlEl?.value.trim() || undefined;
     if (!key) {
       setStatus("", "");
       return;
@@ -607,10 +620,22 @@ function wireApiKeyValidation(
     const mySeq = ++seq;
     setStatus("checking", "Checking…");
     try {
-      const res = await window.orbit.validateApiKey(provider, key);
-      if (mySeq !== seq) return; // a newer request superseded this one
-      if (res.valid) setStatus("valid", "\u2713 Valid");
-      else setStatus("invalid", `\u2717 ${res.error || "Invalid"}`);
+      const res = await window.orbit.validateApiKey(provider, key, baseUrl);
+      if (mySeq !== seq) return;
+      if (res.valid) {
+        setStatus("valid", "\u2713 Valid");
+        if (modelEl && res.models && res.models.length > 0) {
+          const selected = modelEl.value;
+          modelEl.innerHTML = "";
+          for (const id of res.models) {
+            const opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = id;
+            if (id === selected) opt.selected = true;
+            modelEl.appendChild(opt);
+          }
+        }
+      } else setStatus("invalid", `\u2717 ${res.error || "Invalid"}`);
     } catch (err) {
       if (mySeq !== seq) return;
       setStatus("invalid", `\u2717 ${err instanceof Error ? err.message : String(err)}`);
@@ -622,6 +647,7 @@ function wireApiKeyValidation(
   };
   keyEl.addEventListener("input", schedule);
   providerEl.addEventListener("change", schedule);
+  baseUrlEl?.addEventListener("input", schedule);
 }
 
 function populateWelcomeModels(provider: string): void {
@@ -638,10 +664,30 @@ welcomeProvider.addEventListener("change", () => {
   populateWelcomeModels(welcomeProvider.value);
   void updateWelcomeAuthUi();
 });
-wireApiKeyValidation(welcomeProvider, welcomeApiKey, welcomeApiKeyStatus);
+wireApiKeyValidation(
+  welcomeProvider,
+  welcomeApiKey,
+  welcomeApiKeyStatus,
+  welcomeBaseUrl,
+  welcomeModel,
+);
+
+welcomeJetstreamPreset.addEventListener("click", () => {
+  welcomeBaseUrl.value = JETSTREAM_BASE_URL;
+  welcomeModel.innerHTML = "";
+  for (const id of JETSTREAM_MODELS) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    welcomeModel.appendChild(opt);
+  }
+  welcomeBaseUrl.dispatchEvent(new Event("input"));
+});
 
 async function updateWelcomeAuthUi(): Promise<void> {
   const oauth = isOAuthProvider(welcomeProvider.value);
+  const custom = welcomeProvider.value === "openai-compatible";
+  welcomeBaseUrlRow.classList.toggle("hidden", !custom);
   welcomeApiKeyRow.classList.toggle("hidden", oauth);
   welcomeApiKeyHintRow.classList.toggle("hidden", oauth);
   welcomeOauthRow.classList.toggle("hidden", !oauth);
@@ -686,6 +732,11 @@ welcomeSave.addEventListener("click", async () => {
     welcomeError.textContent = "API key is required";
     return;
   }
+  const custom = welcomeProvider.value === "openai-compatible";
+  if (custom && !welcomeBaseUrl.value.trim()) {
+    welcomeError.textContent = "Enter a base URL (or use the Jetstream preset).";
+    return;
+  }
   if (oauth) {
     const status = await window.orbit.oauthStatus(welcomeProvider.value);
     if (!status.signedIn) {
@@ -708,8 +759,9 @@ welcomeSave.addEventListener("click", async () => {
   // OAuth providers persist their credential in ~/.pi/agent/auth.json (written
   // by the sign-in flow above), not in config.json. Skip writing apiKey for
   // those so a leftover plaintext field doesn't shadow the real auth path.
-  const providerEntry: Record<string, unknown> = { model: welcomeModel.value };
+  const providerEntry: Record<string, unknown> = { model: welcomeModel.value || undefined };
   if (!oauth) providerEntry.apiKey = apiKey;
+  if (welcomeBaseUrl.value.trim()) providerEntry.baseUrl = welcomeBaseUrl.value.trim();
   const cfg: Record<string, unknown> = {
     llm: {
       active: welcomeProvider.value,
@@ -2606,6 +2658,9 @@ const prefsOauthHintRow = document.getElementById("prefs-oauth-hint-row")!;
 const prefsOauthStatus = document.getElementById("prefs-oauth-status")!;
 const prefsOauthSignIn = document.getElementById("prefs-oauth-signin") as HTMLButtonElement;
 const prefsOauthSignOut = document.getElementById("prefs-oauth-signout") as HTMLButtonElement;
+const prefsBaseUrlRow = document.getElementById("prefs-base-url-row")!;
+const prefsBaseUrl = document.getElementById("prefs-base-url") as HTMLInputElement;
+const prefsJetstreamPreset = document.getElementById("prefs-jetstream-preset") as HTMLButtonElement;
 
 // Model catalog by provider — labels include cost guidance
 // (in/out price per 1M tokens). Fallback only — populateDynamicModelData()
@@ -2659,6 +2714,7 @@ let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
     { id: "qwen3-coder:30b", label: "Qwen3-Coder 30B (local, A5000) — free" },
     { id: "qwen3:8b", label: "Qwen3 8B (local, fast) — free" },
   ],
+  "openai-compatible": [],
 };
 
 function populateModels(provider: string, selected?: string): void {
@@ -2688,7 +2744,19 @@ prefsProvider.addEventListener("change", () => {
   loadProviderFields(prefsActiveProvider);
   void updatePrefsAuthUi();
 });
-wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus);
+wireApiKeyValidation(prefsProvider, prefsApiKey, prefsApiKeyStatus, prefsBaseUrl, prefsModel);
+prefsJetstreamPreset.addEventListener("click", () => {
+  prefsBaseUrl.value = JETSTREAM_BASE_URL;
+  prefsModel.innerHTML = "";
+  for (const id of JETSTREAM_MODELS) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    prefsModel.appendChild(opt);
+  }
+  // Trigger validation/discovery if a key is already entered.
+  prefsBaseUrl.dispatchEvent(new Event("input"));
+});
 // Clear the "✓ Key stored" indicator as soon as the user starts typing.
 prefsApiKey.addEventListener("input", () => {
   if (prefsApiKeyStatus.classList.contains("stored")) {
@@ -2699,6 +2767,8 @@ prefsApiKey.addEventListener("input", () => {
 
 async function updatePrefsAuthUi(): Promise<void> {
   const oauth = isOAuthProvider(prefsProvider.value);
+  const custom = prefsProvider.value === "openai-compatible";
+  prefsBaseUrlRow.classList.toggle("hidden", !custom);
   prefsApiKeyRow.classList.toggle("hidden", oauth);
   prefsApiKeyHintRow.classList.toggle("hidden", oauth);
   prefsOauthRow.classList.toggle("hidden", !oauth);
@@ -2845,6 +2915,7 @@ interface ProviderState {
   hadKey: boolean;
   typedKey: string;
   model: string;
+  baseUrl: string;
 }
 let prefsProviderStates: Record<string, ProviderState> = {};
 let prefsActiveProvider = "anthropic";
@@ -2871,14 +2942,21 @@ function snapshotCurrentProvider(): void {
     hadKey: prefsProviderStates[prefsActiveProvider]?.hadKey ?? false,
     typedKey: prefsApiKey.value,
     model: prefsModel.value,
+    baseUrl: prefsBaseUrl.value.trim(),
   };
 }
 
 /** Load a provider's stored state into the visible fields. */
 function loadProviderFields(provider: string): void {
-  const state = prefsProviderStates[provider] ?? { hadKey: false, typedKey: "", model: "" };
+  const state = prefsProviderStates[provider] ?? {
+    hadKey: false,
+    typedKey: "",
+    model: "",
+    baseUrl: "",
+  };
   populateModels(provider, state.model || undefined);
   prefsApiKey.value = state.typedKey;
+  prefsBaseUrl.value = state.baseUrl;
   prefsApiKey.placeholder = state.hadKey ? "leave blank to keep existing key" : "";
   if (state.hadKey && !state.typedKey) {
     prefsApiKeyStatus.className = "api-key-status stored";
@@ -2894,7 +2972,7 @@ async function openPreferences(): Promise<void> {
   const config = (await window.orbit.getConfig()) as {
     llm?: {
       active?: string;
-      providers?: Record<string, { model?: string; hasApiKey?: boolean }>;
+      providers?: Record<string, { model?: string; baseUrl?: string; hasApiKey?: boolean }>;
     };
     galaxy?: {
       active: string | null;
@@ -2913,6 +2991,7 @@ async function openPreferences(): Promise<void> {
       hadKey: Boolean(p.hasApiKey),
       typedKey: "",
       model: p.model ?? "",
+      baseUrl: p.baseUrl ?? "",
     };
   }
   prefsActiveProvider = config.llm?.active || "anthropic";
@@ -2978,6 +3057,7 @@ async function savePreferences(): Promise<void> {
     hadKey: false,
     typedKey: "",
     model: "",
+    baseUrl: "",
   };
   const typedApiKey = prefsApiKey.value.trim();
   const llmApiKey = typedApiKey ? typedApiKey : activeState.hadKey ? UNCHANGED_SECRET : "";
@@ -3003,9 +3083,12 @@ async function savePreferences(): Promise<void> {
   // credentials in ~/.pi/agent/auth.json -- don't ship an apiKey field (sentinel
   // or "") for them, or the reconciler would try to preserve/clear a
   // config.json key that was never there.
-  const providers: Record<string, { apiKey?: string; model?: string }> = {};
+  const providers: Record<string, { apiKey?: string; model?: string; baseUrl?: string }> = {};
   for (const [name, state] of Object.entries(prefsProviderStates)) {
-    const entry: { apiKey?: string; model?: string } = { model: state.model || undefined };
+    const entry: { apiKey?: string; model?: string; baseUrl?: string } = {
+      model: state.model || undefined,
+    };
+    if (state.baseUrl) entry.baseUrl = state.baseUrl;
     if (!isOAuthProvider(name)) {
       entry.apiKey = state.typedKey.trim()
         ? state.typedKey.trim()
@@ -3017,7 +3100,10 @@ async function savePreferences(): Promise<void> {
   }
   // Override the active provider with the resolved current-screen values
   // (covers the brand-new-provider case too).
-  const activeEntry: { apiKey?: string; model?: string } = { model: selectedModel };
+  const activeEntry: { apiKey?: string; model?: string; baseUrl?: string } = {
+    model: selectedModel,
+  };
+  if (prefsBaseUrl.value.trim()) activeEntry.baseUrl = prefsBaseUrl.value.trim();
   if (!isOAuthProvider(activeProvider)) activeEntry.apiKey = llmApiKey;
   providers[activeProvider] = activeEntry;
 
