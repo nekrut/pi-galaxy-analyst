@@ -35,6 +35,8 @@ export interface LoomConfig {
     >;
   };
   defaultCwd?: string;
+  /** When false, all update checks (CLI notice + Orbit auto-update/banner) are disabled. Default true. */
+  updateCheck?: boolean;
   /**
    * Execution mode gate. Independent of whether Galaxy credentials are
    * configured.
