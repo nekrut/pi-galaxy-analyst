@@ -3554,6 +3554,10 @@ window.orbit.onProcUpdate((procs) => {
   const updateVersionEl = document.getElementById("update-banner-version");
   const updateLinkBtn = document.getElementById("update-banner-link");
   const updateDismissBtn = document.getElementById("update-banner-dismiss");
+  const linkText = document.getElementById("update-banner-text-link");
+  const restartText = document.getElementById("update-banner-text-restart");
+  const restartVersionEl = document.getElementById("update-banner-restart-version");
+  const restartBtn = document.getElementById("update-banner-restart");
 
   const DISMISSED_KEY = "orbit:update-dismissed-version";
   let currentReleaseUrl: string | null = null;
@@ -3564,14 +3568,16 @@ window.orbit.onProcUpdate((procs) => {
     });
     updateDismissBtn.addEventListener("click", () => {
       updateBanner.classList.add("hidden");
-      if (updateVersionEl.textContent) {
+      const v = updateVersionEl.textContent || restartVersionEl?.textContent;
+      if (v) {
         try {
-          localStorage.setItem(DISMISSED_KEY, updateVersionEl.textContent);
+          localStorage.setItem(DISMISSED_KEY, v);
         } catch {}
       }
     });
+    restartBtn?.addEventListener("click", () => void window.orbit.restartToUpdate());
 
-    void (async () => {
+    const showNotifyLinkBanner = async () => {
       try {
         const info = await window.orbit.checkVersion();
         if (!info || !info.hasUpdate) return;
@@ -3579,14 +3585,31 @@ window.orbit.onProcUpdate((procs) => {
         try {
           dismissed = localStorage.getItem(DISMISSED_KEY);
         } catch {}
-        // Dismissal is per-version: once a newer release lands, the banner
-        // reappears.
         if (dismissed === info.latest) return;
         updateVersionEl.textContent = info.latest;
         currentReleaseUrl = info.releaseUrl;
+        linkText?.classList.remove("hidden");
+        updateLinkBtn.classList.remove("hidden");
         updateBanner.classList.remove("hidden");
       } catch {}
-    })();
+    };
+
+    // macOS: in-place auto-update. Show the "restart to install" banner once a
+    // download completes; fall back to the notify-link banner on updater error.
+    if (window.orbit.platform === "darwin") {
+      window.orbit.onUpdateDownloaded((info) => {
+        if (restartVersionEl) restartVersionEl.textContent = info.version;
+        linkText?.classList.add("hidden");
+        updateLinkBtn.classList.add("hidden");
+        restartText?.classList.remove("hidden");
+        restartBtn?.classList.remove("hidden");
+        updateBanner.classList.remove("hidden");
+      });
+      window.orbit.onUpdateError(() => void showNotifyLinkBanner());
+    } else {
+      // Linux (and any non-darwin): the GitHub-releases notify-link banner.
+      void showNotifyLinkBanner();
+    }
   }
 }
 
