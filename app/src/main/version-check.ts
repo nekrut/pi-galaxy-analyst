@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { isNewer } from "../../../shared/version-compare.js";
+import { loadConfig } from "../../../shared/loom-config.js";
 
 const RELEASES_API = "https://api.github.com/repos/galaxyproject/loom/releases/latest";
 const RELEASES_PAGE = "https://github.com/galaxyproject/loom/releases/latest";
@@ -77,6 +78,7 @@ async function fetchLatestFromGitHub(): Promise<{ latest: string; releaseUrl: st
 }
 
 export async function checkLatestVersion(): Promise<VersionCheckResult | null> {
+  if (loadConfig().updateCheck === false) return null;
   const current = app.getVersion();
   const cached = readCache();
   if (cached?.failed) return null;
