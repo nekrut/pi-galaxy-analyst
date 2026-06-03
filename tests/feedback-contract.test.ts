@@ -5,6 +5,7 @@ import {
   FEEDBACK_ROUTE,
   FEEDBACK_KEY_HEADER,
   formatActivityTail,
+  capFeedbackPayload,
 } from "../shared/feedback-contract.js";
 
 const valid = {
@@ -111,5 +112,23 @@ describe("formatActivityTail", () => {
 
   it("returns an empty string for no events", () => {
     expect(formatActivityTail([])).toBe("");
+  });
+});
+
+describe("capFeedbackPayload", () => {
+  const base = { schemaVersion: 1, source: "orbit", title: "t", body: "b", clientTs: "now" };
+
+  it("returns the payload unchanged when under budget", () => {
+    const p = { ...base, activityTail: "a", shellTail: "s" };
+    expect(capFeedbackPayload(p)).toEqual(p);
+  });
+
+  it("trims activityTail before shellTail and keeps the result under budget", () => {
+    const big = Array.from({ length: 10000 }, (_, i) => `a${i}`).join("\n");
+    const p = { ...base, activityTail: big, shellTail: "keep-me" };
+    const capped = capFeedbackPayload(p, { maxTotalBytes: 8000 });
+    expect(new TextEncoder().encode(JSON.stringify(capped)).length).toBeLessThanOrEqual(8000);
+    expect(capped.shellTail).toBe("keep-me");                 // shell untouched
+    expect(capped.activityTail.length).toBeLessThan(big.length); // activity sacrificed first
   });
 });

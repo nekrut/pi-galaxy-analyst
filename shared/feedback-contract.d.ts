@@ -45,3 +45,8 @@ export declare function formatActivityTail(
   events: FeedbackActivityEvent[],
   opts?: { maxBytes?: number },
 ): string;
+
+export declare function capFeedbackPayload(
+  payload: FeedbackPayload,
+  opts?: { maxTotalBytes?: number },
+): FeedbackPayload;

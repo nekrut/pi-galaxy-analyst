@@ -101,3 +101,21 @@ export function formatActivityTail(events, opts = {}) {
   const text = (events || []).map(formatActivityEvent).join("\n");
   return trimLinesToBytes(text, maxBytes);
 }
+
+const FEEDBACK_MAX_TOTAL_BYTES = 200 * 1024;
+
+// Final guard so an assembled payload never bounces off the worker's 256 KB cap.
+// Trims activityTail first, then shellTail, leaving the user's title/body intact.
+export function capFeedbackPayload(payload, opts = {}) {
+  const maxTotalBytes = opts.maxTotalBytes ?? FEEDBACK_MAX_TOTAL_BYTES;
+  const totalBytes = (p) => byteLen(JSON.stringify(p));
+  let p = { ...payload };
+  for (const field of ["activityTail", "shellTail"]) {
+    if (totalBytes(p) <= maxTotalBytes) break;
+    if (typeof p[field] !== "string" || p[field].length === 0) continue;
+    const over = totalBytes(p) - maxTotalBytes;
+    const target = Math.max(0, byteLen(p[field]) - over);
+    p = { ...p, [field]: trimLinesToBytes(p[field], target) };
+  }
+  return p;
+}
