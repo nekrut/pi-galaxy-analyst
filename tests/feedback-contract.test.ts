@@ -4,6 +4,7 @@ import {
   SCHEMA_VERSION,
   FEEDBACK_ROUTE,
   FEEDBACK_KEY_HEADER,
+  formatActivityTail,
 } from "../shared/feedback-contract.js";
 
 const valid = {
@@ -49,5 +50,66 @@ describe("feedback contract", () => {
   it("accepts an optional string testerId and rejects a non-string one", () => {
     expect(validateFeedbackPayload({ ...valid, testerId: "orbit-007" })).toBe(true);
     expect(validateFeedbackPayload({ ...valid, testerId: 7 })).toBe(false);
+  });
+});
+
+describe("formatActivityTail", () => {
+  it("renders tool name, redacted args, and result summary with a status flag", () => {
+    const out = formatActivityTail([
+      { timestamp: "t1", kind: "tool.start", source: "agent",
+        payload: { toolName: "bash", args: { command: "ls" } } },
+      { timestamp: "t2", kind: "tool.end", source: "agent",
+        payload: { toolName: "bash", isError: false, resultSummary: "ok" } },
+    ]);
+    expect(out).toContain("t1 tool.start bash");
+    expect(out).toContain('args={"command":"ls"}');
+    expect(out).toContain("t2 tool.end bash ✓ ok");
+  });
+
+  it("flags errored tools with ✗ and passes the summary through verbatim", () => {
+    const out = formatActivityTail([
+      { timestamp: "t", kind: "tool.end", source: "agent",
+        payload: { toolName: "galaxy_invoke_workflow", isError: true, resultSummary: "ERROR: bad adapter" } },
+    ]);
+    expect(out).toBe("t tool.end galaxy_invoke_workflow ✗ ERROR: bad adapter");
+  });
+
+  it("renders user prompts and falls back to kind+source for unknown kinds", () => {
+    const out = formatActivityTail([
+      { timestamp: "t1", kind: "user.prompt", source: "user", payload: { text: "hello there" } },
+      { timestamp: "t2", kind: "guard.decision", source: "exec-guard", payload: {} },
+    ]);
+    expect(out).toContain("t1 user.prompt hello there");
+    expect(out).toContain("t2 guard.decision (exec-guard)");
+  });
+
+  it("trims oldest events to fit the byte budget, keeping the newest", () => {
+    const events = Array.from({ length: 200 }, (_, i) => ({
+      timestamp: `t${i}`, kind: "tool.end", source: "agent",
+      payload: { toolName: "bash", isError: false, resultSummary: "x".repeat(400) },
+    }));
+    const out = formatActivityTail(events, { maxBytes: 4096 });
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(4096);
+    expect(out).toContain("t199 ");   // newest kept
+    expect(out.startsWith("t0 ")).toBe(false); // oldest dropped
+  });
+
+  it("hard-slices a single over-budget line to fit the byte budget", () => {
+    const out = formatActivityTail(
+      [
+        {
+          timestamp: "t",
+          kind: "tool.end",
+          source: "agent",
+          payload: { toolName: "x", isError: false, resultSummary: "y".repeat(600) },
+        },
+      ],
+      { maxBytes: 100 },
+    );
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(100);
+  });
+
+  it("returns an empty string for no events", () => {
+    expect(formatActivityTail([])).toBe("");
   });
 });
