@@ -5,7 +5,6 @@ const appendToOutbox = vi.fn();
 vi.mock("../extensions/loom/feedback.js", () => ({
   submitFeedback: (...a: unknown[]) => submitFeedback(...a),
   buildBrainSysinfo: () => ({ platform: "darwin" }),
-  summarizeActivityTail: () => "t1 kind (src)",
   appendToOutbox: (...a: unknown[]) => appendToOutbox(...a),
   readLoomVersion: () => "0.0.0-test",
 }));

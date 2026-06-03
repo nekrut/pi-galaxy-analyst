@@ -2,13 +2,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   submitFeedback,
   buildBrainSysinfo,
-  summarizeActivityTail,
   appendToOutbox,
   readLoomVersion,
 } from "./feedback.js";
 import { getRecentActivityEvents } from "./activity.js";
 import { loadConfig } from "./config.js";
-import { SCHEMA_VERSION } from "../../shared/feedback-contract.js";
+import { SCHEMA_VERSION, formatActivityTail, capFeedbackPayload } from "../../shared/feedback-contract.js";
 import type { FeedbackPayload } from "../../shared/feedback-contract.js";
 
 /**
@@ -38,7 +37,7 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
 
       const includeDiagnostics = await ctx.ui.confirm(
         "Include diagnostics?",
-        "Attach system info + a one-line-per-event activity summary (no command output or arguments), sent to the Loom team's private feedback store. No API keys or credentials are sent.",
+        "Attach system info + a summary of recent activity (tool names, arguments, and truncated results), sent to the Loom team's private feedback store. Credentials and API keys are redacted.",
       );
 
       // Opaque tester code (config, env override) -- non-secret; lets the team
@@ -57,18 +56,19 @@ export function registerFeedbackCommand(pi: ExtensionAPI): void {
         ...(includeDiagnostics
           ? {
               sysinfo: buildBrainSysinfo(),
-              activityTail: summarizeActivityTail(getRecentActivityEvents(15)),
+              activityTail: formatActivityTail(getRecentActivityEvents(60)),
             }
           : { sysinfo: { appVersion: readLoomVersion() } }),
       };
 
-      const res = await submitFeedback(payload);
+      const capped = capFeedbackPayload(payload);
+      const res = await submitFeedback(capped);
       if (res.ok) {
         ctx.ui.notify("Thanks -- your feedback was sent.", "info");
         return;
       }
       // Durability: never lose the user's note if the store is unreachable.
-      const saved = appendToOutbox(payload);
+      const saved = appendToOutbox(capped);
       ctx.ui.notify(
         saved
           ? `Couldn't reach the feedback service (${res.error ?? "unknown error"}) -- saved locally, we'll pick it up later.`
