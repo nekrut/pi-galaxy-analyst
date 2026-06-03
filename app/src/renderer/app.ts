@@ -8,7 +8,7 @@ import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
-import { SCHEMA_VERSION } from "../../../shared/feedback-contract.js";
+import { SCHEMA_VERSION, formatActivityTail, capFeedbackPayload } from "../../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../../shared/feedback-contract.js";
 
 declare global {
@@ -3307,9 +3307,9 @@ function capForGithubUrl(body: string): string {
 }
 
 // Assemble the structured feedback payload POSTed to the capture worker. Honors
-// the two opt-in checkboxes; never includes cwd, API keys, or raw activity
-// payloads (sysinfo strips cwd; the activity tail is summarized to one line per
-// event).
+// the two opt-in checkboxes; never includes cwd or raw credentials (sysinfo
+// strips cwd; the activity tail renders one line per event with already-redacted
+// args and a truncated result).
 async function buildFeedbackPayload(): Promise<FeedbackPayload> {
   const title = reportTitle.value.trim();
   const body = reportBody.value.trim();
@@ -3346,28 +3346,32 @@ async function buildFeedbackPayload(): Promise<FeedbackPayload> {
       const res = await window.orbit.readFile("activity.jsonl");
       if (res.ok) {
         const text = new TextDecoder("utf-8").decode(res.bytes);
-        activityTail = text
+        const events = text
           .split("\n")
           .filter(Boolean)
-          .slice(-15)
+          .slice(-60)
           .map((line) => {
             try {
-              const e = JSON.parse(line) as { timestamp?: string; kind?: string; source?: string };
-              return `${e.timestamp ?? "?"} ${e.kind ?? "?"}${e.source ? " (" + e.source + ")" : ""}`;
+              return JSON.parse(line) as {
+                timestamp: string;
+                kind: string;
+                source: string;
+                payload?: Record<string, unknown>;
+              };
             } catch {
-              return line.slice(0, 80);
+              return { timestamp: "?", kind: "?", source: "", payload: { text: line.slice(0, 80) } };
             }
-          })
-          .join("\n");
+          });
+        activityTail = formatActivityTail(events);
       }
     } catch {
       /* file missing or unreadable -- skip */
     }
-    const t = shell.tail(80);
+    const t = shell.tail(200);
     if (t.trim()) shellTail = t;
   }
 
-  return {
+  return capFeedbackPayload({
     schemaVersion: SCHEMA_VERSION,
     source: "orbit",
     title,
@@ -3376,7 +3380,7 @@ async function buildFeedbackPayload(): Promise<FeedbackPayload> {
     activityTail,
     shellTail,
     clientTs: new Date().toISOString(),
-  };
+  });
 }
 
 reportBtn.addEventListener("click", openReportModal);
