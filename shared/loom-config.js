@@ -114,6 +114,11 @@ export function loadConfig() {
         : null,
     sandbox: g.sandbox === true,
   };
+  // Update checks are on by default; an explicit false (set in config or via
+  // the CLI's --no-update-check) silences the CLI notice + Orbit's checks.
+  if (typeof raw.updateCheck !== "boolean") {
+    raw.updateCheck = true;
+  }
   return raw;
 }
 
