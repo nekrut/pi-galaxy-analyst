@@ -9,6 +9,9 @@ import {
   loadConfig as loadLoomConfig,
   saveConfig as saveLoomConfig,
 } from "../shared/loom-config.js";
+import { spawn } from "child_process";
+import { getLoomVersion, detectInstall } from "./update-check.js";
+import { pickChannel } from "../shared/version-compare.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +24,8 @@ const extensionPath = resolve(__dirname, "../extensions/loom");
 // CLI-shell hand-off glue (the /orbit command). Kept out of the loom brain so
 // the brain stays shell-neutral; the command no-ops when embedded in Orbit.
 const orbitHandoffPath = resolve(__dirname, "../extensions/orbit-handoff");
+const cliUpdatePath = resolve(__dirname, "../extensions/cli-update");
+const updateCheckScript = resolve(__dirname, "update-check.js");
 
 // pi-mcp-adapter is what teaches Pi how to use MCP servers from mcp.json
 // pi-web-access provides web_search, fetch_content, and code_search tools
@@ -49,11 +54,15 @@ if (userArgs.includes("--safe")) {
 if (userArgs.includes("--sandbox")) {
   process.env.LOOM_SANDBOX = "1";
 }
+if (userArgs.includes("--no-update-check")) {
+  process.env.LOOM_NO_UPDATE_CHECK = "1";
+}
 for (let i = userArgs.length - 1; i >= 0; i--) {
   if (
     userArgs[i] === "--dangerously-bypass-permissions" ||
     userArgs[i] === "--safe" ||
-    userArgs[i] === "--sandbox"
+    userArgs[i] === "--sandbox" ||
+    userArgs[i] === "--no-update-check"
   ) {
     userArgs.splice(i, 1);
   }
@@ -64,6 +73,11 @@ function hasArg(flag) {
 }
 
 const isInformationalCommand = ["--help", "-h", "--version", "--list-models"].some(hasArg);
+
+// Config opt-out feeds the same single signal the extension + refresh read.
+try {
+  if (loadLoomConfig().updateCheck === false) process.env.LOOM_NO_UPDATE_CHECK = "1";
+} catch {}
 
 if (
   !isInformationalCommand &&
@@ -94,7 +108,7 @@ async function handleInformationalCommand() {
 
   if (hasArg("--version")) {
     const { VERSION } = await import(pathToFileURL(piConfigModulePath).href);
-    console.log(VERSION);
+    console.log(`loom ${getLoomVersion()} (pi-coding-agent ${VERSION})`);
     return true;
   }
 
@@ -503,6 +517,8 @@ const args = [
   extensionPath,
   "-e",
   orbitHandoffPath,
+  "-e",
+  cliUpdatePath,
   ...providerArgs,
   ...userArgs,
 ];
@@ -511,54 +527,91 @@ if (await handleInformationalCommand()) {
   process.exit(0);
 }
 
-checkLLMProvider();
-
-// Resolve pi-coding-agent's own version by walking up from its entry point to
-// the package root. Used to pin the changelog watermark below.
-function resolvePiVersion() {
-  let dir = dirname(piEntryPointPath);
-  for (let i = 0; i < 6; i++) {
-    const pkgPath = join(dir, "package.json");
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-        if (pkg.name === "@earendil-works/pi-coding-agent") return pkg.version;
-      } catch {}
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+if (userArgs[0] === "update") {
+  if (process.env.LOOM_SHELL_KIND === "orbit") {
+    console.error("Orbit manages its own updates -- update from the Orbit app, not the CLI.");
+    process.exit(0);
   }
-  return null;
-}
+  const channel = pickChannel(getLoomVersion());
+  const { kind, cmd } = detectInstall(channel);
+  if (!cmd) {
+    console.error(
+      `Loom looks like a source checkout, not an npm install -- can't self-update.\n` +
+        `To upgrade an installed copy: npm install -g @galaxyproject/loom@${channel}`,
+    );
+    process.exit(0);
+  }
+  console.error(`Updating Loom (${kind}) -- ${cmd}`);
+  const [bin, ...rest] = cmd.split(" ");
+  const child = spawn(bin, rest, { stdio: "inherit" });
+  child.on("error", (err) => {
+    console.error(`Failed to run "${cmd}": ${err.message}`);
+    process.exit(1);
+  });
+  child.on("exit", (code) => process.exit(code ?? 0));
+} else {
+  checkLLMProvider();
 
-// Suppress Pi's keybinding banner, resource listing, and "What's New"
-// changelog. Loom is the product identity -- users shouldn't see Pi internals
-// unless they pass --verbose. The changelog draws from pi-coding-agent's own
-// CHANGELOG.md and is gated on lastChangelogVersion; pinning that to Pi's
-// current version means getNewEntries() never finds anything newer to show.
-if (!hasArg("--verbose")) {
-  const piSettingsPath = join(agentDir, "settings.json");
-  try {
-    let piSettings = {};
-    if (existsSync(piSettingsPath)) {
-      piSettings = JSON.parse(readFileSync(piSettingsPath, "utf-8"));
+  // Resolve pi-coding-agent's own version by walking up from its entry point to
+  // the package root. Used to pin the changelog watermark below.
+  function resolvePiVersion() {
+    let dir = dirname(piEntryPointPath);
+    for (let i = 0; i < 6; i++) {
+      const pkgPath = join(dir, "package.json");
+      if (existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+          if (pkg.name === "@earendil-works/pi-coding-agent") return pkg.version;
+        } catch {}
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
     }
-    let changed = false;
-    if (!piSettings.quietStartup) {
-      piSettings.quietStartup = true;
-      changed = true;
-    }
-    const piVersion = resolvePiVersion();
-    if (piVersion && piSettings.lastChangelogVersion !== piVersion) {
-      piSettings.lastChangelogVersion = piVersion;
-      changed = true;
-    }
-    if (changed) {
-      mkdirSync(dirname(piSettingsPath), { recursive: true });
-      writeFileSync(piSettingsPath, JSON.stringify(piSettings, null, 2));
-    }
-  } catch {}
-}
+    return null;
+  }
 
-main(args);
+  // Suppress Pi's keybinding banner, resource listing, and "What's New"
+  // changelog. Loom is the product identity -- users shouldn't see Pi internals
+  // unless they pass --verbose. The changelog draws from pi-coding-agent's own
+  // CHANGELOG.md and is gated on lastChangelogVersion; pinning that to Pi's
+  // current version means getNewEntries() never finds anything newer to show.
+  if (!hasArg("--verbose")) {
+    const piSettingsPath = join(agentDir, "settings.json");
+    try {
+      let piSettings = {};
+      if (existsSync(piSettingsPath)) {
+        piSettings = JSON.parse(readFileSync(piSettingsPath, "utf-8"));
+      }
+      let changed = false;
+      if (!piSettings.quietStartup) {
+        piSettings.quietStartup = true;
+        changed = true;
+      }
+      const piVersion = resolvePiVersion();
+      if (piVersion && piSettings.lastChangelogVersion !== piVersion) {
+        piSettings.lastChangelogVersion = piVersion;
+        changed = true;
+      }
+      if (changed) {
+        mkdirSync(dirname(piSettingsPath), { recursive: true });
+        writeFileSync(piSettingsPath, JSON.stringify(piSettings, null, 2));
+      }
+    } catch {}
+  }
+
+  // Refresh the update-check cache in a fully detached child so the network call
+  // never delays startup, holds the TUI, or is killed mid-write. The notice the
+  // user sees this run comes from the cache; this updates it for next run.
+  if (process.env.LOOM_SHELL_KIND !== "orbit" && process.env.LOOM_NO_UPDATE_CHECK !== "1") {
+    try {
+      const refresh = spawn(process.execPath, [updateCheckScript, "--refresh"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      refresh.unref();
+    } catch {}
+  }
+
+  main(args);
+}
