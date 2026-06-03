@@ -136,6 +136,7 @@ export interface OrbitAPI {
             id: string;
             label: string;
             pricing: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+            contextWindow?: number;
           }>
         >;
       }
