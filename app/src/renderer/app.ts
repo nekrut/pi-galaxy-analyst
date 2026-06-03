@@ -91,10 +91,10 @@ let streaming = false;
 let PRICING: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }> =
   {
     // Anthropic
-    "claude-opus-4-8": { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-    "claude-opus-4-7": { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-    "claude-opus-4-6": { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-    "claude-opus-4-5": { in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+    "claude-opus-4-8": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    "claude-opus-4-7": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    "claude-opus-4-6": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    "claude-opus-4-5": { in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
     "claude-sonnet-4-6": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
     "claude-sonnet-4-5": { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
     "claude-haiku-4-5": { in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
@@ -2617,13 +2617,13 @@ interface ModelChoice {
 }
 let MODELS_BY_PROVIDER: Record<string, ModelChoice[]> = {
   anthropic: [
-    { id: "claude-opus-4-8", label: "Opus 4.8 — $15/$75 (most capable)" },
+    { id: "claude-opus-4-8", label: "Opus 4.8 — $5/$25 (most capable)" },
     { id: "claude-sonnet-4-6", label: "Sonnet 4.6 — $3/$15 (recommended)" },
     { id: "claude-haiku-4-5", label: "Haiku 4.5 — $1/$5 (cheapest)" },
-    { id: "claude-opus-4-7", label: "Opus 4.7 — $15/$75" },
-    { id: "claude-opus-4-6", label: "Opus 4.6 — $15/$75" },
+    { id: "claude-opus-4-7", label: "Opus 4.7 — $5/$25" },
+    { id: "claude-opus-4-6", label: "Opus 4.6 — $5/$25" },
     { id: "claude-sonnet-4-5", label: "Sonnet 4.5 — $3/$15" },
-    { id: "claude-opus-4-5", label: "Opus 4.5 — $15/$75" },
+    { id: "claude-opus-4-5", label: "Opus 4.5 — $5/$25" },
   ],
   openai: [
     { id: "gpt-4o-mini", label: "GPT-4o mini — $0.15/$0.60 (cheapest)" },
