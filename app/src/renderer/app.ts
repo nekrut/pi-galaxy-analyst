@@ -76,14 +76,7 @@ async function openFileFromTree(relPath: string): Promise<void> {
     chat.addErrorMessage(`Failed to open ${relPath}${sizeHint}: ${res.error}`);
     return;
   }
-  // The viewer only renders head excerpts; a tail preview is a feedback-only
-  // concept and never reaches this path, so drop it defensively.
-  const proceed = fileViewer.open(
-    relPath,
-    res.bytes,
-    res.size,
-    res.preview?.kind === "head" ? res.preview : undefined,
-  );
+  const proceed = fileViewer.open(relPath, res.bytes, res.size, res.preview);
   if (proceed) {
     artifacts.showFileTab();
     setArtifactCollapsed(false);

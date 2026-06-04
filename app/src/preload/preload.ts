@@ -65,10 +65,8 @@ export interface OrbitAPI {
         ok: true;
         size: number;
         bytes: Uint8Array;
-        // Set when bytes is a head- or tail-only excerpt of a file too large for full read.
-        preview?:
-          | { kind: "head"; lineCount: number; byteBudgetHit: boolean }
-          | { kind: "tail"; lineCount: number; byteBudgetHit: boolean };
+        // Set when bytes is a head-only excerpt of a file too large for full read.
+        preview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean };
       }
     | { ok: false; error: string; size?: number }
   >;

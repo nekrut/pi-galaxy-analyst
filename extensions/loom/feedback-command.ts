@@ -1,13 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  submitFeedback,
-  buildBrainSysinfo,
-  appendToOutbox,
-  readLoomVersion,
-} from "./feedback.js";
+import { submitFeedback, buildBrainSysinfo, appendToOutbox, readLoomVersion } from "./feedback.js";
 import { getRecentActivityEvents } from "./activity.js";
 import { loadConfig } from "./config.js";
-import { SCHEMA_VERSION, formatActivityTail, capFeedbackPayload } from "../../shared/feedback-contract.js";
+import {
+  SCHEMA_VERSION,
+  formatActivityTail,
+  capFeedbackPayload,
+} from "../../shared/feedback-contract.js";
 import type { FeedbackPayload } from "../../shared/feedback-contract.js";
 
 /**

@@ -291,18 +291,12 @@ export function registerFilesIpc(getCwd: () => string): void {
           if (offset > 0 && lines.length > 1) {
             lines.shift();
           }
-          const kept = lines.slice(-200);
-          const previewText = kept.join("\n");
           return {
             ok: true,
             size: stat.size,
-            bytes: Buffer.from(previewText, "utf-8"),
-            preview: {
-              kind: "tail" as const,
-              // Describe the bytes actually returned, not the raw window.
-              lineCount: kept.length,
-              byteBudgetHit: stat.size > PREVIEW_BYTE_BUDGET,
-            },
+            // No preview metadata on the tail path: the only caller (the feedback
+            // payload builder) reads bytes + size and ignores it.
+            bytes: Buffer.from(lines.slice(-200).join("\n"), "utf-8"),
           };
         } finally {
           await fd.close();
