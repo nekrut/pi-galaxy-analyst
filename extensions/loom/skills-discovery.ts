@@ -106,19 +106,22 @@ export async function fetchSkillFile(
   repo: ConfiguredSkillRepo,
   cleanPath: string,
   signal?: AbortSignal,
+  force = false,
 ): Promise<FetchSkillResult> {
   const rawBase = githubRawBase(repo.url, repo.branch);
   if (!rawBase) return { ok: false, error: `Repo URL "${repo.url}" is not a GitHub repo URL.` };
 
   const cachePath = path.join(skillsCacheDir(repo), cleanPath);
   const ttlMs = cleanPath.endsWith("SKILL.md") ? CATALOG_TTL_MS : 24 * 60 * 60 * 1000;
-  try {
-    const stat = fs.statSync(cachePath);
-    if (Date.now() - stat.mtimeMs < ttlMs) {
-      return { ok: true, text: fs.readFileSync(cachePath, "utf-8"), cached: true };
+  if (!force) {
+    try {
+      const stat = fs.statSync(cachePath);
+      if (Date.now() - stat.mtimeMs < ttlMs) {
+        return { ok: true, text: fs.readFileSync(cachePath, "utf-8"), cached: true };
+      }
+    } catch {
+      // cache miss -- fall through to fetch
     }
-  } catch {
-    // cache miss -- fall through to fetch
   }
 
   let response: Response;
@@ -187,11 +190,12 @@ export async function treeWalkSkillPaths(
 export async function discoverCatalog(
   repo: ConfiguredSkillRepo,
   signal?: AbortSignal,
+  force = false,
 ): Promise<SkillEntry[]> {
   const paths = await treeWalkSkillPaths(repo, signal);
   const entries: SkillEntry[] = [];
   for (const p of paths) {
-    const res = await fetchSkillFile(repo, p, signal);
+    const res = await fetchSkillFile(repo, p, signal, force);
     if (!res.ok) continue; // skip files we can't fetch; keep the rest
     const fm = parseFrontmatter(res.text);
     entries.push({
@@ -245,7 +249,7 @@ export async function refreshCatalog(
 ): Promise<SkillEntry[]> {
   const existing = readCatalog(repo);
   if (!opts?.force && existing && !isCatalogStale(existing)) return existing.skills;
-  const skills = await discoverCatalog(repo, opts?.signal);
+  const skills = await discoverCatalog(repo, opts?.signal, opts?.force);
   writeCatalog(repo, skills);
   return skills;
 }

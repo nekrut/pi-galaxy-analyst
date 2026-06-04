@@ -122,6 +122,16 @@ describe("fetchSkillFile", () => {
     expect(res).toEqual({ ok: false, status: 404, error: "HTTP 404" });
   });
 
+  it("force re-fetches even when the cache is still fresh", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("v1", { status: 200 })));
+    await fetchSkillFile(REPO, "y/SKILL.md");
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(new Response("v2", { status: 200 }));
+    // without force this would be a fresh cache hit; with force it must re-fetch
+    const res = await fetchSkillFile(REPO, "y/SKILL.md", undefined, true);
+    expect(res).toEqual({ ok: true, text: "v2", cached: false });
+  });
+
   it("expires a SKILL.md cache entry after the 1h catalog TTL", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("v1", { status: 200 })));
     await fetchSkillFile(REPO, "x/SKILL.md");

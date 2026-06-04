@@ -22,7 +22,7 @@ import {
   type InvocationYaml,
 } from "./notebook-writer";
 import { getGalaxyConfig, galaxyGet, type GalaxyInvocationResponse } from "./galaxy-api";
-import { type ConfiguredSkillRepo, listEnabledSkillRepos, findSkillRepo } from "./skills";
+import { listEnabledSkillRepos, findSkillRepo } from "./skills";
 import { fetchSkillFile, githubRawBase } from "./skills-discovery";
 import { parse as parseHtml } from "node-html-parser";
 
