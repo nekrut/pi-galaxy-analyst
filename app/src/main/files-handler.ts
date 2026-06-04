@@ -261,12 +261,41 @@ export function registerFilesIpc(getCwd: () => string): void {
     }
   });
 
-  ipcMain.handle("files:read", async (_e, relPath: string) => {
+  ipcMain.handle("files:read", async (_e, relPath: string, opts?: { tail?: boolean }) => {
     const cwd = getCwd();
     try {
       const abs = resolveWithin(cwd, relPath);
       const stat = await fsp.stat(abs);
       if (!stat.isFile()) return { ok: false, error: "Not a regular file" };
+
+      // Tail preview requested: bypass full read and read from the end.
+      if (opts?.tail) {
+        const readSize = Math.min(stat.size, PREVIEW_BYTE_BUDGET);
+        const offset = stat.size - readSize;
+        const fd = await fsp.open(abs, "r");
+        try {
+          const tailBuf = Buffer.alloc(readSize);
+          const { bytesRead } = await fd.read(tailBuf, 0, readSize, offset);
+          const tail = tailBuf.subarray(0, bytesRead).toString("utf-8");
+          const lines = tail.split("\n");
+          if (offset > 0 && lines.length > 1) {
+            lines.shift();
+          }
+          const previewText = lines.slice(-200).join("\n");
+          return {
+            ok: true,
+            size: stat.size,
+            bytes: Buffer.from(previewText, "utf-8"),
+            preview: {
+              kind: "tail" as const,
+              lineCount: lines.length,
+              byteBudgetHit: readSize === PREVIEW_BYTE_BUDGET,
+            },
+          };
+        } finally {
+          await fd.close();
+        }
+      }
 
       // Full read up to MAX_READ_BYTES.
       if (stat.size <= MAX_READ_BYTES) {

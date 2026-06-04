@@ -8,7 +8,11 @@ import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
-import { SCHEMA_VERSION, formatActivityTail, capFeedbackPayload } from "../../../shared/feedback-contract.js";
+import {
+  SCHEMA_VERSION,
+  formatActivityTail,
+  capFeedbackPayload,
+} from "../../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../../shared/feedback-contract.js";
 
 declare global {
@@ -72,7 +76,14 @@ async function openFileFromTree(relPath: string): Promise<void> {
     chat.addErrorMessage(`Failed to open ${relPath}${sizeHint}: ${res.error}`);
     return;
   }
-  const proceed = fileViewer.open(relPath, res.bytes, res.size, res.preview);
+  // The viewer only renders head excerpts; a tail preview is a feedback-only
+  // concept and never reaches this path, so drop it defensively.
+  const proceed = fileViewer.open(
+    relPath,
+    res.bytes,
+    res.size,
+    res.preview?.kind === "head" ? res.preview : undefined,
+  );
   if (proceed) {
     artifacts.showFileTab();
     setArtifactCollapsed(false);
@@ -3343,7 +3354,7 @@ async function buildFeedbackPayload(): Promise<FeedbackPayload> {
 
   if (reportIncludeLogs.checked) {
     try {
-      const res = await window.orbit.readFile("activity.jsonl");
+      const res = await window.orbit.readFile("activity.jsonl", { tail: true });
       if (res.ok) {
         const text = new TextDecoder("utf-8").decode(res.bytes);
         const events = text
@@ -3359,7 +3370,12 @@ async function buildFeedbackPayload(): Promise<FeedbackPayload> {
                 payload?: Record<string, unknown>;
               };
             } catch {
-              return { timestamp: "?", kind: "?", source: "", payload: { text: line.slice(0, 80) } };
+              return {
+                timestamp: "?",
+                kind: "?",
+                source: "",
+                payload: { text: line.slice(0, 80) },
+              };
             }
           });
         activityTail = formatActivityTail(events);

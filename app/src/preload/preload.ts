@@ -57,13 +57,18 @@ export interface OrbitAPI {
   listFiles(opts?: {
     includeHidden?: boolean;
   }): Promise<{ ok: true; root: FileNode; cwd: string } | { ok: false; error: string }>;
-  readFile(relPath: string): Promise<
+  readFile(
+    relPath: string,
+    opts?: { tail?: boolean },
+  ): Promise<
     | {
         ok: true;
         size: number;
         bytes: Uint8Array;
-        // Set when bytes is a head-only excerpt of a file too large for full read.
-        preview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean };
+        // Set when bytes is a head- or tail-only excerpt of a file too large for full read.
+        preview?:
+          | { kind: "head"; lineCount: number; byteBudgetHit: boolean }
+          | { kind: "tail"; lineCount: number; byteBudgetHit: boolean };
       }
     | { ok: false; error: string; size?: number }
   >;
@@ -162,7 +167,7 @@ const api: OrbitAPI = {
   getCwd: () => ipcRenderer.invoke("agent:get-cwd"),
   openFile: (filePath) => ipcRenderer.invoke("file:open", filePath),
   listFiles: (opts) => ipcRenderer.invoke("files:list", opts),
-  readFile: (relPath) => ipcRenderer.invoke("files:read", relPath),
+  readFile: (relPath, opts) => ipcRenderer.invoke("files:read", relPath, opts),
   writeFile: (relPath, content) => ipcRenderer.invoke("files:write", relPath, content),
   onFilesChanged: (callback) => {
     const handler = () => callback();
