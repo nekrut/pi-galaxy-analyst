@@ -380,7 +380,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
       // Clear the resolved-catalog file for each configured repo so the restarted
       // agent re-walks on its next start. Leave per-file SKILL.md caches alone.
       for (const r of repos) {
-        if (!r?.name) continue;
+        // Skills code only ever uses filesystem-safe names; validate here too
+        // since this builds a path and deletes files (defense in depth).
+        if (!r?.name || !/^[A-Za-z0-9._-]+$/.test(r.name)) continue;
         try {
           for (const dir of fs.readdirSync(base)) {
             if (dir.startsWith(`${r.name}@`)) {
