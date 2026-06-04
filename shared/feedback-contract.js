@@ -57,21 +57,30 @@ function compactArgs(args) {
 
 // One line per event. Renders the already-redacted/truncated payload fields the
 // upstream activity hooks produced -- this function adds no redaction of its own.
+// Embedded line breaks (LF, CRLF, or bare CR from progress-style output) are
+// flattened to spaces so each event stays exactly one line, which keeps the
+// byte-budget trimmer from orphaning a fragment of a multi-line event.
 function formatActivityEvent(e) {
   const ts = e && e.timestamp ? e.timestamp : "?";
   const p = (e && e.payload) || {};
+  let rawLine;
   switch (e && e.kind) {
     case "user.prompt":
-      return `${ts} user.prompt ${truncate(String(p.text ?? ""), PROMPT_MAX)}`.trimEnd();
+      rawLine = `${ts} user.prompt ${truncate(String(p.text ?? ""), PROMPT_MAX)}`;
+      break;
     case "tool.start":
-      return `${ts} tool.start ${p.toolName ?? "?"} ${compactArgs(p.args)}`.trimEnd();
+      rawLine = `${ts} tool.start ${p.toolName ?? "?"} ${compactArgs(p.args)}`;
+      break;
     case "tool.end": {
       const flag = p.isError ? "✗" : "✓";
-      return `${ts} tool.end ${p.toolName ?? "?"} ${flag} ${truncate(String(p.resultSummary ?? ""), RESULT_MAX)}`.trimEnd();
+      rawLine = `${ts} tool.end ${p.toolName ?? "?"} ${flag} ${truncate(String(p.resultSummary ?? ""), RESULT_MAX)}`;
+      break;
     }
     default:
-      return `${ts} ${(e && e.kind) ?? "?"}${e && e.source ? " (" + e.source + ")" : ""}`;
+      rawLine = `${ts} ${(e && e.kind) ?? "?"}${e && e.source ? " (" + e.source + ")" : ""}`;
+      break;
   }
+  return rawLine.trimEnd().replace(/[\r\n]+/g, " ");
 }
 
 // Drop oldest (leading) lines until the text fits maxBytes; hard-slice a lone
@@ -84,14 +93,23 @@ function trimLinesToBytes(text, maxBytes) {
   }
   let out = lines.join("\n");
   if (byteLen(out) > maxBytes) {
-    // Floor for a lone over-budget line: accumulate whole codepoints up to the
-    // budget so we never split a multibyte char or overshoot maxBytes.
-    let acc = "";
-    for (const ch of out) {
-      if (byteLen(acc + ch) > maxBytes) break;
-      acc += ch;
+    // Binary search for the maximum prefix of 'out' that fits in maxBytes
+    // using character offsets to avoid splitting Unicode surrogate pairs.
+    const arr = Array.from(out);
+    let low = 0;
+    let high = arr.length;
+    let best = "";
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const candidate = arr.slice(0, mid).join("");
+      if (byteLen(candidate) <= maxBytes) {
+        best = candidate;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
     }
-    out = acc;
+    out = best;
   }
   return out;
 }

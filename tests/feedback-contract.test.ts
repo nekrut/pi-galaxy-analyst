@@ -57,10 +57,18 @@ describe("feedback contract", () => {
 describe("formatActivityTail", () => {
   it("renders tool name, redacted args, and result summary with a status flag", () => {
     const out = formatActivityTail([
-      { timestamp: "t1", kind: "tool.start", source: "agent",
-        payload: { toolName: "bash", args: { command: "ls" } } },
-      { timestamp: "t2", kind: "tool.end", source: "agent",
-        payload: { toolName: "bash", isError: false, resultSummary: "ok" } },
+      {
+        timestamp: "t1",
+        kind: "tool.start",
+        source: "agent",
+        payload: { toolName: "bash", args: { command: "ls" } },
+      },
+      {
+        timestamp: "t2",
+        kind: "tool.end",
+        source: "agent",
+        payload: { toolName: "bash", isError: false, resultSummary: "ok" },
+      },
     ]);
     expect(out).toContain("t1 tool.start bash");
     expect(out).toContain('args={"command":"ls"}');
@@ -69,8 +77,16 @@ describe("formatActivityTail", () => {
 
   it("flags errored tools with ✗ and passes the summary through verbatim", () => {
     const out = formatActivityTail([
-      { timestamp: "t", kind: "tool.end", source: "agent",
-        payload: { toolName: "galaxy_invoke_workflow", isError: true, resultSummary: "ERROR: bad adapter" } },
+      {
+        timestamp: "t",
+        kind: "tool.end",
+        source: "agent",
+        payload: {
+          toolName: "galaxy_invoke_workflow",
+          isError: true,
+          resultSummary: "ERROR: bad adapter",
+        },
+      },
     ]);
     expect(out).toBe("t tool.end galaxy_invoke_workflow ✗ ERROR: bad adapter");
   });
@@ -86,12 +102,14 @@ describe("formatActivityTail", () => {
 
   it("trims oldest events to fit the byte budget, keeping the newest", () => {
     const events = Array.from({ length: 200 }, (_, i) => ({
-      timestamp: `t${i}`, kind: "tool.end", source: "agent",
+      timestamp: `t${i}`,
+      kind: "tool.end",
+      source: "agent",
       payload: { toolName: "bash", isError: false, resultSummary: "x".repeat(400) },
     }));
     const out = formatActivityTail(events, { maxBytes: 4096 });
     expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(4096);
-    expect(out).toContain("t199 ");   // newest kept
+    expect(out).toContain("t199 "); // newest kept
     expect(out.startsWith("t0 ")).toBe(false); // oldest dropped
   });
 
@@ -113,6 +131,60 @@ describe("formatActivityTail", () => {
   it("returns an empty string for no events", () => {
     expect(formatActivityTail([])).toBe("");
   });
+
+  it("flattens embedded newlines so each event stays exactly one line", () => {
+    const out = formatActivityTail([
+      {
+        timestamp: "t1",
+        kind: "user.prompt",
+        source: "user",
+        payload: { text: "first line\nsecond line" },
+      },
+      {
+        timestamp: "t2",
+        kind: "tool.end",
+        source: "agent",
+        payload: {
+          toolName: "bash",
+          isError: true,
+          resultSummary: "Error: boom\nstack frame",
+        },
+      },
+    ]);
+    expect(out).toContain("t1 user.prompt first line second line");
+    expect(out).toContain("t2 tool.end bash ✗ Error: boom stack frame");
+    expect(out.split("\n").length).toBe(2);
+  });
+
+  it("collapses bare carriage returns and CRLF runs, not just LF", () => {
+    const out = formatActivityTail([
+      {
+        timestamp: "t",
+        kind: "user.prompt",
+        source: "user",
+        payload: { text: "downloading\r99%\r\ndone" },
+      },
+    ]);
+    expect(out).toBe("t user.prompt downloading 99% done");
+    expect(out).not.toMatch(/[\r\n]/);
+  });
+
+  it("handles multibyte characters during hard-slicing without splitting unicode code points", () => {
+    const emoji = "🐻❄️🔥🌲";
+    const out = formatActivityTail(
+      [
+        {
+          timestamp: "t",
+          kind: "user.prompt",
+          source: "user",
+          payload: { text: emoji.repeat(50) },
+        },
+      ],
+      { maxBytes: 50 },
+    );
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(50);
+    expect(out.endsWith("\uFFFD")).toBe(false);
+  });
 });
 
 describe("capFeedbackPayload", () => {
@@ -128,7 +200,7 @@ describe("capFeedbackPayload", () => {
     const p = { ...base, activityTail: big, shellTail: "keep-me" };
     const capped = capFeedbackPayload(p, { maxTotalBytes: 8000 });
     expect(new TextEncoder().encode(JSON.stringify(capped)).length).toBeLessThanOrEqual(8000);
-    expect(capped.shellTail).toBe("keep-me");                 // shell untouched
+    expect(capped.shellTail).toBe("keep-me"); // shell untouched
     expect(capped.activityTail.length).toBeLessThan(big.length); // activity sacrificed first
   });
 });
