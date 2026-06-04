@@ -2,9 +2,9 @@ name: Make Orbit installer
 description: >-
   Build a platform-specific Orbit installer with electron-forge -- including
   optional macOS Developer ID signing + notarization -- and upload it as a
-  workflow artifact named Orbit-<platform>-<arch>. Shared by the release
-  workflow's required-platform matrix and its best-effort Intel mac job so the
-  signing setup can never drift between the two macOS builds.
+  workflow artifact named Orbit-<platform>-<arch>. Shared by every leg of the
+  release workflow's build matrix so the signing setup can never drift between
+  the two macOS builds.
 
 inputs:
   platform:
