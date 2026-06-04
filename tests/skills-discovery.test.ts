@@ -6,10 +6,10 @@ import {
   parseFrontmatter,
   selectSkills,
   type SkillEntry,
-} from "../extensions/loom/skills-discovery";
-import {
   fetchSkillFile,
   githubRawBase,
+  treeWalkSkillPaths,
+  discoverCatalog,
   type ConfiguredSkillRepo,
 } from "../extensions/loom/skills-discovery";
 
@@ -129,5 +129,97 @@ describe("fetchSkillFile", () => {
     );
     const res = await fetchSkillFile(REPO, "x/SKILL.md");
     expect(res).toEqual({ ok: true, text: "v2", cached: false });
+  });
+});
+
+function mockGithub(tree: Array<{ path: string; type: string }>, files: Record<string, string>) {
+  return vi.fn(async (url: string) => {
+    if (url.startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ tree }), { status: 200 });
+    }
+    const m = /\/main\/(.+)$/.exec(url);
+    const key = m?.[1] ?? "";
+    if (key in files) return new Response(files[key], { status: 200 });
+    return new Response("not found", { status: 404 });
+  });
+}
+
+describe("treeWalkSkillPaths", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns only SKILL.md blob paths, sorted", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockGithub(
+        [
+          { path: "collection-manipulation/SKILL.md", type: "blob" },
+          { path: "collection-manipulation/references/tools.md", type: "blob" },
+          { path: "galaxy-integration", type: "tree" },
+          { path: "galaxy-integration/mcp-reference/SKILL.md", type: "blob" },
+        ],
+        {},
+      ),
+    );
+    const paths = await treeWalkSkillPaths(REPO);
+    expect(paths).toEqual([
+      "collection-manipulation/SKILL.md",
+      "galaxy-integration/mcp-reference/SKILL.md",
+    ]);
+  });
+
+  it("throws on a non-200 from the tree API (so callers keep last-known-good)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("rate limited", { status: 403 })),
+    );
+    await expect(treeWalkSkillPaths(REPO)).rejects.toThrow(/403/);
+  });
+});
+
+describe("discoverCatalog", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-disc-"));
+    vi.spyOn(os, "homedir").mockReturnValue(tmp);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("walks, fetches, and parses each SKILL.md into entries", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockGithub(
+        [
+          { path: "collection-manipulation/SKILL.md", type: "blob" },
+          { path: "galaxy-integration/mcp-reference/SKILL.md", type: "blob" },
+        ],
+        {
+          "collection-manipulation/SKILL.md":
+            "---\nname: galaxy-transform-collection\ndescription: transform collections\nsurfaces: [loom]\n---\nbody",
+          "galaxy-integration/mcp-reference/SKILL.md":
+            "---\nname: galaxy-mcp-reference\ndescription: mcp ref\n---\nbody",
+        },
+      ),
+    );
+    const entries = await discoverCatalog(REPO);
+    expect(entries).toEqual([
+      {
+        path: "collection-manipulation/SKILL.md",
+        name: "galaxy-transform-collection",
+        description: "transform collections",
+        when_to_use: undefined,
+        surfaces: ["loom"],
+      },
+      {
+        path: "galaxy-integration/mcp-reference/SKILL.md",
+        name: "galaxy-mcp-reference",
+        description: "mcp ref",
+        when_to_use: undefined,
+        surfaces: [],
+      },
+    ]);
   });
 });

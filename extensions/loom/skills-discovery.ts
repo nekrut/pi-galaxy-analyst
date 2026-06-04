@@ -141,3 +141,70 @@ export async function fetchSkillFile(
   }
   return { ok: true, text, cached: false };
 }
+
+function githubOwnerRepo(repoUrl: string): { owner: string; repo: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(repoUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== "github.com") return null;
+  const segs = parsed.pathname.replace(/^\/+|\/+$/g, "").split("/");
+  if (segs.length < 2 || !segs[0] || !segs[1]) return null;
+  return { owner: segs[0], repo: segs[1].replace(/\.git$/i, "") };
+}
+
+/** List every SKILL.md path in a repo via the GitHub trees API. Throws on HTTP failure. */
+export async function treeWalkSkillPaths(
+  repo: ConfiguredSkillRepo,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const slug = githubOwnerRepo(repo.url);
+  if (!slug) return [];
+  const api =
+    `https://api.github.com/repos/${slug.owner}/${slug.repo}/git/trees/` +
+    `${encodeURIComponent(repo.branch)}?recursive=1`;
+  const res = await fetch(api, {
+    signal,
+    headers: { "User-Agent": "loom-skills", Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `tree-walk ${slug.owner}/${slug.repo}@${repo.branch} failed: HTTP ${res.status}`,
+    );
+  }
+  const json = (await res.json()) as { tree?: Array<{ path?: string; type?: string }> };
+  const tree = Array.isArray(json.tree) ? json.tree : [];
+  return tree
+    .filter(
+      (n) =>
+        n.type === "blob" &&
+        typeof n.path === "string" &&
+        (n.path === "SKILL.md" || n.path.endsWith("/SKILL.md")),
+    )
+    .map((n) => n.path as string)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/** Walk a repo, fetch+parse each SKILL.md, and return sorted skill entries. */
+export async function discoverCatalog(
+  repo: ConfiguredSkillRepo,
+  signal?: AbortSignal,
+): Promise<SkillEntry[]> {
+  const paths = await treeWalkSkillPaths(repo, signal);
+  const entries: SkillEntry[] = [];
+  for (const p of paths) {
+    const res = await fetchSkillFile(repo, p, signal);
+    if (!res.ok) continue; // skip files we can't fetch; keep the rest
+    const fm = parseFrontmatter(res.text);
+    entries.push({
+      path: p,
+      name: fm.name ?? p,
+      description: fm.description ?? "",
+      when_to_use: fm.when_to_use,
+      surfaces: fm.surfaces ?? [],
+    });
+  }
+  return entries.sort((a, b) => a.path.localeCompare(b.path));
+}
