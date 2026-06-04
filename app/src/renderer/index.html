@@ -795,9 +795,10 @@
               name (no API key), Galaxy connection state (no credentials).
             </p>
             <p>
-              <b>Logs:</b> last 15 events of <code>activity.jsonl</code> (summarized to one line
-              each, no raw payloads) and the last ~80 lines of the in-app shell stream. These can
-              include filenames, tool arguments, and command output.
+              <b>Logs:</b> last 60 events of <code>activity.jsonl</code> (one line each: tool name,
+              arguments, and a truncated result -- credentials and API keys redacted) and the last
+              ~200 lines of the in-app shell stream. These can include filenames, tool arguments,
+              and command output.
             </p>
             <p>
               Both are on by default for the beta so we get useful diagnostics. Feedback goes to

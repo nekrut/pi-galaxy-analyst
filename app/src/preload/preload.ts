@@ -57,7 +57,10 @@ export interface OrbitAPI {
   listFiles(opts?: {
     includeHidden?: boolean;
   }): Promise<{ ok: true; root: FileNode; cwd: string } | { ok: false; error: string }>;
-  readFile(relPath: string): Promise<
+  readFile(
+    relPath: string,
+    opts?: { tail?: boolean },
+  ): Promise<
     | {
         ok: true;
         size: number;
@@ -163,7 +166,7 @@ const api: OrbitAPI = {
   getCwd: () => ipcRenderer.invoke("agent:get-cwd"),
   openFile: (filePath) => ipcRenderer.invoke("file:open", filePath),
   listFiles: (opts) => ipcRenderer.invoke("files:list", opts),
-  readFile: (relPath) => ipcRenderer.invoke("files:read", relPath),
+  readFile: (relPath, opts) => ipcRenderer.invoke("files:read", relPath, opts),
   writeFile: (relPath, content) => ipcRenderer.invoke("files:write", relPath, content),
   onFilesChanged: (callback) => {
     const handler = () => callback();

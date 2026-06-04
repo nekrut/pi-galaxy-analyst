@@ -1,17 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { submitFeedback, summarizeActivityTail } from "../extensions/loom/feedback.js";
+import { submitFeedback } from "../extensions/loom/feedback.js";
 
 describe("brain submitFeedback", () => {
   beforeEach(() => vi.restoreAllMocks());
-
-  it("summarizes activity events to timestamp+kind+source", () => {
-    const out = summarizeActivityTail([
-      { timestamp: "t1", kind: "tool_call", source: "galaxy", payload: { secret: "x" } },
-      { timestamp: "t2", kind: "message", source: "user", payload: {} },
-    ]);
-    expect(out).toBe("t1 tool_call (galaxy)\nt2 message (user)");
-    expect(out).not.toContain("secret");
-  });
 
   it("POSTs the payload and returns ok+id", async () => {
     const fetchMock = vi.fn().mockResolvedValue({

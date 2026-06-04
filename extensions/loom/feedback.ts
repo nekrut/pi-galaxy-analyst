@@ -5,7 +5,6 @@ import {
   SCHEMA_VERSION,
 } from "../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../shared/feedback-contract.js";
-import type { ActivityEvent } from "./activity.js";
 import { loadConfig, getConfigDir } from "./config.js";
 import { loadProfiles } from "./profiles.js";
 import { appendFileSync, readFileSync } from "fs";
@@ -39,16 +38,6 @@ export function readLoomVersion(): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/**
- * Summarize an activity tail to `timestamp kind (source)` lines only. Never ship
- * raw event payloads -- they carry tool I/O (paths, prompts, dataset names).
- */
-export function summarizeActivityTail(events: ActivityEvent[]): string {
-  return events
-    .map((e) => `${e.timestamp} ${e.kind}${e.source ? " (" + e.source + ")" : ""}`)
-    .join("\n");
 }
 
 /** Brain-side sysinfo. No Electron here (the brain is a Node child), no secrets. */
