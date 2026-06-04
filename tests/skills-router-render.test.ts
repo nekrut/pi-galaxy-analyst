@@ -39,4 +39,22 @@ describe("renderSkillsSection", () => {
   it("returns empty string when there are no repos", () => {
     expect(renderSkillsSection([], new Map())).toBe("");
   });
+
+  it("omits the repo arg for the first repo and includes it for others", () => {
+    const twoRepos = [
+      {
+        name: "galaxy-skills",
+        url: "https://github.com/galaxyproject/galaxy-skills",
+        branch: "main",
+      },
+      { name: "extra", url: "https://github.com/galaxyproject/extra", branch: "main" },
+    ];
+    const map = new Map<string, SkillEntry[]>([
+      ["galaxy-skills", [{ path: "a/SKILL.md", name: "a", description: "d", surfaces: ["loom"] }]],
+      ["extra", [{ path: "b/SKILL.md", name: "b", description: "d", surfaces: ["loom"] }]],
+    ]);
+    const out = renderSkillsSection(twoRepos, map);
+    expect(out).toContain('skills_fetch({ path: "a/SKILL.md" })');
+    expect(out).toContain('skills_fetch({ repo: "extra", path: "b/SKILL.md" })');
+  });
 });

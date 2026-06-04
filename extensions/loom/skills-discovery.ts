@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { listEnabledSkillRepos } from "./skills";
+import { listEnabledSkillRepos, type ConfiguredSkillRepo } from "./skills";
+export type { ConfiguredSkillRepo };
 
 /** The product-surface id Loom claims. A skill opts in with `surfaces: [loom]`. */
 export const SURFACE_ID = "loom";
@@ -60,12 +61,6 @@ export function parseFrontmatter(text: string): SkillFrontmatter {
 export function selectSkills(entries: SkillEntry[], surface: string = SURFACE_ID): SkillEntry[] {
   const tagged = entries.filter((e) => e.surfaces.includes(surface));
   return tagged.length ? tagged : entries;
-}
-
-export interface ConfiguredSkillRepo {
-  name: string;
-  url: string;
-  branch: string;
 }
 
 /** Short stable tag derived from `${url}@${branch}` for the skills-cache directory. */

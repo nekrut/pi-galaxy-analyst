@@ -814,6 +814,11 @@ function buildSkillsContext(): string {
     const entries = readCatalog(r)?.skills ?? BUILTIN_CATALOG[r.name] ?? [];
     entriesByRepo.set(r.name, selectSkills(entries));
   }
+  // Don't emit a contentless skills section. If nothing resolved (e.g. a
+  // user-added repo whose catalog hasn't been fetched yet, no builtin), stay
+  // silent until the background refresh populates it next session.
+  const hasAny = [...entriesByRepo.values()].some((e) => e.length > 0);
+  if (!hasAny) return "";
   return renderSkillsSection(repos, entriesByRepo);
 }
 
