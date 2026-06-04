@@ -269,6 +269,14 @@ export function registerFilesIpc(getCwd: () => string): void {
       if (!stat.isFile()) return { ok: false, error: "Not a regular file" };
 
       // Tail preview requested: bypass full read and read from the end.
+      //
+      // Known beta limitation: a single physical line longer than the budget
+      // (activity.jsonl persists uncapped user-prompt text and tool args -- only
+      // result summaries are capped at the source) can't be recovered whole. When
+      // the newest line exceeds the budget we drop it as a partial first line, so
+      // that event is omitted from the preview rather than shipped truncated. The
+      // feedback tail degrades gracefully (missing event, never corrupt bytes); a
+      // real fix is a source-side cap in activity-hooks, tracked separately.
       if (opts?.tail) {
         const readSize = Math.min(stat.size, PREVIEW_BYTE_BUDGET);
         const offset = stat.size - readSize;
@@ -278,18 +286,22 @@ export function registerFilesIpc(getCwd: () => string): void {
           const { bytesRead } = await fd.read(tailBuf, 0, readSize, offset);
           const tail = tailBuf.subarray(0, bytesRead).toString("utf-8");
           const lines = tail.split("\n");
+          // A non-zero offset means we started mid-file, so the first element is a
+          // partial line (or a multibyte boundary fragment) -- drop it.
           if (offset > 0 && lines.length > 1) {
             lines.shift();
           }
-          const previewText = lines.slice(-200).join("\n");
+          const kept = lines.slice(-200);
+          const previewText = kept.join("\n");
           return {
             ok: true,
             size: stat.size,
             bytes: Buffer.from(previewText, "utf-8"),
             preview: {
               kind: "tail" as const,
-              lineCount: lines.length,
-              byteBudgetHit: readSize === PREVIEW_BYTE_BUDGET,
+              // Describe the bytes actually returned, not the raw window.
+              lineCount: kept.length,
+              byteBudgetHit: stat.size > PREVIEW_BYTE_BUDGET,
             },
           };
         } finally {
