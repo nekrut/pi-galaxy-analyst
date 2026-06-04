@@ -17,11 +17,18 @@ export function registerSkillsCommand(pi: ExtensionAPI): void {
           ctx.ui.notify(`Skills refreshed (${summary}). Takes effect next session.`, "info");
           return;
         }
-        // status (default)
-        const summary = catalogSummary()
-          .map((r) => `${r.repo}: ${r.count} skill(s) cached`)
-          .join("\n");
-        ctx.ui.notify(summary || "No skill repos enabled.", "info");
+        if (sub === "status") {
+          const summary = catalogSummary()
+            .map((r) =>
+              r.cached
+                ? `${r.repo}: ${r.count} skill(s) cached`
+                : `${r.repo}: not cached yet (run /skills refresh to fetch the latest)`,
+            )
+            .join("\n");
+          ctx.ui.notify(summary || "No skill repos enabled.", "info");
+          return;
+        }
+        ctx.ui.notify(`Unknown /skills subcommand: ${sub}. Use status or refresh.`, "warning");
       } catch (err) {
         ctx.ui.notify(
           `/skills ${sub}: ${err instanceof Error ? err.message : String(err)}`,

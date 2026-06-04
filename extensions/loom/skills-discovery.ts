@@ -255,6 +255,7 @@ export interface CatalogRefreshResult {
   count: number;
   ok: boolean;
   error?: string;
+  cached?: boolean;
 }
 
 /** Force-refresh every enabled repo (the manual path). Per-repo errors are reported, not thrown. */
@@ -280,7 +281,7 @@ export async function refreshAllCatalogs(): Promise<CatalogRefreshResult[]> {
 export function catalogSummary(): CatalogRefreshResult[] {
   return listEnabledSkillRepos().map((repo) => {
     const cat = readCatalog(repo);
-    return { repo: repo.name, count: cat?.skills.length ?? 0, ok: true };
+    return { repo: repo.name, count: cat?.skills.length ?? 0, ok: true, cached: cat !== null };
   });
 }
 

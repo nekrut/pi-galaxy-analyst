@@ -355,4 +355,16 @@ describe("refreshAllCatalogs", () => {
     const summary = await refreshAllCatalogs();
     expect(summary).toEqual([{ repo: "galaxy-skills", count: 1, ok: true }]);
   });
+
+  it("reports ok:false when a repo's tree-walk fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("rate limited", { status: 403 })),
+    );
+    const summary = await refreshAllCatalogs();
+    expect(summary).toHaveLength(1);
+    expect(summary[0].repo).toBe("galaxy-skills");
+    expect(summary[0].ok).toBe(false);
+    expect(summary[0].error).toMatch(/403/);
+  });
 });
