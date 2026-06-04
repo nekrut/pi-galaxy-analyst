@@ -1,8 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
 import {
   parseFrontmatter,
   selectSkills,
   type SkillEntry,
+} from "../extensions/loom/skills-discovery";
+import {
+  fetchSkillFile,
+  githubRawBase,
+  type ConfiguredSkillRepo,
 } from "../extensions/loom/skills-discovery";
 
 describe("parseFrontmatter", () => {
@@ -58,5 +66,68 @@ describe("selectSkills (tag-or-all)", () => {
   it("returns all skills when none are tagged", () => {
     const entries = [mk("a", []), mk("b", [])];
     expect(selectSkills(entries).map((e) => e.path)).toEqual(["a", "b"]);
+  });
+});
+
+const REPO: ConfiguredSkillRepo = {
+  name: "galaxy-skills",
+  url: "https://github.com/galaxyproject/galaxy-skills",
+  branch: "main",
+};
+
+describe("githubRawBase", () => {
+  it("maps a github repo url to its raw base", () => {
+    expect(githubRawBase(REPO.url, "main")).toBe(
+      "https://raw.githubusercontent.com/galaxyproject/galaxy-skills/main",
+    );
+  });
+  it("returns null for non-github urls", () => {
+    expect(githubRawBase("https://example.com/x/y", "main")).toBeNull();
+  });
+});
+
+describe("fetchSkillFile", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-skills-"));
+    vi.spyOn(os, "homedir").mockReturnValue(tmp);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("fetches, writes to cache, and reports cached:false", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("hello skill", { status: 200 })));
+    const res = await fetchSkillFile(REPO, "collection-manipulation/SKILL.md");
+    expect(res).toEqual({ ok: true, text: "hello skill", cached: false });
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockClear();
+    const res2 = await fetchSkillFile(REPO, "collection-manipulation/SKILL.md");
+    expect(res2).toEqual({ ok: true, text: "hello skill", cached: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns ok:false with the status on a non-200", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 404 })));
+    const res = await fetchSkillFile(REPO, "missing/SKILL.md");
+    expect(res).toEqual({ ok: false, status: 404, error: "HTTP 404" });
+  });
+
+  it("expires a SKILL.md cache entry after the 1h catalog TTL", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("v1", { status: 200 })));
+    await fetchSkillFile(REPO, "x/SKILL.md");
+    const cacheFile = fs
+      .readdirSync(path.join(tmp, ".loom", "cache", "skills"))
+      .map((d) => path.join(tmp, ".loom", "cache", "skills", d, "x", "SKILL.md"))
+      .find((p) => fs.existsSync(p))!;
+    const old = Date.now() / 1000 - 2 * 60 * 60;
+    fs.utimesSync(cacheFile, old, old);
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response("v2", { status: 200 }),
+    );
+    const res = await fetchSkillFile(REPO, "x/SKILL.md");
+    expect(res).toEqual({ ok: true, text: "v2", cached: false });
   });
 });
