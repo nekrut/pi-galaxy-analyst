@@ -7,11 +7,14 @@ name: release
 # GitHub Release (promote the draft manually), and publishes the @galaxyproject/loom
 # npm package via OIDC trusted publishing (no token, no 2FA prompt).
 #
-# Critical-path split: `build` covers the platforms whose runner fleets
-# schedule reliably (arm64 mac + linux) and is the only thing `publish` waits
-# on, so the draft Release is never held hostage to runner availability. The
-# Intel mac build runs off to the side in `build-intel` and is attached after
-# the fact by `publish-intel` -- see those jobs for why.
+# All three installer platforms (arm64 mac, Intel mac, linux) build in one
+# matrix that `publish` waits on. The Intel leg used to run decoupled off to the
+# side: GitHub's now-retired macos-13 Intel fleet was small and could sit queued
+# for hours (~19h on the alpha.1 cut), which would have held the draft Release
+# hostage if `publish` depended on it. macos-26-intel schedules reliably, so
+# it's folded back in. If a future Intel runner starts stalling releases again,
+# split it back out into a best-effort job that `publish` doesn't need -- see
+# git history for that shape.
 
 on:
   push:
@@ -29,9 +32,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Required platforms. `publish` needs this job and only this job, so the
-  # release blocks solely on fleets we trust to schedule quickly. Intel mac is
-  # deliberately not here -- see build-intel.
+  # Builds every installer platform; `publish` needs this job and attaches
+  # whatever lands here. fail-fast is off so one platform's failure doesn't
+  # cancel the others mid-build.
   build:
     strategy:
       fail-fast: false
@@ -40,6 +43,14 @@ jobs:
           # macos-latest runners are arm64 (Apple Silicon).
           - os: macos-latest
             arch: arm64
+            platform: darwin
+          # Intel (x64) mac. macos-26-intel is the newest standard Intel runner
+          # (free for public repos) and the longest-lived label there'll be --
+          # macos-13 is already retired, macos-15-intel goes a macOS cycle
+          # sooner, and macos-26 is expected to be the last Intel-capable macOS.
+          # Bump as newer -intel labels appear.
+          - os: macos-26-intel
+            arch: x64
             platform: darwin
           # Linux x64 — produces .deb, .rpm, and .zip. Works natively on
           # Linux and inside WSL2 (with WSLg) on Windows 11.
@@ -62,36 +73,6 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
           arch: ${{ matrix.arch }}
-          macos-certificate-base64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-          macos-certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          apple-api-key-base64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-          apple-api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
-          apple-api-issuer: ${{ secrets.APPLE_API_ISSUER }}
-
-  # Best-effort Intel (x64) mac build, deliberately OUT of publish's `needs`
-  # graph. GitHub's Intel mac fleet is small and shared across the whole org,
-  # so this can sit queued a long time -- on the alpha.1 cut the old macos-13
-  # job sat ~19h before GitHub queue-cancelled it. A queued job blocks `needs`
-  # until it reaches a terminal state, so if publish depended on this a busy-org
-  # day would stall the whole release. Instead it runs alongside `build`;
-  # publish-intel attaches the installer to the already-created draft if/when it
-  # lands, and nothing ever waits on it.
-  #
-  # macos-26-intel is the newest standard Intel runner (free for public repos).
-  # GitHub keeps only the latest two macOS versions: macos-13 already retired,
-  # and macos-15-intel will follow when macOS 27 lands -- macos-26 is also
-  # expected to be the last Intel-capable macOS, so this is the longest-lived
-  # Intel label there'll be. Bump as newer -intel labels appear.
-  build-intel:
-    runs-on: macos-26-intel
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/make-orbit
-        with:
-          platform: darwin
-          arch: x64
           macos-certificate-base64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
           macos-certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -128,35 +109,6 @@ jobs:
             artifacts/**/*.deb
             artifacts/**/*.rpm
           fail_on_unmatched_files: true
-
-  # Attach the best-effort Intel installer to the draft once it exists. needs
-  # `publish` (so the draft is already created -- this never blocks it) and
-  # `build-intel` (the artifact). If build-intel failed or got queue-cancelled
-  # after 24h, `needs` isn't satisfied and this job is simply skipped -- the
-  # release ships with arm64 + linux and no Intel build, rather than waiting.
-  # Uses `gh release upload`, which adds assets without touching the release's
-  # draft/prerelease/notes state; --clobber makes a re-run idempotent.
-  publish-intel:
-    needs: [build-intel, publish]
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: Orbit-darwin-x64
-          path: artifacts
-
-      - name: Attach Intel build to draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mapfile -t files < <(find artifacts -type f \( -name '*.dmg' -o -name '*.zip' \))
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No Intel installer found to attach" >&2
-            exit 1
-          fi
-          printf 'Attaching: %s\n' "${files[@]}"
-          gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber
 
   # Publish the @galaxyproject/loom npm package (the Loom CLI -- not Orbit) via
   # OIDC trusted publishing. No NPM_TOKEN and no 2FA OTP: GitHub mints a
