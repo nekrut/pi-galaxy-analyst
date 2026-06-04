@@ -29,8 +29,9 @@ function packagedExecutablePath(): string {
     return path.join(root, "out", `Orbit-linux-${arch}`, "orbit");
   }
   if (process.platform === "darwin") {
-    // Inner binary name follows forge.config.ts `executableName: "orbit"`
-    // (lowercase), not the .app bundle's display name.
+    // Inner binary name follows forge.config.ts `executableName`, which is the
+    // proper-cased "Orbit" on darwin (the lowercase variant is Linux/Windows
+    // only -- see the comment on executableName for why).
     return path.join(
       root,
       "out",
@@ -38,7 +39,7 @@ function packagedExecutablePath(): string {
       "Orbit.app",
       "Contents",
       "MacOS",
-      "orbit",
+      "Orbit",
     );
   }
   if (process.platform === "win32") {

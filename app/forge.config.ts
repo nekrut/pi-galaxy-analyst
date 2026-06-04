@@ -289,7 +289,15 @@ const macCodesign: Partial<Pick<PackagerOptions, "osxSign" | "osxNotarize">> =
 const config: ForgeConfig = {
   packagerConfig: {
     name: "Orbit",
-    executableName: "orbit",
+    // @electron/packager derives CFBundleDisplayName (the name Finder shows
+    // under the app icon) from executableName, not from `name` above -- so a
+    // lowercase value here makes the macOS app read "orbit" even though the
+    // bundle is Orbit.app. The lowercase binary is only wanted for the Linux
+    // deb/rpm CLI command; macOS has no need for it. Use the proper-cased name
+    // on darwin and keep lowercase elsewhere. Each platform builds on its own
+    // native runner (same assumption the codesign gate below relies on), so
+    // process.platform reflects the target OS family here.
+    executableName: process.platform === "darwin" ? "Orbit" : "orbit",
     icon: "resources/icon",
     appBundleId: "org.galaxyproject.orbit",
     appCategoryType: "public.app-category.developer-tools",
