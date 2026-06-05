@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redactArgs } from "../extensions/loom/activity-hooks";
+import { redactArgs, summarizeResult } from "../extensions/loom/activity-hooks";
 
 describe("redactArgs", () => {
   it("whole-object redacts credential tools", () => {
@@ -59,5 +59,20 @@ describe("redactArgs", () => {
     const out = redactArgs("bash", { ApiKey: "x", AUTHORIZATION: "y" }) as Record<string, unknown>;
     expect(out.ApiKey).toBe("[redacted]");
     expect(out.AUTHORIZATION).toBe("[redacted]");
+  });
+});
+
+describe("summarizeResult", () => {
+  const KEY = "sk-ant-RESULT-SECRET-7777777";
+  it("scrubs known secret VALUES out of a tool result before it is logged", () => {
+    // bash results are not args -- a `cat`-style leak lands in the result text,
+    // which also feeds the on-disk activity log and the /feedback payload.
+    const out = summarizeResult(`{"apiKey":"${KEY}"}`, [KEY]);
+    expect(out).not.toContain(KEY);
+    expect(out).toContain("[redacted]");
+  });
+  it("passes ordinary results through unchanged", () => {
+    expect(summarizeResult("plain output", [KEY])).toBe("plain output");
+    expect(summarizeResult("plain output")).toBe("plain output");
   });
 });
