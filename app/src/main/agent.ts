@@ -8,6 +8,15 @@ import { loadConfig } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
 import { loadSessionHistory, newestSessionFile } from "./session-replay.js";
 import { collectDescendantsOf } from "./proc-monitor.js";
+import { TurnWatchdog } from "./turn-watchdog.js";
+
+/**
+ * How long the brain may stay completely silent mid-turn before Orbit treats the
+ * turn as stalled and recovers the UI (#185). Generous on purpose: tool runs and
+ * UI modals are excluded by the watchdog, so the only window this guards is
+ * "waiting on the model", where multi-minute silence is unambiguously a failure.
+ */
+export const TURN_SILENCE_TIMEOUT_MS = 120_000;
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -214,9 +223,17 @@ export class AgentManager {
   private static readonly MAX_RESTARTS_PER_WINDOW = 3;
   private static readonly RESTART_WINDOW_MS = 60_000;
 
+  // Breaks the "stuck on thinking" hang (#185): fires when a turn goes silent
+  // long enough that the provider call must have failed or stalled.
+  private readonly watchdog: TurnWatchdog;
+
   constructor(window: BrowserWindow, cwd: string) {
     this.window = window;
     this.cwd = cwd;
+    this.watchdog = new TurnWatchdog({
+      timeoutMs: TURN_SILENCE_TIMEOUT_MS,
+      onTimeout: () => this.handleTurnStalled(),
+    });
   }
 
   /** Reset session continuity (e.g. when switching to a new analysis directory). */
@@ -505,6 +522,11 @@ export class AgentManager {
     const json = JSON.stringify(obj);
     log("→ stdin:", json.slice(0, 200));
     this.process.stdin.write(json + "\n");
+    // A prompt (including streamed steer/followUp) starts a turn we must watch
+    // for a silent stall. Other commands (abort, set_model, ...) don't.
+    if (obj.type === "prompt") {
+      this.watchdog.promptSent();
+    }
   }
 
   /**
@@ -576,6 +598,8 @@ export class AgentManager {
     // Process death (clean or otherwise) ends any in-flight turn.
     if (status === "stopped" || status === "error") {
       this.turnActive = false;
+      // The process is gone; never let a pending watchdog fire against it.
+      this.watchdog.stop();
     }
     log("status:", status, message || "");
     // During a silent restart we suppress the transient stopped→running flicker;
@@ -584,6 +608,30 @@ export class AgentManager {
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:status", status, message);
     }
+  }
+
+  /**
+   * The brain went silent mid-turn (#185): a provider call failed or stalled
+   * without emitting a terminal event, so the renderer is pinned on "thinking".
+   * Surface a recoverable error through the existing `error` event path, mark the
+   * turn done, and best-effort tell the brain to abort so its streaming state
+   * clears and the next prompt isn't queued behind a dead turn.
+   */
+  private handleTurnStalled(): void {
+    log("turn stalled: no brain activity for", TURN_SILENCE_TIMEOUT_MS, "ms");
+    this.turnActive = false;
+    if (!this.window.isDestroyed()) {
+      this.window.webContents.send("agent:event", {
+        type: "error",
+        message:
+          "The assistant stopped responding. The request may have failed or " +
+          "been blocked -- please try again.",
+      });
+    }
+    // Best-effort: unstick pi's streaming state so the next prompt runs. If the
+    // brain is wedged on a dead socket this may not land, but the UI is already
+    // recovered either way.
+    this.send({ type: "abort" });
   }
 
   private handleLine(line: string): void {
@@ -600,6 +648,10 @@ export class AgentManager {
     const type = data.type as string;
     const noisy = type === "message_update" || type === "tool_execution_update";
     log("← event:", type, noisy ? "" : JSON.stringify(data).slice(0, 150));
+
+    // Any line from the brain is a sign of life: reset/pause/disarm the stall
+    // watchdog before we act on (or early-return from) this event.
+    this.watchdog.observe(type);
 
     if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);
