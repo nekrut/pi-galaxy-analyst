@@ -18,3 +18,16 @@
 export function isLocalExecDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.LOOM_LOCAL_EXEC === "off";
 }
+
+/**
+ * Whether the shell told the brain it has no local bash shell, via
+ * LOOM_LOCAL_SHELL=off (set by the native Windows remote-only desktop). Distinct
+ * from isLocalExecDisabled: a Windows desktop keeps a local *file* surface
+ * (exec-guard write-jail stays on) but has no *shell*, so LOOM_LOCAL_EXEC stays
+ * "on" while LOOM_LOCAL_SHELL is "off". The init-gate uses this to reject plans
+ * whose routing requires a local execution leg. Fail-safe: only the exact "off"
+ * disables it, so an unset var (mac/linux) keeps local plans runnable.
+ */
+export function isLocalShellDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.LOOM_LOCAL_SHELL === "off";
+}
