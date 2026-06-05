@@ -17,6 +17,7 @@ import {
   signInOpenAICodex,
   signOutOAuth,
 } from "./oauth-handler.js";
+import { isLocalShellAvailable } from "./local-shell.js";
 
 /**
  * Sentinel the renderer sends back in a secret field when the user did NOT
@@ -34,6 +35,7 @@ interface MaskedLoomConfig extends Omit<LoomConfig, "llm" | "galaxy"> {
     active: string | null;
     profiles: Record<string, { url: string; hasApiKey: boolean }>;
   };
+  localShellAvailable?: boolean;
 }
 
 function maskConfig(cfg: LoomConfig): MaskedLoomConfig {
@@ -293,7 +295,10 @@ export function registerIpcHandlers(agent: AgentManager): void {
   });
 
   ipcMain.handle("config:get", () => {
-    return maskConfig(loadConfig());
+    // Distinct from web's `_mode:"remote"` (which strips all config and skips
+    // first-run): the desktop keeps real Galaxy/LLM config + cwd and only hides
+    // the local-exec-only UI when there's no shell.
+    return { ...maskConfig(loadConfig()), localShellAvailable: isLocalShellAvailable() };
   });
 
   ipcMain.handle(
