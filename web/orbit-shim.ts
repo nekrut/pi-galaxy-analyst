@@ -171,4 +171,52 @@ async function fetchMode(): Promise<"remote" | "desktop"> {
   onCwdChanged: (cb: Callback<[string]>) => on("agent:cwd-changed", cb),
   onOpenPreferences: (cb: Callback<[]>) => on("menu:open-preferences", cb),
   onProcUpdate: (cb: Callback<[unknown[]]>) => on("proc:update", cb),
+
+  // --- Stubs for OrbitAPI methods with no web/remote transport. The renderer is
+  // built against the full desktop OrbitAPI; methods main added after this
+  // shell's branch point (session restore, model catalog, update checks, OAuth,
+  // key validation, feedback) would be `undefined` here and throw when the
+  // renderer wires them at startup. The remote UI hides the controls that drive
+  // most of these (body.remote-mode); these no-ops return the shapes consumers
+  // expect so a stray call degrades gracefully instead of crashing.
+  onFilesChanged: (cb: Callback<[]>) => on("agent:files-changed", cb),
+  onDisplayResume: (cb: Callback<[]>) => on("agent:display-resume", cb),
+  onShowSlashCommands: (cb: Callback<[]>) => on("menu:show-slash-commands", cb),
+  onSessionHistory: (cb: Callback<[unknown]>) => on("agent:session-history", cb),
+  onUpdateDownloaded: (cb: Callback<[unknown]>) => {
+    on("update:downloaded", cb);
+  },
+  onUpdateError: (cb: Callback<[unknown]>) => {
+    on("update:error", cb);
+  },
+  getAgentStatus: () => Promise.resolve({ status: "stopped", turnActive: false }),
+  notebookStatus: () => Promise.resolve({ exists: false, hasContent: false }),
+  loadNotebook: () => Promise.resolve({ ok: false, content: null, path: "" }),
+  clearNotebookArtifacts: () => Promise.resolve({ cleared: false }),
+  replayChat: () =>
+    Promise.resolve({ ok: false, error: "session restore is unavailable in remote mode" }),
+  listAllModels: () =>
+    Promise.resolve({ ok: false, error: "model catalog is unavailable in remote mode" }),
+  oauthStatus: () => Promise.resolve({ signedIn: false }),
+  oauthSignIn: () => Promise.resolve({ ok: false, error: "OAuth is unavailable in remote mode" }),
+  oauthSignOut: () => Promise.resolve({ ok: true }),
+  validateApiKey: () => Promise.resolve({ valid: false, error: "unavailable in remote mode" }),
+  setBypassPermissions: () => Promise.resolve({ ok: false, enabled: false }),
+  getReportSysinfo: () =>
+    Promise.resolve({
+      appVersion: "",
+      electronVersion: "",
+      nodeVersion: "",
+      chromeVersion: "",
+      platform: "web",
+      arch: "",
+    }),
+  openIssueReport: () => Promise.resolve({ opened: false }),
+  submitFeedback: () =>
+    Promise.resolve({ ok: false, error: "feedback is unavailable in remote mode" }),
+  readFile: () => Promise.resolve({ ok: false, error: "file read is unavailable in remote mode" }),
+  checkVersion: () => Promise.resolve(null),
+  openReleasePage: () => Promise.resolve({ opened: false }),
+  restartToUpdate: () => Promise.resolve({ restarting: false }),
+  platform: "web",
 };

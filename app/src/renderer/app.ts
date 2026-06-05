@@ -935,8 +935,12 @@ document.addEventListener("keydown", (e) => {
 
 async function checkFirstRun(): Promise<void> {
   const cfg = (await window.orbit.getConfig()) as {
+    _mode?: string;
     llm?: { active?: string; providers?: Record<string, { hasApiKey?: boolean }> };
   };
+  // Remote shells inject creds server-side; the first-run credential flow is N/A
+  // there and its OAuth/key controls aren't wired in the web shim.
+  if (cfg._mode === "remote") return;
   const active = cfg.llm?.active;
   // Treat an OAuth-only setup (no API key, but provider has a stored token)
   // as fully configured -- skip the welcome screen.

@@ -61,16 +61,32 @@ function saveConfig(config: Record<string, unknown>): void {
 }
 
 function synthesizedRemoteConfig(): Record<string, unknown> {
+  const provider = process.env.LOOM_LLM_PROVIDER ?? "anthropic";
+  // Mirror the nested masked shape the desktop renderer expects (active +
+  // providers / active + profiles) so the first-run welcome overlay stays
+  // suppressed and the Galaxy status dot reads "connected" from the env-injected
+  // creds. Creds are server-owned: only hasApiKey booleans ever cross to the
+  // renderer, never the key values themselves.
   return {
     _mode: "remote",
     executionMode: "cloud",
     galaxy: {
-      url: process.env.GALAXY_URL ?? null,
-      // apiKey deliberately omitted -- never serialize to renderer
+      active: "remote",
+      profiles: {
+        remote: {
+          url: process.env.GALAXY_URL ?? null,
+          hasApiKey: Boolean(process.env.GALAXY_API_KEY),
+        },
+      },
     },
     llm: {
-      provider: process.env.LOOM_LLM_PROVIDER ?? "anthropic",
-      model: process.env.LOOM_LLM_MODEL ?? null,
+      active: provider,
+      providers: {
+        [provider]: {
+          model: process.env.LOOM_LLM_MODEL ?? null,
+          hasApiKey: true,
+        },
+      },
     },
   };
 }
