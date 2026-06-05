@@ -230,13 +230,13 @@ not this gate.
 
 A `windows-latest / x64 / win32` leg is added to `.github/workflows/release.yml`
 alongside the existing macOS and Linux jobs. Electron Forge's maker-squirrel was
-already configured in `app/forge.config.js`; this just enables the job.
+already configured in `app/forge.config.ts`; this just enables the job.
 
 Key details:
 
 - `resources/icon.ico` added (ICO format required by Squirrel's
   `setupIcon` option; the ICO is derived from the existing PNG assets).
-- `forge.config.js` sets `setupIcon: "resources/icon.ico"` in the
+- `forge.config.ts` sets `setupIcon: "resources/icon.ico"` in the
   maker-squirrel config.
 - The publish step's artifact glob includes `*.exe`, so the `Setup.exe`
   installer is automatically attached to the GitHub release alongside the macOS
