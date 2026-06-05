@@ -24,6 +24,7 @@ import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerConfusablesHint } from "./confusables-hint";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
+import { registerSecretRedaction } from "./secret-redaction";
 import * as fs from "fs";
 import { getState, getNotebookPath, getNotebookWidgetMode, setNotebookWidgetMode } from "./state";
 import {
@@ -46,6 +47,10 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   // decides allow/ask/deny; the sandbox only contains an allowed command's blast
   // radius). Default-on file-write confinement lives in the gate itself.
   registerSandbox(pi);
+  // Data-shaped backstop to the path-shaped gate: scrub known secret VALUES out
+  // of tool OUTPUT before it returns to the model, so an approved/slipped read
+  // (or an `env` dump) can't push API keys into the provider's logs (#183).
+  registerSecretRedaction(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
