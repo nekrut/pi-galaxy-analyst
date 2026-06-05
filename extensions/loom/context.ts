@@ -125,6 +125,26 @@ You are **${modelStr}** running via the **${active}** provider. This is your cur
 `;
 }
 
+/**
+ * Surface the Orbit tester ID directly into the prompt so the agent answers
+ * "what's my tester ID?" from local config instead of guessing at Galaxy
+ * (issue #189). The id is an opaque, non-secret beta-tester code stored in
+ * ~/.loom/config.json (or LOOM_TESTER_ID). Reads ONLY testerId -- never the
+ * rest of the config, and never tells the agent to open the file (#183).
+ */
+export function buildTesterIdBlock(): string {
+  const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+  if (!testerId) return "";
+  return `## Orbit tester ID
+
+This session's Orbit tester ID is **${testerId}**. It comes from the local
+Orbit/Loom config, not from Galaxy. When the user asks about their tester ID,
+report this value directly and do **not** call Galaxy tools such as
+\`galaxy_get_user\`. The tester ID is not a Galaxy account attribute; it's an
+opaque, non-secret code that rides along on feedback submissions.
+`;
+}
+
 function buildExecutionModeBlock(): string {
   const cfg = loadConfig();
   if (cfg.executionMode !== "local") return "";
@@ -971,6 +991,7 @@ export function setupContextInjection(pi: ExtensionAPI): void {
     const omitAnchors = isLlama4Family(ctx.model);
     const systemPrompt = [
       buildActiveModelBlock(),
+      buildTesterIdBlock(),
       buildOperatingDisciplineBlock(),
       buildVerificationDisciplineBlock(),
       buildPlanConventionBlock({ omitAnchors }),
