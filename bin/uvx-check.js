@@ -41,12 +41,16 @@ export function resolveExecutable(cmd, opts = {}) {
   } = opts;
   if (!pathEnv) return null;
   const isWin = platform === "win32";
+  // Join with the injected platform's separator, not the host OS's. Bare
+  // path.join uses native separators, so a win32 PATH probed on a posix host
+  // (or vice versa) yielded mismatched slashes -- which broke this on Windows CI.
+  const pathMod = isWin ? path.win32 : path.posix;
   const sep = isWin ? ";" : ":";
   const exts = isWin ? (pathExt ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean) : [""];
   for (const dir of pathEnv.split(sep)) {
     if (!dir) continue; // empty segment must not resolve to the cwd
     for (const ext of exts) {
-      const candidate = path.join(dir, cmd + ext);
+      const candidate = pathMod.join(dir, cmd + ext);
       if (isExecutable(candidate)) return candidate;
     }
   }

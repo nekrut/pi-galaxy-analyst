@@ -49,7 +49,10 @@ describe("resolveExecutable", () => {
       pathExt: ".EXE;.CMD",
       isExecutable: (p) => p.endsWith("uvx.EXE"),
     });
-    expect(found?.endsWith("uvx.EXE")).toBe(true);
+    // Assert the full path, not just the suffix: the separator must come from
+    // the injected platform, not the host OS. This is exactly what broke on the
+    // Windows runner -- path.join used native separators regardless of platform.
+    expect(found).toBe("C:\\tools\\uvx.EXE");
   });
 });
 
