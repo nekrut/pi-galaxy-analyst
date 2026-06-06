@@ -151,6 +151,7 @@ export interface OrbitAPI {
     hasUpdate: boolean;
     releaseUrl: string;
   } | null>;
+  getVersion(): Promise<{ version: string; isPackaged: boolean }>;
   openReleasePage(url?: string): Promise<{ opened: boolean }>;
   restartToUpdate(): Promise<{ restarting: boolean }>;
   onUpdateDownloaded(cb: (info: { version: string }) => void): void;
@@ -257,6 +258,7 @@ const api: OrbitAPI = {
 
   listAllModels: () => ipcRenderer.invoke("models:list-all"),
   checkVersion: () => ipcRenderer.invoke("version:check"),
+  getVersion: () => ipcRenderer.invoke("version:current"),
   openReleasePage: (url) => ipcRenderer.invoke("version:open-release", url),
   restartToUpdate: () => ipcRenderer.invoke("update:restart"),
   onUpdateDownloaded: (cb) => {

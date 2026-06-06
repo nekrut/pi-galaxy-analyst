@@ -558,6 +558,14 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return await checkLatestVersion();
   });
 
+  // Running app version + packaged flag for the what's-new banner. Unlike
+  // version:check this never hits the network and ignores updateCheck -- the
+  // what's-new surface is local and must work even with update checks off.
+  ipcMain.handle("version:current", () => ({
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+  }));
+
   // Opens the GitHub releases page in the user's default browser when they
   // click the "update available" banner. Hard-coded URL — renderer never
   // gets a generic openExternal capability.
