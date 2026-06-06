@@ -26,5 +26,8 @@ export default defineConfig({
     // subprocess keeps running. location.reload is [LegacyUnforgeable], so
     // patching it fails. Disabling HMR removes the WebSocket entirely.
     hmr: false,
+    fs: {
+      allow: [path.resolve(__dirname, "..")],
+    },
   },
 });
