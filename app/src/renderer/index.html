@@ -48,6 +48,26 @@
           ×
         </button>
       </div>
+      <!-- What's-new banner. Shown on the first launch of a version newer than
+           the one last seen; clicking opens the highlights modal. Packaged
+           builds only; reads the bundled CHANGELOG (offline). -->
+      <div id="whatsnew-banner" class="hidden" role="status" aria-live="polite">
+        <span class="wn-banner-text">
+          ✨ Updated to Orbit <span id="whatsnew-banner-version"></span>
+        </span>
+        <button id="whatsnew-banner-open" class="wn-banner-link" type="button">
+          See what's new
+        </button>
+        <button
+          id="whatsnew-banner-dismiss"
+          class="wn-banner-dismiss"
+          type="button"
+          title="Dismiss"
+          aria-label="Dismiss what's-new notice"
+        >
+          ×
+        </button>
+      </div>
       <!-- Permissions-bypass banner. Shown only while the safety gate is off
            (guardian.dangerouslyBypassPermissions). Persistent and unmissable. -->
       <div id="bypass-banner" class="hidden" role="alert" aria-live="assertive">
@@ -696,6 +716,25 @@
           <div class="modal-actions">
             <button id="welcome-skip" class="plan-btn">Skip — set up later</button>
             <button id="welcome-save" class="plan-btn execute">Save and continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- What's-new highlights modal (opened from #whatsnew-banner). -->
+    <div id="whatsnew-overlay" class="modal-overlay hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="whatsnew-title">What's new</h2>
+          <button id="whatsnew-close" class="modal-close" type="button" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div class="modal-body" id="whatsnew-body"></div>
+        <div class="modal-footer">
+          <div class="modal-actions">
+            <button id="whatsnew-notes" class="plan-btn" type="button">Full release notes ↗</button>
+            <button id="whatsnew-got-it" class="plan-btn execute" type="button">Got it</button>
           </div>
         </div>
       </div>
