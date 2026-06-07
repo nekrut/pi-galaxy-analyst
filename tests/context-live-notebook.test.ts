@@ -73,6 +73,39 @@ describe("live notebook context injection", () => {
     expect((messages ?? []).some((m) => m.role === "user" && m.content === "hi")).toBe(true);
   });
 
+  it("places the project-data message before the current user turn so the user stays last", async () => {
+    fs.writeFileSync(nb, `# My project\n\n${MARKER}.\n`);
+    setNotebookPath(nb);
+    const h = wire();
+    const { messages } = await h.get("context")!(
+      {
+        messages: [
+          { role: "user", content: "earlier" },
+          { role: "assistant", content: "ok" },
+          { role: "user", content: "current question" },
+        ],
+      },
+      {},
+    );
+    const msgs = messages ?? [];
+    const injIdx = msgs.findIndex(
+      (m) => m.role === "custom" && m.customType === LOOM_NOTEBOOK_CONTEXT_TYPE,
+    );
+    const lastUserIdx = msgs.map((m) => m.role).lastIndexOf("user");
+    expect(injIdx).toBeGreaterThanOrEqual(0);
+    // injected data sits immediately before the final user turn, not after it
+    expect(injIdx).toBe(lastUserIdx - 1);
+    // the user's actual current question remains the last message the model sees
+    expect(msgs[msgs.length - 1].content).toBe("current question");
+  });
+
+  it("anchors the data-not-instructions classification in the cached system prompt", async () => {
+    setNotebookPath(nb);
+    const h = wire();
+    const { systemPrompt } = await h.get("before_agent_start")!({}, {});
+    expect(systemPrompt).toContain("data, not instructions");
+  });
+
   it("system prompt is byte-identical across a notebook edit; injected content tracks it", async () => {
     fs.writeFileSync(nb, "# v1\nfirst contents here\n");
     setNotebookPath(nb);
