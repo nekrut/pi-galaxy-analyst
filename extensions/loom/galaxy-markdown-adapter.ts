@@ -27,7 +27,9 @@ const GALAXY_FENCE_OPEN = "```galaxy";
 // Anchored to a whole line (`m` flag): the carrier is always its own line, so
 // this never decodes carrier-like syntax that appears inline in prose (e.g. a
 // notebook documenting Loom's own format). The `g` flag replaces every carrier.
-const CARRIER_RE = /^\[loom-invocation:v1\]: #loom "([A-Za-z0-9+/=]+)"$/gm;
+// Tolerate trailing horizontal whitespace -- a storage round trip can append a
+// space, and an unmatched carrier silently loses the invocation on pull.
+const CARRIER_RE = /^\[loom-invocation:v1\]: #loom "([A-Za-z0-9+/=]+)"[ \t]*$/gm;
 
 /** base64 a loom-invocation block into a (render-invisible) link-reference carrier. */
 function encodeCarrier(block: string): string {
@@ -71,7 +73,9 @@ export function galaxyMarkdownToLoom(body: string): string {
 
 // Single-line carrier matcher. CARRIER_RE is global/multiline (stateful via
 // lastIndex), so it's unsafe for a one-off .test(); this is the per-line form.
-const CARRIER_LINE_RE = /^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/;
+// Same trailing-whitespace tolerance as CARRIER_RE so the strip heuristic and
+// the decoder agree on what counts as a carrier line.
+const CARRIER_LINE_RE = /^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"[ \t]*$/;
 
 /**
  * Remove only the ```galaxy directive blocks Loom itself emitted.
@@ -108,17 +112,30 @@ export interface InvocationValidator {
 }
 
 /**
- * Real validator: a GET that resolves means the id decodes and exists. It
- * queries the ambient configured server (galaxyGet reads GALAXY_URL), not a
- * block's own galaxy_server_url -- so an id from a different server validates
- * as false and its directive is safely omitted, which is correct under the
- * single-server push model.
+ * Real validator: a GET that resolves AND echoes back the same id means the id
+ * decodes and exists on the connected server (galaxyGet reads GALAXY_URL, not a
+ * block's own galaxy_server_url -- so an id from a different server validates as
+ * false and its directive is safely omitted, correct under the single-server
+ * push model).
+ *
+ * Two guards stop a malformed id from smuggling a directive onto the page:
+ * encoded ids are hex, so anything else is rejected before any network call (a
+ * value like "../histories" would otherwise dot-segment-normalize to a real
+ * endpoint, return 200, and pass); and the response id must equal the requested
+ * id, so a 200 for some *other* resource doesn't count. Both matter because
+ * pulled page content is untrusted -- a hostile carrier must not 400 the next
+ * push.
  */
+const ENCODED_ID_RE = /^[0-9a-fA-F]+$/;
+
 export const galaxyInvocationValidator: InvocationValidator = {
   async isValid(invocationId: string): Promise<boolean> {
+    if (!ENCODED_ID_RE.test(invocationId)) return false;
     try {
-      await galaxyGet(`/invocations/${invocationId}`);
-      return true;
+      const inv = await galaxyGet<{ id?: string }>(
+        `/invocations/${encodeURIComponent(invocationId)}`,
+      );
+      return inv?.id === invocationId;
     } catch {
       return false;
     }

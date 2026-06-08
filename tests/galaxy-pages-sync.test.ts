@@ -78,14 +78,14 @@ describe("pushNotebookToGalaxy", () => {
   });
 
   it("projects loom-invocation blocks to a carrier + validated directive on the page", async () => {
-    // galaxyGet resolves, so galaxyInvocationValidator reports the id valid and
-    // the rich push emits the directive alongside the hidden carrier.
-    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({});
+    // galaxyGet echoes back the same id, so galaxyInvocationValidator reports it
+    // valid and the rich push emits the directive alongside the hidden carrier.
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({ id: "f2db41e1fa331b3e" });
     const notebook = [
       "# Analysis",
       "",
       "```loom-invocation",
-      "invocation_id: inv-abc",
+      "invocation_id: f2db41e1fa331b3e",
       'galaxy_server_url: "https://galaxy.example"',
       "notebook_anchor: plan-a-step-2",
       "label: BWA alignment",
@@ -109,7 +109,7 @@ describe("pushNotebookToGalaxy", () => {
 
     const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
     expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
-    expect(sent).toContain("invocation_outputs(invocation_id=inv-abc)");
+    expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
     expect(sent).not.toContain("```loom-invocation");
     // the local notebook stays canonical -- the raw fence, not the projection
     const writtenLocal = vi.mocked(notebookWriter.writeNotebook).mock.calls[0][1];
@@ -268,7 +268,9 @@ describe("pullNotebookFromGalaxy", () => {
     // A page body as it would look after a Loom push: the loom-invocation fence
     // is encoded to a render-invisible carrier. Pull must decode it back AND
     // still apply the untrusted-content wrap -- the two transforms compose.
-    const loomBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join("\n");
+    const loomBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join(
+      "\n",
+    );
     const remoteWithCarrier = loomToGalaxyMarkdown(`# Remote report\n\n${loomBlock}\n`);
     vi.mocked(pagesApi.getPage).mockResolvedValue({
       id: "p1",

@@ -1,9 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   loomToGalaxyMarkdown,
   galaxyMarkdownToLoom,
   loomToGalaxyMarkdownRich,
+  galaxyInvocationValidator,
 } from "../extensions/loom/galaxy-markdown-adapter";
+import * as galaxyApi from "../extensions/loom/galaxy-api";
+
+vi.mock("../extensions/loom/galaxy-api");
 
 const NOTEBOOK = [
   "# chrM Variant Calling",
@@ -141,5 +145,48 @@ describe("galaxy-markdown-adapter -- rich push", () => {
     expect(out).not.toContain("```galaxy");
     expect(out).toMatch(/^\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+"$/m);
     expect(galaxyMarkdownToLoom(out)).toBe(noId);
+  });
+});
+
+describe("galaxy-markdown-adapter -- carrier whitespace tolerance", () => {
+  it("decodes a carrier that picked up trailing whitespace and still strips its directive", async () => {
+    const rich = await loomToGalaxyMarkdownRich(NOTEBOOK, { isValid: async () => true });
+    // Simulate a storage round trip that appended whitespace to the carrier line.
+    const withTrailingWs = rich.replace(
+      /(\[loom-invocation:v1\]: #loom "[A-Za-z0-9+/=]+")$/m,
+      "$1  ",
+    );
+    expect(withTrailingWs).not.toBe(rich); // guard: the mutation actually landed
+
+    const pulled = galaxyMarkdownToLoom(withTrailingWs);
+    expect(pulled).toContain("```loom-invocation");
+    expect(pulled).toContain("invocation_id: abc123");
+    expect(pulled).not.toContain("[loom-invocation:v1]"); // carrier was decoded, not left behind
+    expect(pulled).not.toContain("invocation_outputs("); // Loom's own directive was stripped
+  });
+});
+
+describe("galaxy-markdown-adapter -- galaxyInvocationValidator", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("rejects a path-like id before making any network call", async () => {
+    expect(await galaxyInvocationValidator.isValid("../histories")).toBe(false);
+    expect(galaxyApi.galaxyGet).not.toHaveBeenCalled();
+  });
+
+  it("validates a hex id (encoded into the path) when the server echoes the same id", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({ id: "abc123" });
+    expect(await galaxyInvocationValidator.isValid("abc123")).toBe(true);
+    expect(galaxyApi.galaxyGet).toHaveBeenCalledWith("/invocations/abc123");
+  });
+
+  it("rejects when the server returns 200 for a different resource", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({ id: "somethingelse" });
+    expect(await galaxyInvocationValidator.isValid("abc123")).toBe(false);
+  });
+
+  it("rejects when the lookup throws", async () => {
+    vi.mocked(galaxyApi.galaxyGet).mockRejectedValue(new Error("404"));
+    expect(await galaxyInvocationValidator.isValid("abc123")).toBe(false);
   });
 });
