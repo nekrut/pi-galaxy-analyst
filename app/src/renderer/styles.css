@@ -2094,6 +2094,30 @@ body.platform-darwin #files-title {
   line-height: 1.5;
 }
 
+.report-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 20px;
+  text-align: center;
+}
+.report-success-check {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: 26px;
+  line-height: 48px;
+}
+.report-success-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .prefs-row-with-btn {
   display: flex;
   flex: 1;

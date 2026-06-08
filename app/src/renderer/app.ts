@@ -5,6 +5,7 @@ import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
 import { FileViewer } from "./files/file-viewer.js";
+import { FeedbackConfirmation } from "./feedback-confirmation.js";
 import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
@@ -3491,6 +3492,22 @@ const reportTitle = document.getElementById("report-title") as HTMLInputElement;
 const reportBody = document.getElementById("report-body") as HTMLTextAreaElement;
 const reportIncludeSysinfo = document.getElementById("report-include-sysinfo") as HTMLInputElement;
 const reportIncludeLogs = document.getElementById("report-include-logs") as HTMLInputElement;
+const reportFormFields = document.getElementById("report-form-fields")!;
+const reportSuccess = document.getElementById("report-success")!;
+const reportFooter = document.getElementById("report-footer")!;
+
+// How long the "Feedback received, thank you!" state stays up before the modal
+// closes itself -- long enough to read, short enough to not nag.
+const REPORT_CONFIRM_MS = 1500;
+const reportConfirmation = new FeedbackConfirmation({
+  delayMs: REPORT_CONFIRM_MS,
+  onShowSuccess: () => {
+    reportFormFields.classList.add("hidden");
+    reportFooter.classList.add("hidden");
+    reportSuccess.classList.remove("hidden");
+  },
+  onClose: () => closeReportModal(),
+});
 
 // Budget for the *encoded* body in the GitHub URL. The whole URL
 // (~"https://github.com/galaxyproject/loom/issues/new?title=…&body=…")
@@ -3500,6 +3517,12 @@ const reportIncludeLogs = document.getElementById("report-include-logs") as HTML
 const REPORT_URL_BUDGET = 7000;
 
 function openReportModal(): void {
+  // Drop any pending auto-close so reopening within the thank-you window can't
+  // close the freshly opened modal, and reset back to the form state.
+  reportConfirmation.cancel();
+  reportSuccess.classList.add("hidden");
+  reportFormFields.classList.remove("hidden");
+  reportFooter.classList.remove("hidden");
   reportTitle.value = "";
   reportBody.value = "";
   // Default ON: the primary destination is Loom's private capture store, not a
@@ -3512,6 +3535,7 @@ function openReportModal(): void {
   reportTitle.focus();
 }
 function closeReportModal(): void {
+  reportConfirmation.cancel();
   reportOverlay.classList.add("hidden");
 }
 
@@ -3637,7 +3661,9 @@ reportSubmit.addEventListener("click", async () => {
     const payload = await buildFeedbackPayload();
     const result = await window.orbit.submitFeedback(payload);
     if (result.ok) {
-      closeReportModal();
+      // Show an inline "Feedback received, thank you!" before auto-closing, so a
+      // successful send is visibly confirmed instead of the modal just vanishing.
+      reportConfirmation.confirm();
       return;
     }
     // Fallback: the private store was unreachable. Open a PUBLIC GitHub issue

@@ -799,55 +799,63 @@
           <button id="report-close" class="modal-close" title="Close" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
-          <div class="report-account-note">
-            Your feedback goes straight to the Loom team's private feedback store — no GitHub
-            account needed. If that service is unreachable, Orbit falls back to opening a pre-filled
-            issue on
-            <a
-              href="https://github.com/galaxyproject/loom"
-              target="_blank"
-              rel="noopener noreferrer"
-              >github.com/galaxyproject/loom</a
-            >
-            with only your title and description (no diagnostics), which you submit there.
+          <div id="report-form-fields">
+            <div class="report-account-note">
+              Your feedback goes straight to the Loom team's private feedback store — no GitHub
+              account needed. If that service is unreachable, Orbit falls back to opening a
+              pre-filled issue on
+              <a
+                href="https://github.com/galaxyproject/loom"
+                target="_blank"
+                rel="noopener noreferrer"
+                >github.com/galaxyproject/loom</a
+              >
+              with only your title and description (no diagnostics), which you submit there.
+            </div>
+            <div class="prefs-row">
+              <label for="report-title">Title</label>
+              <input id="report-title" type="text" placeholder="Short summary" required />
+            </div>
+            <div class="prefs-row">
+              <label for="report-body">What happened?</label>
+              <textarea
+                id="report-body"
+                rows="6"
+                placeholder="Steps to reproduce, expected vs actual, screenshots if relevant..."
+              ></textarea>
+            </div>
+            <div class="report-options">
+              <label
+                ><input type="checkbox" id="report-include-sysinfo" /> Include system info</label
+              >
+              <label><input type="checkbox" id="report-include-logs" /> Include logs</label>
+            </div>
+            <details class="report-disclosure">
+              <summary>What's included?</summary>
+              <p>
+                <b>System info:</b> Orbit version, OS, Electron/Node versions, LLM model + provider
+                name (no API key), Galaxy connection state (no credentials).
+              </p>
+              <p>
+                <b>Logs:</b> last 60 events of <code>activity.jsonl</code> (one line each: tool
+                name, arguments, and a truncated result -- credentials and API keys redacted) and
+                the last ~200 lines of the in-app shell stream. These can include filenames, tool
+                arguments, and command output.
+              </p>
+              <p>
+                Both are on by default for the beta so we get useful diagnostics. Feedback goes to
+                Loom's private feedback store; uncheck either box to leave it out. If the store is
+                unreachable and we fall back to a public GitHub issue, only your text is sent —
+                never these diagnostics.
+              </p>
+            </details>
           </div>
-          <div class="prefs-row">
-            <label for="report-title">Title</label>
-            <input id="report-title" type="text" placeholder="Short summary" required />
+          <div id="report-success" class="report-success hidden" role="status" aria-live="polite">
+            <div class="report-success-check" aria-hidden="true">✓</div>
+            <div class="report-success-text">Feedback received, thank you!</div>
           </div>
-          <div class="prefs-row">
-            <label for="report-body">What happened?</label>
-            <textarea
-              id="report-body"
-              rows="6"
-              placeholder="Steps to reproduce, expected vs actual, screenshots if relevant..."
-            ></textarea>
-          </div>
-          <div class="report-options">
-            <label><input type="checkbox" id="report-include-sysinfo" /> Include system info</label>
-            <label><input type="checkbox" id="report-include-logs" /> Include logs</label>
-          </div>
-          <details class="report-disclosure">
-            <summary>What's included?</summary>
-            <p>
-              <b>System info:</b> Orbit version, OS, Electron/Node versions, LLM model + provider
-              name (no API key), Galaxy connection state (no credentials).
-            </p>
-            <p>
-              <b>Logs:</b> last 60 events of <code>activity.jsonl</code> (one line each: tool name,
-              arguments, and a truncated result -- credentials and API keys redacted) and the last
-              ~200 lines of the in-app shell stream. These can include filenames, tool arguments,
-              and command output.
-            </p>
-            <p>
-              Both are on by default for the beta so we get useful diagnostics. Feedback goes to
-              Loom's private feedback store; uncheck either box to leave it out. If the store is
-              unreachable and we fall back to a public GitHub issue, only your text is sent — never
-              these diagnostics.
-            </p>
-          </details>
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer" id="report-footer">
           <div class="modal-actions">
             <button id="report-cancel" class="plan-btn">Cancel</button>
             <button id="report-submit" class="plan-btn primary">Send feedback</button>
