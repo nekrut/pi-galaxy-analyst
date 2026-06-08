@@ -30,6 +30,7 @@ const LOOM_BUNDLE_FILES = [
   "bin",
   "extensions",
   "shared",
+  "CHANGELOG.md",
   "package.json",
   "package-lock.json",
   "README.md",

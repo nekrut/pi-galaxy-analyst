@@ -209,15 +209,18 @@ a:visited {
    window. When a banner is showing it IS that top strip, so on darwin it has to
    double as the titlebar -- same drag + inset treatment .pane-title gets
    otherwise -- or it both collides with the lights and kills the drag region.
-   Only #update-banner needs the left inset (its text is left-aligned); the
-   bypass/sandbox banners center their text, which never reaches under the
-   lights. The buttons/links stay no-drag (mirrors the .pane-title rule). */
+   Only #update-banner and #whatsnew-banner need the left inset (their text is
+   left-aligned); the bypass/sandbox banners center their text, which never
+   reaches under the lights. The buttons/links stay no-drag (mirrors the
+   .pane-title rule). */
 body.platform-darwin #update-banner,
 body.platform-darwin #bypass-banner,
-body.platform-darwin #sandbox-banner {
+body.platform-darwin #sandbox-banner,
+body.platform-darwin #whatsnew-banner {
   -webkit-app-region: drag;
 }
-body.platform-darwin #update-banner {
+body.platform-darwin #update-banner,
+body.platform-darwin #whatsnew-banner {
   padding-left: 78px;
 }
 body.platform-darwin #update-banner button,
@@ -225,7 +228,9 @@ body.platform-darwin #update-banner a,
 body.platform-darwin #bypass-banner button,
 body.platform-darwin #bypass-banner a,
 body.platform-darwin #sandbox-banner button,
-body.platform-darwin #sandbox-banner a {
+body.platform-darwin #sandbox-banner a,
+body.platform-darwin #whatsnew-banner button,
+body.platform-darwin #whatsnew-banner a {
   -webkit-app-region: no-drag;
 }
 
@@ -2990,4 +2995,73 @@ body.platform-darwin #files-title {
 .file-viewer-stale-banner .file-viewer-btn {
   font-size: 10px;
   padding: 2px 8px;
+}
+
+/* What's-new banner -- mirrors #update-banner; shown once per upgrade. */
+#whatsnew-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--accent-bg);
+  color: var(--text-bright);
+  border-bottom: 1px solid var(--border-strong);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+#whatsnew-banner.hidden {
+  display: none;
+}
+#whatsnew-banner .wn-banner-text {
+  flex: 1;
+}
+#whatsnew-banner-version {
+  font-weight: 600;
+  color: var(--accent);
+}
+#whatsnew-banner .wn-banner-link {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+}
+#whatsnew-banner .wn-banner-link:hover {
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+#whatsnew-banner .wn-banner-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+#whatsnew-banner .wn-banner-dismiss:hover {
+  color: var(--text-bright);
+}
+/* What's-new modal body */
+.whatsnew-entry {
+  margin-bottom: 16px;
+}
+.whatsnew-entry:last-child {
+  margin-bottom: 0;
+}
+.whatsnew-entry h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  color: var(--accent);
+}
+.whatsnew-entry ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.whatsnew-entry li {
+  margin: 2px 0;
 }

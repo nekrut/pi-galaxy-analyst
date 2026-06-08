@@ -15,6 +15,8 @@ import {
   capFeedbackPayload,
 } from "../../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../../shared/feedback-contract.js";
+import changelogRaw from "../../../CHANGELOG.md?raw";
+import { parseChangelog, decideWhatsNew, releaseUrlFor } from "../../../shared/whats-new.js";
 
 declare global {
   interface Window {
@@ -3926,6 +3928,82 @@ window.orbit.onProcUpdate((procs) => {
       // Linux (and any non-darwin): the GitHub-releases notify-link banner.
       void showNotifyLinkBanner();
     }
+  }
+}
+
+// ── What's-new (first launch after an update) ────────────────────────────────
+//
+// Backward-looking: compare the running version to a persisted stamp. Newer ->
+// show a banner that opens the highlights modal (accumulating any skipped
+// versions), then advance the stamp. Fresh install stamps silently. Packaged
+// builds only, so `npm start` dev versions never trigger it. Offline -- reads
+// the bundled CHANGELOG, no network.
+{
+  const wnBanner = document.getElementById("whatsnew-banner");
+  const wnVersionEl = document.getElementById("whatsnew-banner-version");
+  const wnOpenBtn = document.getElementById("whatsnew-banner-open");
+  const wnDismissBtn = document.getElementById("whatsnew-banner-dismiss");
+  const wnOverlay = document.getElementById("whatsnew-overlay");
+  const wnBody = document.getElementById("whatsnew-body");
+  const wnTitle = document.getElementById("whatsnew-title");
+  const wnClose = document.getElementById("whatsnew-close");
+  const wnGotIt = document.getElementById("whatsnew-got-it");
+  const wnNotes = document.getElementById("whatsnew-notes");
+
+  const WN_SEEN_KEY = "orbit:whatsnew-last-seen";
+  let wnReleaseUrl: string | null = null;
+
+  if (wnBanner && wnVersionEl && wnOpenBtn && wnDismissBtn && wnOverlay && wnBody) {
+    wnOpenBtn.addEventListener("click", () => wnOverlay.classList.remove("hidden"));
+    wnClose?.addEventListener("click", () => wnOverlay.classList.add("hidden"));
+    wnGotIt?.addEventListener("click", () => wnOverlay.classList.add("hidden"));
+    wnDismissBtn.addEventListener("click", () => wnBanner.classList.add("hidden"));
+    wnNotes?.addEventListener("click", () => {
+      if (wnReleaseUrl) void window.orbit.openReleasePage(wnReleaseUrl);
+    });
+
+    void (async () => {
+      try {
+        const { version, isPackaged } = await window.orbit.getVersion();
+        if (!isPackaged) return; // dev builds never show what's-new
+        let lastSeen: string | undefined;
+        try {
+          lastSeen = localStorage.getItem(WN_SEEN_KEY) ?? undefined;
+        } catch {}
+        const decision = decideWhatsNew(
+          parseChangelog(changelogRaw),
+          lastSeen,
+          version,
+          "accumulate",
+        );
+        if (decision.entries.length) {
+          wnVersionEl.textContent = version;
+          if (wnTitle) wnTitle.textContent = `What's new in ${version}`;
+          wnReleaseUrl = releaseUrlFor(version);
+          wnBody.replaceChildren();
+          for (const entry of decision.entries) {
+            const wrap = document.createElement("div");
+            wrap.className = "whatsnew-entry";
+            const h = document.createElement("h3");
+            h.textContent = entry.date ? `${entry.version} (${entry.date})` : entry.version;
+            const ul = document.createElement("ul");
+            for (const hi of entry.highlights) {
+              const li = document.createElement("li");
+              li.textContent = hi;
+              ul.appendChild(li);
+            }
+            wrap.append(h, ul);
+            wnBody.appendChild(wrap);
+          }
+          wnBanner.classList.remove("hidden");
+        }
+        if (decision.stamp) {
+          try {
+            localStorage.setItem(WN_SEEN_KEY, decision.stamp);
+          } catch {}
+        }
+      } catch {}
+    })();
   }
 }
 
