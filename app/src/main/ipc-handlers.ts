@@ -8,6 +8,7 @@ import { execSync } from "node:child_process";
 import { loadConfig, saveConfig, type LoomConfig } from "./config.js";
 import { encryptSecret, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getProviders, getModels } from "@earendil-works/pi-ai";
+import { isDeprecatedModelId } from "./model-catalog.js";
 import { checkLatestVersion } from "./version-check.js";
 import { postFeedback } from "./feedback.js";
 import type { FeedbackPayload } from "../../../shared/feedback-contract.js";
@@ -672,7 +673,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
     try {
       for (const provider of getProviders()) {
         if (!USER_FACING_PROVIDERS.has(provider)) continue;
-        const models = getModels(provider);
+        // Drop generations the provider's live API has retired -- pi's registry
+        // still lists them but they 404 on use, so they shouldn't reach the picker (#221).
+        const models = getModels(provider).filter((m) => !isDeprecatedModelId(provider, m.id));
         if (!models.length) continue;
         out[provider] = models.map((m) => {
           const cleanName = m.name.replace(/^Claude\s+/i, "");

@@ -11,7 +11,7 @@ export interface HumanizedError {
 
 interface AnthropicLikeError {
   type?: string;
-  error?: { type?: string; message?: string };
+  error?: { type?: string; message?: string; code?: string | number };
   message?: string;
 }
 
@@ -76,6 +76,7 @@ export function humanizeAgentError(raw: string | undefined | null): HumanizedErr
 
   const inner = parsed.error;
   const errType = inner?.type;
+  const errCode = inner?.code;
   const errMsg = inner?.message ?? parsed.message ?? "";
 
   // Google's consumer Generative Language API geo-blocks unsupported regions
@@ -85,6 +86,24 @@ export function humanizeAgentError(raw: string | undefined | null): HumanizedErr
   if (/user location is not supported/i.test(errMsg)) {
     return {
       text: "Gemini isn't available in your region -- Google blocked the request. Switch to a non-Google provider (e.g. Anthropic, OpenAI, or DeepSeek) in Preferences.",
+      retriable: false,
+    };
+  }
+
+  // Backstop for #221: a retired model selected from the picker fails at the
+  // provider. Google keys these on code/status (404 "not found for API version"),
+  // OpenAI returns code "model_not_found" / "has been deprecated" -- neither maps
+  // to an Anthropic `type`, so catch the stable phrasing before the switch and
+  // point the user back to a current model instead of echoing the wire payload.
+  if (
+    errCode === "model_not_found" ||
+    /is not found for API version/i.test(errMsg) ||
+    /\bhas been deprecated\b/i.test(errMsg) ||
+    /\bmodel\b[^.]*\bdoes not exist\b/i.test(errMsg) ||
+    /\bno longer (available|supported)\b/i.test(errMsg)
+  ) {
+    return {
+      text: "That model is no longer available from the provider. Pick a current model in Preferences.",
       retriable: false,
     };
   }
