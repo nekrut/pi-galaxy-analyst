@@ -357,4 +357,30 @@ describe("decide", () => {
       decide(req({ toolInput: { command: "cat /home/alice/project/notes.txt" } }), deps).decision,
     ).toBe("allow");
   });
+  it("a safe bash enumeration/metadata command outside the workspace -> ask (#224)", () => {
+    // ls/find/stat/wc/du/file are 'safe' but reveal structure/metadata/content of
+    // their target; pointed outside the workspace they must prompt, same as cat.
+    for (const command of [
+      "ls /home/alice/Desktop/experiment",
+      "find /home/alice/Desktop -name '*.csv'",
+      "stat /home/alice/Desktop/exp.csv",
+      "wc -l /home/alice/Desktop/exp.csv",
+      "du -sh /home/alice/Desktop/experiment",
+      "file /home/alice/Desktop/exp.bin",
+    ])
+      expect(decide(req({ toolInput: { command } }), deps).decision, command).toBe("ask");
+  });
+  it("a safe bash enumeration command inside the workspace is allowed (#224)", () => {
+    // Real-world relative operands (e.g. `find . -name '*.ts'`) resolve under cwd
+    // and are exercised in the path-jail/classifier suites; the fake resolver here
+    // only models absolute membership, so these cases use absolute in-workspace
+    // paths and path-less forms.
+    for (const command of [
+      "ls /home/alice/project/data",
+      "ls -la",
+      "find /home/alice/project",
+      "stat /home/alice/project/notes.txt",
+    ])
+      expect(decide(req({ toolInput: { command } }), deps).decision, command).toBe("allow");
+  });
 });

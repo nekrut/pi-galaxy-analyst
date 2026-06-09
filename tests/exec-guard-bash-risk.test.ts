@@ -25,6 +25,36 @@ describe("classifyBash", () => {
     expect(r.kind).toBe("safe");
     expect(r.readPaths).toContain("/home/alice/.ssh/id_rsa"); // policy layer rejects via sensitive-read
   });
+  it("surfaces read paths for enumeration / metadata commands, not just content readers (#224)", () => {
+    // ls/find/fd/file/stat/du/wc are 'safe' but still read or enumerate their
+    // target, so their path operands must reach the policy's workspace jail --
+    // otherwise `ls ~/Desktop` silently inspects outside the workspace while the
+    // equivalent `ls` *tool* prompts.
+    for (const [cmd, target] of [
+      ["ls /home/alice/Desktop/experiment", "/home/alice/Desktop/experiment"],
+      ["find /home/alice/Desktop -name '*.csv'", "/home/alice/Desktop"],
+      ["fd pattern /home/alice/Desktop", "/home/alice/Desktop"],
+      ["file /home/alice/Desktop/exp.bin", "/home/alice/Desktop/exp.bin"],
+      ["stat /home/alice/Desktop/exp.csv", "/home/alice/Desktop/exp.csv"],
+      ["du -sh /home/alice/Desktop/experiment", "/home/alice/Desktop/experiment"],
+      ["wc -l /home/alice/Desktop/exp.csv", "/home/alice/Desktop/exp.csv"],
+    ] as const) {
+      const r = classifyBash(cmd);
+      expect(r.kind, cmd).toBe("safe");
+      expect(r.readPaths, cmd).toContain(target);
+    }
+  });
+  it("a path-less enumeration command keeps empty read paths (operates on cwd)", () => {
+    for (const c of ["ls", "ls -la", "find . -name '*.ts'", "du -sh"]) {
+      const r = classifyBash(c);
+      expect(r.kind, c).toBe("safe");
+      // only flag tokens or cwd-relative '.'; nothing that escapes resolves outside
+      expect(
+        r.readPaths.every((p) => !p.startsWith("/home/alice/Desktop")),
+        c,
+      ).toBe(true);
+    }
+  });
   it("compound / redirect / substitution -> unknown", () => {
     for (const c of [
       "ls; rm -rf build",
