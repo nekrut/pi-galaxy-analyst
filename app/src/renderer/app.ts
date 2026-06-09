@@ -6,6 +6,7 @@ import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
 import { FileViewer } from "./files/file-viewer.js";
 import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
+import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
@@ -573,10 +574,12 @@ document.addEventListener("mouseup", () => {
 // Initial tree population + live updates from the main-process watcher.
 void filesPanel.refresh();
 void refreshGalaxyInvocations(window.orbit);
+void refreshGalaxyHistory(window.orbit);
 window.orbit.onFilesChanged(() => {
   void filesPanel.refresh();
   void fileViewer.refreshFromDisk();
   void refreshGalaxyInvocations(window.orbit);
+  void refreshGalaxyHistory(window.orbit);
 });
 
 // ── Galaxy connection indicator ──────────────────────────────────────────────
@@ -605,6 +608,11 @@ async function refreshGalaxyStatus(): Promise<void> {
     galaxyStatus.classList.remove("status-dot-connected");
     galaxyStatus.title = "Galaxy: not configured (open Preferences to add a profile)";
   }
+
+  // The Galaxy history section is driven off the same connection signal so it
+  // hides on disconnect and tracks profile switches (which file changes alone
+  // would miss — disconnect doesn't touch notebook.md).
+  void refreshGalaxyHistory(window.orbit);
 }
 
 void refreshGalaxyStatus();
