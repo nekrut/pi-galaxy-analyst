@@ -255,4 +255,15 @@ describeH("galaxy_upload_local_file handler", () => {
     expectH(res.details.uploaded).toBe(true);
     expectH(res.content[0].text).toMatch(/get_history_contents/);
   });
+
+  itH("refuses a benign-named symlink whose target is a sensitive file", async () => {
+    const realSecret = pathMod.join(sandbox, "server.key");
+    fsMod.writeFileSync(realSecret, "PRIVATE");
+    const link = pathMod.join(sandbox, "innocent.fastq");
+    fsMod.symlinkSync(realSecret, link);
+    const res = await run(getTool(), { path: link, history_id: "h" });
+    expectH(res.details.error).toBe(true);
+    expectH(res.content[0].text).toMatch(/sensitive|credential|refus/i);
+    expectH(runGalaxyUpload).not.toHaveBeenCalled();
+  });
 });

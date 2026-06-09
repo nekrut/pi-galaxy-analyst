@@ -134,9 +134,19 @@ export function registerGalaxyUploadTool(pi: ExtensionAPI): void {
       }
       if (!stat.isFile()) return err(`Not a regular file: ${params.path}`);
 
-      if (isSensitivePath(absPath, os.homedir())) {
+      // Resolve symlinks before the sensitive-path check: galaxy-upload follows
+      // the link, so a benign-named symlink to ~/.ssh/id_rsa would otherwise
+      // exfiltrate the target. Check both the literal path and its real target.
+      let realPath: string;
+      try {
+        realPath = fs.realpathSync(absPath);
+      } catch {
+        return err(`Cannot resolve path: ${params.path}`);
+      }
+      const home = os.homedir();
+      if (isSensitivePath(absPath, home) || isSensitivePath(realPath, home)) {
         return err(
-          `Refusing to upload "${params.path}": it matches loom's sensitive/credential path policy.`,
+          `Refusing to upload "${params.path}": it (or its target) matches loom's sensitive/credential path policy.`,
         );
       }
 
