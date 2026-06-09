@@ -10,6 +10,13 @@ import type {
   ParameterSpec,
 } from "../../../../shared/loom-shell-contract.js";
 
+type MessageRecord =
+  | { role: "user"; text: string }
+  | { role: "assistant"; text: string }
+  | { role: "tool"; name: string; status: string; result?: string }
+  | { role: "info"; text: string }
+  | { role: "error"; text: string };
+
 export class ChatPanel {
   private container: HTMLElement;
   private currentMessage: HTMLElement | null = null;
@@ -28,6 +35,7 @@ export class ChatPanel {
   private lastErrorEl: HTMLElement | null = null;
   private lastErrorText = "";
   private lastErrorCount = 0;
+  private history: MessageRecord[] = [];
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -90,6 +98,7 @@ export class ChatPanel {
   }
 
   addUserMessage(text: string): void {
+    this.history.push({ role: "user", text });
     this.resetErrorDedup();
     const n = ++this.promptCounter;
     const turn = document.createElement("div");
@@ -122,6 +131,7 @@ export class ChatPanel {
    * counter equals the replay's count. Live numbers continue from there.
    */
   addReplayUserMessage(text: string, promptNum: number): void {
+    this.history.push({ role: "user", text });
     this.resetErrorDedup();
     this.promptCounter = promptNum;
     const turn = document.createElement("div");
@@ -155,6 +165,7 @@ export class ChatPanel {
     this.pendingBlockBreak = false;
     this.toolCards.clear();
     this.thinkingEl = null;
+    this.history = [];
   }
 
   showThinking(): void {
@@ -272,12 +283,16 @@ export class ChatPanel {
     }
     // Clean up any stray cursors across the whole container
     this.container.querySelectorAll(".cursor-blink").forEach((c) => c.remove());
+    if (this.currentText) {
+      this.history.push({ role: "assistant", text: this.currentText });
+    }
     this.currentMessage = null;
     this.currentText = "";
     this.pendingBlockBreak = false;
   }
 
   addToolCard(id: string, name: string): void {
+    this.history.push({ role: "tool", name, status: "running" });
     const card = document.createElement("div");
     card.className = "tool-card";
     card.innerHTML = `
@@ -334,6 +349,12 @@ export class ChatPanel {
       const body = card.querySelector(".tool-card-body")!;
       body.textContent = result.slice(0, 2000);
     }
+
+    const rec = this.history.findLast(r => r.role === "tool" && r.name === card.querySelector("span:last-child")?.textContent);
+    if (rec && rec.role === "tool") {
+      rec.status = status;
+      if (result) rec.result = result.slice(0, 2000);
+    }
   }
 
   private resetErrorDedup(): void {
@@ -343,6 +364,7 @@ export class ChatPanel {
   }
 
   addErrorMessage(text: string): void {
+    this.history.push({ role: "error", text });
     if (this.lastErrorEl && this.lastErrorText === text) {
       this.lastErrorCount += 1;
       this.lastErrorEl.textContent = `${text}  (x${this.lastErrorCount})`;
@@ -381,6 +403,24 @@ export class ChatPanel {
     el.innerHTML = html;
     this.container.appendChild(el);
     this.scrollToBottom();
+  }
+
+  /** Export the current conversation as a Markdown string. */
+  exportAsMarkdown(): string {
+    const lines: string[] = [];
+    for (const rec of this.history) {
+      if (rec.role === "user") {
+        lines.push(`**You**\n\n${rec.text}\n`);
+      } else if (rec.role === "assistant") {
+        lines.push(`**Assistant**\n\n${rec.text}\n`);
+      } else if (rec.role === "tool") {
+        const badge = rec.status === "done" ? "✓" : rec.status === "error" ? "✗" : "…";
+        lines.push(`*Tool call ${badge}: \`${rec.name}\`*${rec.result ? `\n\n\`\`\`\n${rec.result}\n\`\`\`` : ""}\n`);
+      } else if (rec.role === "error") {
+        lines.push(`*Error: ${rec.text}*\n`);
+      }
+    }
+    return lines.join("\n---\n\n");
   }
 
   private renderCurrentMessage(): void {
