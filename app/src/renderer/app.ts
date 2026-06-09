@@ -1,6 +1,7 @@
 import { ChatPanel } from "./chat/chat-panel.js";
 import { detectCompactIntent } from "./chat/compact-intent.js";
 import { humanizeAgentError } from "./chat/error-humanizer.js";
+import { detectStopIntent } from "./chat/stop-intent.js";
 import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
@@ -1420,6 +1421,17 @@ function submit(): void {
 
   // Nudge plain-text "compact"/"reduce context" requests toward /compact (#171).
   maybeShowCompactIntentHint(text);
+
+  // A bare "stop"/"abort" typed during an active turn is a halt intent, not a
+  // prompt to queue behind the very turn the user is trying to kill (#225).
+  // Abort instead of enqueueing, and acknowledge so the intent isn't silent.
+  if (streaming && detectStopIntent(text)) {
+    abortCurrentTurn();
+    chat.addInfoMessage("<i>Stopping the current response...</i>");
+    inputEl.value = "";
+    inputEl.style.height = "auto";
+    return;
+  }
 
   // If the agent is mid-turn, queue the message and flush when agent_end fires.
   // Purely local slash commands still run immediately; slash commands that
