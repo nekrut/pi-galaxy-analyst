@@ -579,6 +579,44 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return { opened: true };
   });
 
+  // Opens the bound Galaxy history in the user's default browser when the user
+  // clicks the link in the Activity tab. The renderer never gets a generic
+  // openExternal capability. We pin the destination to the configured Galaxy
+  // server: the URL must be http(s), its origin must match the active Galaxy
+  // profile, and its path must end in the canonical /histories/view view. The
+  // origin pin is the real trust boundary; the path suffix is a sanity check.
+  // pathname.endsWith (not ===) is required so subpath deployments
+  // (https://example.org/galaxy/histories/view) are accepted.
+  ipcMain.handle("galaxy:open-history", async (_e, url: unknown) => {
+    if (typeof url !== "string") return { opened: false };
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return { opened: false };
+    }
+    const httpScheme = parsed.protocol === "https:" || parsed.protocol === "http:";
+    if (!httpScheme || !parsed.pathname.endsWith("/histories/view")) {
+      return { opened: false };
+    }
+    // Pin the host to the active Galaxy profile so a compromised renderer
+    // cannot point this at an attacker-controlled host that also serves
+    // /histories/view.
+    const cfg = loadConfig();
+    const active = cfg.galaxy?.active;
+    const serverUrl = active ? cfg.galaxy?.profiles?.[active]?.url : undefined;
+    if (!serverUrl) return { opened: false };
+    let expectedOrigin: string;
+    try {
+      expectedOrigin = new URL(serverUrl).origin;
+    } catch {
+      return { opened: false };
+    }
+    if (parsed.origin !== expectedOrigin) return { opened: false };
+    await shell.openExternal(parsed.toString());
+    return { opened: true };
+  });
+
   // Apply a downloaded macOS update + relaunch. autoUpdater.quitAndInstall is a
   // no-op unless an update was actually downloaded, so this is safe to call.
   ipcMain.handle("update:restart", () => {

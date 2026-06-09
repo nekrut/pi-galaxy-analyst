@@ -1599,6 +1599,45 @@ body.platform-darwin #files-title {
   padding: 6px 12px 8px;
 }
 
+#activity-galaxy-history-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--masthead);
+  color: var(--text);
+  overflow: hidden;
+}
+#activity-galaxy-history-section.hidden {
+  display: none;
+}
+
+#galaxy-history-body {
+  padding: 6px 12px 8px;
+}
+
+.galaxy-history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.galaxy-history-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+.galaxy-history-link:hover {
+  text-decoration: underline;
+}
+.galaxy-history-meta {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .galaxy-invocation-row {
   padding: 6px 0;
   border-bottom: 1px solid var(--border);

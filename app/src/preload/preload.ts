@@ -153,6 +153,7 @@ export interface OrbitAPI {
   } | null>;
   getVersion(): Promise<{ version: string; isPackaged: boolean }>;
   openReleasePage(url?: string): Promise<{ opened: boolean }>;
+  openGalaxyHistory(url: string): Promise<{ opened: boolean }>;
   restartToUpdate(): Promise<{ restarting: boolean }>;
   onUpdateDownloaded(cb: (info: { version: string }) => void): void;
   onUpdateError(cb: (info: { message: string }) => void): void;
@@ -260,6 +261,7 @@ const api: OrbitAPI = {
   checkVersion: () => ipcRenderer.invoke("version:check"),
   getVersion: () => ipcRenderer.invoke("version:current"),
   openReleasePage: (url) => ipcRenderer.invoke("version:open-release", url),
+  openGalaxyHistory: (url) => ipcRenderer.invoke("galaxy:open-history", url),
   restartToUpdate: () => ipcRenderer.invoke("update:restart"),
   onUpdateDownloaded: (cb) => {
     ipcRenderer.on("update:downloaded", (_e, info) => cb(info));
