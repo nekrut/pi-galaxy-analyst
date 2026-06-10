@@ -399,6 +399,8 @@ export class ChatPanel {
   }
 
   addErrorMessage(text: string): void {
+    // Flush any prose streamed before this error so the export keeps order.
+    this.flushAssistantSegment();
     if (this.lastErrorEl && this.lastErrorText === text) {
       this.lastErrorCount += 1;
       this.lastErrorEl.textContent = `${text}  (x${this.lastErrorCount})`;

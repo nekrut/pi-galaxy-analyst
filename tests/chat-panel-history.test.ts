@@ -95,4 +95,14 @@ describe("ChatPanel text/tool ordering", () => {
     expect(iBefore).toBeLessThan(iTool);
     expect(iTool).toBeLessThan(iAfter);
   });
+
+  it("flushes pending prose before an error so order is preserved", () => {
+    const panel = makePanel();
+    panel.startAssistantMessage();
+    panel.appendDelta("Trying the thing.");
+    panel.addErrorMessage("it broke");
+    panel.finishAssistantMessage();
+    const md = panel.exportAsMarkdown();
+    expect(md.indexOf("Trying the thing.")).toBeLessThan(md.indexOf("*Error: it broke*"));
+  });
 });
