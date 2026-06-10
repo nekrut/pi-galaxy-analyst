@@ -9,6 +9,7 @@ import { FeedbackConfirmation } from "./feedback-confirmation.js";
 import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
+import { FeedbackDraftStore } from "./feedback-draft.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
 import {
@@ -3530,6 +3531,11 @@ const reportConfirmation = new FeedbackConfirmation({
   onClose: () => closeReportModal(),
 });
 
+// Issue #234: hold the in-progress title/body so dismissing the modal to copy
+// something from chat and reopening it doesn't wipe the draft. Module-scope so
+// it survives every open/close within a session; cleared only on a sent report.
+const feedbackDraft = new FeedbackDraftStore();
+
 // Budget for the *encoded* body in the GitHub URL. The whole URL
 // (~"https://github.com/galaxyproject/loom/issues/new?title=…&body=…")
 // has to fit within ~8KB or the OS/browser refuses to open it. Most
@@ -3544,20 +3550,34 @@ function openReportModal(): void {
   reportSuccess.classList.add("hidden");
   reportFormFields.classList.remove("hidden");
   reportFooter.classList.remove("hidden");
-  reportTitle.value = "";
-  reportBody.value = "";
+  // Restore any in-progress draft instead of clearing the fields (#234).
+  const draft = feedbackDraft.load();
+  reportTitle.value = draft.title;
+  reportBody.value = draft.body;
   // Default ON: the primary destination is Loom's private capture store, not a
   // public issue, so opt-out is fine. The user can still uncheck before sending,
   // and the public GitHub fallback (POST failure) sends text only -- no
-  // diagnostics -- so this never auto-publishes logs to a public issue.
+  // diagnostics -- so this never auto-publishes logs to a public issue. The
+  // toggles intentionally reset each open; only the typed text is a draft.
   reportIncludeSysinfo.checked = true;
   reportIncludeLogs.checked = true;
   reportOverlay.classList.remove("hidden");
   reportTitle.focus();
 }
+// Every dismiss path routes through here, so stashing the current text here
+// keeps the draft alive no matter how the modal is closed (#234). A sent report
+// empties the fields first (clearReportForm), so this saves nothing in that case.
 function closeReportModal(): void {
   reportConfirmation.cancel();
+  feedbackDraft.save({ title: reportTitle.value, body: reportBody.value });
   reportOverlay.classList.add("hidden");
+}
+// Report sent: drop the held draft and blank the fields so the next open starts
+// clean. Pair with closeReportModal(), which then has an empty form to stash.
+function clearReportForm(): void {
+  feedbackDraft.clear();
+  reportTitle.value = "";
+  reportBody.value = "";
 }
 
 // Cap a body on its URL-encoded length for the GitHub-issue fallback. The "new
@@ -3682,8 +3702,10 @@ reportSubmit.addEventListener("click", async () => {
     const payload = await buildFeedbackPayload();
     const result = await window.orbit.submitFeedback(payload);
     if (result.ok) {
-      // Show an inline "Feedback received, thank you!" before auto-closing, so a
-      // successful send is visibly confirmed instead of the modal just vanishing.
+      // Clear the held draft and blank the fields first, so the auto-close that
+      // confirm() schedules stashes nothing, then show the inline "Feedback
+      // received, thank you!" before the modal closes itself (#213 + #234).
+      clearReportForm();
       reportConfirmation.confirm();
       return;
     }
@@ -3694,6 +3716,7 @@ reportSubmit.addEventListener("click", async () => {
         "\n\n_(sent via fallback; diagnostics omitted -- the feedback service was unreachable)_",
     );
     await window.orbit.openIssueReport({ title, body: fallbackBody });
+    clearReportForm();
     closeReportModal();
   } finally {
     reportSubmit.disabled = false;
