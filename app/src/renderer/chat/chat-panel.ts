@@ -36,6 +36,10 @@ export class ChatPanel {
   private lastErrorText = "";
   private lastErrorCount = 0;
   private history: MessageRecord[] = [];
+  // Assistant text accumulated since the last export flush (message start or a
+  // tool card). Flushed as its own record so prose keeps its order around tool
+  // cards instead of all collapsing to one block pushed at message end.
+  private pendingSegment = "";
   private copyBtn: HTMLElement;
 
   constructor(container: HTMLElement) {
@@ -175,6 +179,7 @@ export class ChatPanel {
     this.container.innerHTML = "";
     this.currentMessage = null;
     this.currentText = "";
+    this.pendingSegment = "";
     this.pendingBlockBreak = false;
     this.toolCards.clear();
     this.thinkingEl = null;
@@ -259,6 +264,7 @@ export class ChatPanel {
 
   startAssistantMessage(): void {
     this.currentText = "";
+    this.pendingSegment = "";
     this.pendingBlockBreak = false;
     const el = document.createElement("div");
     el.className = "message assistant";
@@ -283,8 +289,10 @@ export class ChatPanel {
     if (this.pendingBlockBreak) {
       this.pendingBlockBreak = false;
       this.currentText = joinTextBlocks(this.currentText, delta);
+      this.pendingSegment = joinTextBlocks(this.pendingSegment, delta);
     } else {
       this.currentText += delta;
+      this.pendingSegment += delta;
     }
     this.renderCurrentMessage();
     this.scrollToBottom();
@@ -296,15 +304,25 @@ export class ChatPanel {
     }
     // Clean up any stray cursors across the whole container
     this.container.querySelectorAll(".cursor-blink").forEach((c) => c.remove());
-    if (this.currentText) {
-      this.history.push({ role: "assistant", text: this.currentText });
-    }
+    this.flushAssistantSegment();
     this.currentMessage = null;
     this.currentText = "";
     this.pendingBlockBreak = false;
   }
 
+  /**
+   * Push the assistant text accumulated since the last flush as one export
+   * record. Called at each tool card and at message end so prose keeps its
+   * position relative to tool cards.
+   */
+  private flushAssistantSegment(): void {
+    const segment = this.pendingSegment.trim();
+    if (segment) this.history.push({ role: "assistant", text: segment });
+    this.pendingSegment = "";
+  }
+
   addToolCard(id: string, name: string): void {
+    this.flushAssistantSegment();
     this.history.push({ role: "tool", id, name, status: "running" });
     const card = document.createElement("div");
     card.className = "tool-card";

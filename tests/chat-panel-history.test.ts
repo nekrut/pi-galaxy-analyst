@@ -73,3 +73,26 @@ describe("ChatPanel tool history", () => {
     expect(md).not.toContain("Tool call …");
   });
 });
+
+describe("ChatPanel text/tool ordering", () => {
+  it("records assistant prose in order relative to tool cards", () => {
+    const panel = makePanel();
+    panel.startAssistantMessage();
+    panel.appendDelta("Let me run a team.");
+    panel.addToolCard("t1", "team_dispatch");
+    panel.updateToolCard("t1", "done", "team result");
+    panel.separateNextBlock();
+    panel.appendDelta("All done!");
+    panel.finishAssistantMessage();
+
+    const md = panel.exportAsMarkdown();
+    const iBefore = md.indexOf("Let me run a team.");
+    const iTool = md.indexOf("Tool call");
+    const iAfter = md.indexOf("All done!");
+    expect(iBefore).toBeGreaterThanOrEqual(0);
+    expect(iAfter).toBeGreaterThanOrEqual(0);
+    // prose-before-tool must export before the tool card, prose-after must follow it
+    expect(iBefore).toBeLessThan(iTool);
+    expect(iTool).toBeLessThan(iAfter);
+  });
+});
