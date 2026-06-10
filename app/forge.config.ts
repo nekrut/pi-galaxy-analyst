@@ -343,6 +343,12 @@ const config: ForgeConfig = {
         options: {
           maintainer: "Galaxy Project contributors",
           homepage: "https://galaxyproject.org",
+          // electron-installer-debian's computed default depends omit ALSA, but
+          // Electron links libasound.so.2 -- without it Orbit fails to launch on
+          // Ubuntu/WSL2 with "error while loading shared libraries". depends is
+          // unioned with the defaults, so this only adds the missing lib.
+          // libasound2t64 on newer Ubuntu satisfies libasound2 via Provides.
+          depends: ["libasound2"],
         },
       },
     },
