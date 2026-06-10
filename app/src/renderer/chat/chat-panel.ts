@@ -377,13 +377,16 @@ export class ChatPanel {
   }
 
   addErrorMessage(text: string): void {
-    this.history.push({ role: "error", text });
     if (this.lastErrorEl && this.lastErrorText === text) {
       this.lastErrorCount += 1;
       this.lastErrorEl.textContent = `${text}  (x${this.lastErrorCount})`;
       this.scrollToBottom();
       return;
     }
+    // Record only when a new card is actually rendered -- duplicates collapse
+    // into the card above, so one record per visible card keeps the export in
+    // sync with what the user sees.
+    this.history.push({ role: "error", text });
     const el = document.createElement("div");
     el.className = "message assistant";
     el.style.color = "var(--error)";
