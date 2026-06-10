@@ -10,7 +10,7 @@ import type {
   ParameterSpec,
 } from "../../../../shared/loom-shell-contract.js";
 
-type MessageRecord =
+export type MessageRecord =
   | { role: "user"; text: string }
   | { role: "assistant"; text: string }
   | { role: "tool"; name: string; status: string; result?: string }
@@ -420,20 +420,7 @@ export class ChatPanel {
 
   /** Export the current conversation as a Markdown string. */
   exportAsMarkdown(): string {
-    const lines: string[] = [];
-    for (const rec of this.history) {
-      if (rec.role === "user") {
-        lines.push(`**You**\n\n${rec.text}\n`);
-      } else if (rec.role === "assistant") {
-        lines.push(`**Assistant**\n\n${rec.text}\n`);
-      } else if (rec.role === "tool") {
-        const badge = rec.status === "done" ? "✓" : rec.status === "error" ? "✗" : "…";
-        lines.push(`*Tool call ${badge}: \`${rec.name}\`*${rec.result ? `\n\n\`\`\`\n${rec.result}\n\`\`\`` : ""}\n`);
-      } else if (rec.role === "error") {
-        lines.push(`*Error: ${rec.text}*\n`);
-      }
-    }
-    return lines.join("\n---\n\n");
+    return historyToMarkdown(this.history);
   }
 
   private initCopyButton(): HTMLElement {
@@ -532,7 +519,24 @@ export class ChatPanel {
   }
 }
 
-function fragmentToMarkdown(el: HTMLElement): string {
+export function historyToMarkdown(records: MessageRecord[]): string {
+  const lines: string[] = [];
+  for (const rec of records) {
+    if (rec.role === "user") {
+      lines.push(`**You**\n\n${rec.text}\n`);
+    } else if (rec.role === "assistant") {
+      lines.push(`**Assistant**\n\n${rec.text}\n`);
+    } else if (rec.role === "tool") {
+      const badge = rec.status === "done" ? "✓" : rec.status === "error" ? "✗" : "…";
+      lines.push(`*Tool call ${badge}: \`${rec.name}\`*${rec.result ? `\n\n\`\`\`\n${rec.result}\n\`\`\`` : ""}\n`);
+    } else if (rec.role === "error") {
+      lines.push(`*Error: ${rec.text}*\n`);
+    }
+  }
+  return lines.join("\n---\n\n");
+}
+
+export function fragmentToMarkdown(el: HTMLElement): string {
   return nodeToMd(el).trim();
 }
 
