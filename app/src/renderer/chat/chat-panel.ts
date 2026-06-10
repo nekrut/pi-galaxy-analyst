@@ -438,7 +438,9 @@ export class ChatPanel {
     btn.addEventListener("mousedown", (e) => e.preventDefault()); // keep selection alive on button click
 
     document.addEventListener("mousedown", (e) => {
-      if (e.target !== btn) { btn.hidden = true; mouseIsDown = true; }
+      // contains() so clicking the button's inner <svg> (a child) still counts
+      // as the button -- otherwise the icon hit hides it before the copy fires.
+      if (!btn.contains(e.target as Node)) { btn.hidden = true; mouseIsDown = true; }
     });
     document.addEventListener("mouseup", () => {
       mouseIsDown = false;
