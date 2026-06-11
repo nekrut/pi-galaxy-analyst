@@ -78,7 +78,7 @@ function resolveLoomBin(): string {
   return path.resolve(__dirname, "../../../bin/loom.js");
 }
 
-// Resolve the Node binary the brain runs under. Dev assumes Node 20+ on PATH.
+// Resolve the Node binary the brain runs under. Dev assumes Node 22.19+ on PATH.
 // Packaged Orbit ships its own Node next to Loom (Resources/node/) so users
 // don't need to have Node installed; this also keeps native module ABI in sync
 // with whatever Node ran `npm ci` during prePackage staging.
