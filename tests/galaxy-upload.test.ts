@@ -1,71 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as os from "os";
 import * as path from "path";
+import * as fsMod from "fs";
+import * as osMod from "os";
+import * as pathMod from "path";
 import {
-  buildGalaxyUploadArgs,
-  detectUploadFailure,
   resolveStoragePath,
   pickUploadedDataset,
-  GALAXY_UPLOAD_PACKAGE,
   type HistoryContentItem,
 } from "../extensions/loom/galaxy-upload";
-
-describe("buildGalaxyUploadArgs", () => {
-  it("builds the base command with a pinned package, --no-auto-decompress, --silent, and no creds on argv", () => {
-    const args = buildGalaxyUploadArgs({
-      historyId: "h1",
-      path: "/data/reads.fastq",
-      storagePath: "/home/u/.loom/upload-resume.json",
-    });
-    expect(args).toEqual([
-      GALAXY_UPLOAD_PACKAGE,
-      "--history-id",
-      "h1",
-      "--storage",
-      "/home/u/.loom/upload-resume.json",
-      "--no-auto-decompress",
-      "--silent",
-      "/data/reads.fastq",
-    ]);
-    expect(GALAXY_UPLOAD_PACKAGE).toMatch(/^galaxy-upload>=/);
-    expect(args).not.toContain("--url");
-    expect(args).not.toContain("--api-key");
-  });
-
-  it("includes optional flags only when provided, with path last", () => {
-    const args = buildGalaxyUploadArgs({
-      historyId: "h1",
-      path: "/data/reads.fastq",
-      storagePath: "/s.json",
-      fileType: "fastqsanger.gz",
-      dbkey: "hg38",
-      fileName: "sample1.fastq",
-    });
-    expect(args).toContain("--file-type");
-    expect(args[args.indexOf("--file-type") + 1]).toBe("fastqsanger.gz");
-    expect(args[args.indexOf("--dbkey") + 1]).toBe("hg38");
-    expect(args[args.indexOf("--file-name") + 1]).toBe("sample1.fastq");
-    expect(args[args.length - 1]).toBe("/data/reads.fastq");
-  });
-});
-
-describe("detectUploadFailure", () => {
-  it("passes on clean exit 0", () => {
-    expect(detectUploadFailure(0, "")).toEqual({ failed: false });
-  });
-
-  it("fails on non-zero exit, reporting the first stderr line", () => {
-    const r = detectUploadFailure(1, "Traceback...\nboom\n");
-    expect(r.failed).toBe(true);
-    expect(r.message).toBe("Traceback...");
-  });
-
-  it("fails on exit 0 when stderr carries an ERROR: line (galaxy-upload swallows the exit code)", () => {
-    const r = detectUploadFailure(0, "ERROR: Unable to connect to Galaxy: 503\n");
-    expect(r.failed).toBe(true);
-    expect(r.message).toBe("Unable to connect to Galaxy: 503");
-  });
-});
 
 describe("resolveStoragePath", () => {
   it("is under ~/.loom and stable", () => {
@@ -78,7 +21,13 @@ describe("pickUploadedDataset", () => {
   const items: HistoryContentItem[] = [
     { id: "a", hid: 1, name: "reads.fastq", state: "ok", history_content_type: "dataset" },
     { id: "b", hid: 5, name: "reads.fastq", state: "queued", history_content_type: "dataset" },
-    { id: "c", hid: 9, name: "reads.fastq", state: "ok", history_content_type: "dataset_collection" },
+    {
+      id: "c",
+      hid: 9,
+      name: "reads.fastq",
+      state: "ok",
+      history_content_type: "dataset_collection",
+    },
   ];
 
   it("returns the newest dataset matching the file name", () => {
@@ -90,17 +39,19 @@ describe("pickUploadedDataset", () => {
   });
 });
 
-import { describe as describeH, it as itH, expect as expectH, vi, beforeEach, afterEach } from "vitest";
-import * as fsMod from "fs";
-import * as osMod from "os";
-import * as pathMod from "path";
+// ---------------------------------------------------------------------------
+// Handler tests
+// ---------------------------------------------------------------------------
 
-vi.mock("../extensions/loom/galaxy-upload-runner");
+vi.mock("../extensions/loom/galaxy-upload-tus", async (orig) => {
+  const real = (await orig()) as object;
+  return { ...real, tusUpload: vi.fn(), waitForDataset: vi.fn() };
+});
 vi.mock("../extensions/loom/galaxy-api");
 vi.mock("../extensions/loom/state");
 
-import { runGalaxyUpload } from "../extensions/loom/galaxy-upload-runner";
-import { galaxyGet, getGalaxyConfig } from "../extensions/loom/galaxy-api";
+import { tusUpload, waitForDataset } from "../extensions/loom/galaxy-upload-tus";
+import { galaxyGet, galaxyPost, getGalaxyConfig } from "../extensions/loom/galaxy-api";
 import { getCurrentHistoryId } from "../extensions/loom/state";
 import { registerGalaxyUploadTool } from "../extensions/loom/galaxy-upload";
 
@@ -125,7 +76,7 @@ function getTool() {
   const { api, tools } = makeFakeApi();
   registerGalaxyUploadTool(api);
   const tool = tools.find((t) => t.name === "galaxy_upload_local_file")!;
-  expectH(tool).toBeDefined();
+  expect(tool).toBeDefined();
   return tool;
 }
 
@@ -146,15 +97,17 @@ beforeEach(() => {
 
   vi.mocked(getGalaxyConfig).mockReturnValue({ url: "https://galaxy.test", apiKey: "k" });
   vi.mocked(getCurrentHistoryId).mockReturnValue("hist1");
-  vi.mocked(runGalaxyUpload).mockResolvedValue({
-    exitCode: 0,
-    stdout: "",
-    stderr: "",
-    aborted: false,
+  vi.mocked(tusUpload).mockResolvedValue({ sessionId: "S1" });
+  vi.mocked(galaxyPost).mockResolvedValue({
+    outputs: [{ id: "ds1", hid: 3, name: "reads.fastq", state: "queued" }],
+    jobs: [{ id: "job1", state: "new" }],
+  } as any);
+  vi.mocked(waitForDataset).mockResolvedValue({
+    id: "ds1",
+    state: "ok",
+    hid: 3,
+    name: "reads.fastq",
   });
-  vi.mocked(galaxyGet).mockResolvedValue([
-    { id: "ds1", hid: 3, name: "reads.fastq", state: "queued", history_content_type: "dataset" },
-  ] as any);
 });
 
 afterEach(() => {
@@ -162,111 +115,126 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describeH("galaxy_upload_local_file handler", () => {
-  itH("uploads and returns the read-back dataset id", async () => {
+describe("galaxy_upload_local_file handler", () => {
+  it("happy path: tusUpload called once; galaxyPost to /tools/fetch with correct session_id; result has datasetId and state ok", async () => {
     const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
-    expectH(res.details.error).toBeFalsy();
-    expectH(res.details.datasetId).toBe("ds1");
-    expectH(res.content[0].text).toContain("ds1");
+    expect(tusUpload).toHaveBeenCalledOnce();
+    expect(galaxyPost).toHaveBeenCalledWith(
+      "/tools/fetch",
+      expect.objectContaining({
+        "files_0|file_data": expect.objectContaining({ session_id: "S1" }),
+      }),
+      expect.anything(),
+    );
+    expect(res.details.error).toBeFalsy();
+    expect(res.details.datasetId).toBe("ds1");
+    expect(res.details.state).toBe("ok");
   });
 
-  itH("passes creds via env, never on argv", async () => {
+  it("passes creds to tusUpload via opts (not argv)", async () => {
     await run(getTool(), { path: goodFile, history_id: "hist1" });
-    const call = vi.mocked(runGalaxyUpload).mock.calls[0][0];
-    expectH(call.env.GALAXY_URL).toBe("https://galaxy.test");
-    expectH(call.env.GALAXY_API_KEY).toBe("k");
-    expectH(call.args).not.toContain("--api-key");
-    expectH(call.args).not.toContain("--url");
-    expectH(call.args).toContain("--silent");
+    const call = vi.mocked(tusUpload).mock.calls[0][0];
+    expect(call.baseUrl).toBe("https://galaxy.test");
+    expect(call.apiKey).toBe("k");
   });
 
-  itH("defaults history_id to the current history", async () => {
-    await run(getTool(), { path: goodFile });
-    const call = vi.mocked(runGalaxyUpload).mock.calls[0][0];
-    expectH(call.args[call.args.indexOf("--history-id") + 1]).toBe("hist1");
+  it("returns cancelled text when tusUpload rejects with AbortError", async () => {
+    const abortErr = new DOMException("aborted", "AbortError");
+    vi.mocked(tusUpload).mockRejectedValue(abortErr);
+    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
+    expect(res.content[0].text).toMatch(/cancel/i);
   });
 
-  itH("errors when no history is available", async () => {
+  it("returns error with reject reason when galaxyPost rejects", async () => {
+    vi.mocked(galaxyPost).mockRejectedValue(new Error("Galaxy API 400: bad ext"));
+    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
+    expect(res.details.error).toBe(true);
+    expect(res.content[0].text).toMatch(/400|reject/i);
+  });
+
+  it("read-back fallback: when outputs absent, falls back to galaxyGet history-contents", async () => {
+    vi.mocked(galaxyPost).mockResolvedValue({ jobs: [{ id: "job1", state: "new" }] } as any);
+    vi.mocked(galaxyGet).mockResolvedValue([
+      { id: "ds2", hid: 7, name: "reads.fastq", state: "ok", history_content_type: "dataset" },
+    ] as any);
+    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
+    expect(galaxyGet).toHaveBeenCalled();
+    expect(res.details.error).toBeFalsy();
+    expect(res.details.datasetId).toBe("ds2");
+  });
+
+  it("waitForDataset path used when outputs present (not galaxyGet for history-contents)", async () => {
+    // galaxyPost already returns outputs in the default mock
+    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
+    expect(waitForDataset).toHaveBeenCalled();
+    // galaxyGet should NOT be called for the history-contents fallback
+    expect(galaxyGet).not.toHaveBeenCalledWith(
+      expect.stringContaining("/histories/"),
+      expect.anything(),
+    );
+    expect(res.details.datasetId).toBe("ds1");
+  });
+
+  it("errors when no history is available", async () => {
     vi.mocked(getCurrentHistoryId).mockReturnValue(null);
     const res = await run(getTool(), { path: goodFile });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/history/i);
-    expectH(runGalaxyUpload).not.toHaveBeenCalled();
+    expect(res.details.error).toBe(true);
+    expect(res.content[0].text).toMatch(/history/i);
+    expect(tusUpload).not.toHaveBeenCalled();
   });
 
-  itH("errors when Galaxy is not configured", async () => {
+  it("errors when Galaxy is not configured", async () => {
     vi.mocked(getGalaxyConfig).mockReturnValue(null);
     const res = await run(getTool(), { path: goodFile, history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/not configured/i);
+    expect(res.details.error).toBe(true);
+    expect(res.content[0].text).toMatch(/not configured/i);
+    expect(tusUpload).not.toHaveBeenCalled();
   });
 
-  itH("errors when the file does not exist", async () => {
-    const res = await run(getTool(), { path: pathMod.join(sandbox, "nope.fastq"), history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/not found/i);
+  it("errors when the file does not exist", async () => {
+    const res = await run(getTool(), {
+      path: pathMod.join(sandbox, "nope.fastq"),
+      history_id: "h",
+    });
+    expect(res.details.error).toBe(true);
+    expect(res.content[0].text).toMatch(/not found/i);
+    expect(tusUpload).not.toHaveBeenCalled();
   });
 
-  itH("refuses to upload a sensitive/credential file", async () => {
+  it("refuses to upload a sensitive/credential file", async () => {
     const secret = pathMod.join(sandbox, "id_rsa");
     fsMod.writeFileSync(secret, "PRIVATE");
     const res = await run(getTool(), { path: secret, history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/sensitive|credential|refus/i);
-    expectH(runGalaxyUpload).not.toHaveBeenCalled();
+    expect(res.details.error).toBe(true);
+    expect(res.content[0].text).toMatch(/sensitive|credential|refus/i);
+    expect(tusUpload).not.toHaveBeenCalled();
   });
 
-  itH("reports failure on a non-zero exit", async () => {
-    vi.mocked(runGalaxyUpload).mockResolvedValue({
-      exitCode: 1, stdout: "", stderr: "boom\n", aborted: false,
-    });
-    const res = await run(getTool(), { path: goodFile, history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/boom/);
-  });
-
-  itH("reports failure on exit 0 with an ERROR: line", async () => {
-    vi.mocked(runGalaxyUpload).mockResolvedValue({
-      exitCode: 0, stdout: "", stderr: "ERROR: Unable to connect\n", aborted: false,
-    });
-    const res = await run(getTool(), { path: goodFile, history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/Unable to connect/);
-  });
-
-  itH("returns cancelled when aborted", async () => {
-    vi.mocked(runGalaxyUpload).mockResolvedValue({
-      exitCode: null, stdout: "", stderr: "", aborted: true,
-    });
-    const res = await run(getTool(), { path: goodFile, history_id: "h" });
-    expectH(res.content[0].text).toMatch(/cancel/i);
-  });
-
-  itH("gives an actionable message when uvx is missing (ENOENT)", async () => {
-    vi.mocked(runGalaxyUpload).mockRejectedValue(
-      Object.assign(new Error("spawn uvx ENOENT"), { code: "ENOENT" }),
-    );
-    const res = await run(getTool(), { path: goodFile, history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/uvx|uv\b/i);
-  });
-
-  itH("falls back gracefully when the dataset read-back fails", async () => {
-    vi.mocked(galaxyGet).mockRejectedValue(new Error("500"));
-    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
-    expectH(res.details.error).toBeFalsy();
-    expectH(res.details.uploaded).toBe(true);
-    expectH(res.content[0].text).toMatch(/get_history_contents/);
-  });
-
-  itH("refuses a benign-named symlink whose target is a sensitive file", async () => {
+  it("refuses a benign-named symlink whose target is a sensitive file", async () => {
     const realSecret = pathMod.join(sandbox, "server.key");
     fsMod.writeFileSync(realSecret, "PRIVATE");
     const link = pathMod.join(sandbox, "innocent.fastq");
     fsMod.symlinkSync(realSecret, link);
     const res = await run(getTool(), { path: link, history_id: "h" });
-    expectH(res.details.error).toBe(true);
-    expectH(res.content[0].text).toMatch(/sensitive|credential|refus/i);
-    expectH(runGalaxyUpload).not.toHaveBeenCalled();
+    expect(res.details.error).toBe(true);
+    expect(res.content[0].text).toMatch(/sensitive|credential|refus/i);
+    expect(tusUpload).not.toHaveBeenCalled();
+  });
+
+  it("falls back gracefully when waitForDataset times out (returns last-known state)", async () => {
+    vi.mocked(waitForDataset).mockRejectedValue(new Error("Upload ingest timed out after 600s"));
+    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
+    // should still return the initial dataset info from the fetch response
+    expect(res.details.error).toBeFalsy();
+    expect(res.details.datasetId).toBe("ds1");
+  });
+
+  it("falls back gracefully when both fetch outputs missing and history-contents get fails", async () => {
+    vi.mocked(galaxyPost).mockResolvedValue({ jobs: [{ id: "job1", state: "new" }] } as any);
+    vi.mocked(galaxyGet).mockRejectedValue(new Error("500"));
+    const res = await run(getTool(), { path: goodFile, history_id: "hist1" });
+    expect(res.details.error).toBeFalsy();
+    expect(res.details.uploaded).toBe(true);
+    expect(res.content[0].text).toMatch(/get_history_contents/);
   });
 });
