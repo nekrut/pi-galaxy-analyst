@@ -12,6 +12,7 @@ import {
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
 import { isUvxAvailable, uvxMissingNotice } from "./uvx-check.js";
+import { resolveHideThinking, isInteractiveTerminal } from "./thinking-pref.js";
 import { pickChannel } from "../shared/version-compare.js";
 import {
   isCustomProvider,
@@ -619,12 +620,21 @@ if (userArgs[0] === "update") {
     return null;
   }
 
-  // Suppress Pi's keybinding banner, resource listing, and "What's New"
-  // changelog. Loom is the product identity -- users shouldn't see Pi internals
-  // unless they pass --verbose. The changelog draws from pi-coding-agent's own
-  // CHANGELOG.md and is gated on lastChangelogVersion; pinning that to Pi's
-  // current version means getNewEntries() never finds anything newer to show.
-  if (!hasArg("--verbose")) {
+  // Reconcile the Pi settings loom manages. Two concerns share one read/write:
+  //  - Startup quiet (banner, resource listing, "What's New" changelog): loom is
+  //    the product identity, so users shouldn't see Pi internals unless they
+  //    pass --verbose. The changelog is gated on lastChangelogVersion; pinning
+  //    it to Pi's current version means getNewEntries() finds nothing newer.
+  //  - Thinking visibility (interactive terminal only): Pi streams the model's
+  //    reasoning into the TUI, which is noisy, so loom hides it by default.
+  //    `hideThinkingBlock` is a persisted global Pi setting that only the
+  //    interactive renderer reads, so only reconcile it for an interactive
+  //    terminal launch -- never for the non-interactive modes (rpc for Orbit
+  //    and the web server, json for evals, headless --print), which would
+  //    churn the global file for a setting they never read. Override
+  //    persistently with `ui.showThinking: true` in ~/.loom/config.json, or
+  //    just toggle it live in-session with Ctrl+T.
+  {
     const piSettingsPath = join(agentDir, "settings.json");
     try {
       let piSettings = {};
@@ -632,15 +642,29 @@ if (userArgs[0] === "update") {
         piSettings = JSON.parse(readFileSync(piSettingsPath, "utf-8"));
       }
       let changed = false;
-      if (!piSettings.quietStartup) {
-        piSettings.quietStartup = true;
-        changed = true;
+
+      if (!hasArg("--verbose")) {
+        if (!piSettings.quietStartup) {
+          piSettings.quietStartup = true;
+          changed = true;
+        }
+        const piVersion = resolvePiVersion();
+        if (piVersion && piSettings.lastChangelogVersion !== piVersion) {
+          piSettings.lastChangelogVersion = piVersion;
+          changed = true;
+        }
       }
-      const piVersion = resolvePiVersion();
-      if (piVersion && piSettings.lastChangelogVersion !== piVersion) {
-        piSettings.lastChangelogVersion = piVersion;
-        changed = true;
+
+      if (isInteractiveTerminal(userArgs)) {
+        const hideThinking = resolveHideThinking({
+          configShowThinking: loomConfig.ui?.showThinking,
+        });
+        if (piSettings.hideThinkingBlock !== hideThinking) {
+          piSettings.hideThinkingBlock = hideThinking;
+          changed = true;
+        }
       }
+
       if (changed) {
         mkdirSync(dirname(piSettingsPath), { recursive: true });
         writeFileSync(piSettingsPath, JSON.stringify(piSettings, null, 2));
