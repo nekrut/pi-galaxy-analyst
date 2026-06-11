@@ -7,7 +7,7 @@ import {
 } from "./state.js";
 import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller.js";
 import {
-  appendSessionSummaryBlock,
+  upsertSessionSummaryBlock,
   readNotebook,
   withNotebookLock,
   writeNotebook,
@@ -83,10 +83,14 @@ function snapshotNotebook(pi: ExtensionAPI): void {
 }
 
 /**
- * Append a `loom-session` block to the notebook on shutdown so a future
+ * Write a `loom-session` block to the notebook on shutdown so a future
  * session can see what was running. `orphaned_active_steps` is 0 today
  * (typed plan-step blocks don't exist yet); this writer is the receiving
  * end of that future change.
+ *
+ * Upserts by session id (#260): Pi reuses the same session id when an idle
+ * session is resumed, so a second shutdown continues the existing block
+ * rather than appending a duplicate under the same id.
  *
  * Uses the same per-path mutex chain as the invocation poller so a
  * concurrent `galaxy_invocation_check_*` write at shutdown doesn't lose
@@ -105,7 +109,7 @@ async function writeSessionSummary(): Promise<void> {
   try {
     await withNotebookLock(nbPath, async () => {
       const content = await readNotebook(nbPath);
-      const updated = appendSessionSummaryBlock(content, summary);
+      const updated = upsertSessionSummaryBlock(content, summary);
       await writeNotebook(nbPath, updated);
     });
   } catch (err) {
