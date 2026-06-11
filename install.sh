@@ -26,14 +26,15 @@ echo -e "${GREEN}║     Galaxy Co-Scientist for Bioinformatics ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Check Node.js
+# Check Node.js (>=22.19, matching package.json engines.node / .nvmrc)
 if ! command -v node &> /dev/null; then
-    error "Node.js is required but not installed. Please install Node.js 18+ from https://nodejs.org/"
+    error "Node.js is required but not installed. Please install Node.js 22.19+ from https://nodejs.org/"
 fi
 
-NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-    error "Node.js 18+ is required. You have $(node -v). Please upgrade."
+NODE_MAJOR=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+NODE_MINOR=$(node -v | cut -d'.' -f2)
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
+    error "Node.js 22.19+ is required. You have $(node -v). Please upgrade."
 fi
 success "Node.js $(node -v) found"
 

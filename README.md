@@ -227,7 +227,7 @@ Orbit ships as a native installer that bundles its own Node runtime, `uv`, and L
 
 ### Loom CLI from npm
 
-Run the brain on the command line without Orbit. Requires Node 22+ and (for Galaxy MCP) [uv](https://docs.astral.sh/uv/).
+Run the brain on the command line without Orbit. Requires Node 22.19+ and (for Galaxy MCP) [uv](https://docs.astral.sh/uv/).
 
 ```bash
 npm install -g @galaxyproject/loom
@@ -279,7 +279,7 @@ node bin/loom.js                       # from repo root
 For a browser-based dev loop with hot reload (the Orbit renderer served over
 the web, against the same brain), see [`web/README.md`](web/README.md).
 
-The developer install needs Node 22+ and `uv` on `PATH`. Per-OS bootstrap below.
+The developer install needs Node 22.19+ (matching [`.nvmrc`](.nvmrc)) and `uv` on `PATH`. Per-OS bootstrap below.
 
 #### Linux (Ubuntu/Debian)
 
