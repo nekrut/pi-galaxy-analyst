@@ -4,6 +4,13 @@ Notable, user-facing changes to Loom and Orbit. Each release lists a short set o
 highlights; the full commit-level notes live on the GitHub release pages. Add a
 new `## [<version>] - <date>` block with a `### Highlights` list at release time.
 
+## [0.4.1] - 2026-06-11
+
+### Highlights
+
+- Require the Galaxy MCP 1.8 server (up from 1.6): workflow runs now validate inputs against the tool's datatypes before submitting -- catching datatype and collection mismatches early -- with input templates and run guidance to go with them
+- User-defined tools run again on Galaxy 26.0 servers
+
 ## [0.4.0] - 2026-06-11
 
 ### Highlights

@@ -1,5 +1,5 @@
 // Pre-flight helper: is `uvx` resolvable on PATH? Galaxy MCP launches via
-// `uvx galaxy-mcp>=1.6.0` (see bin/loom.js), so when Galaxy credentials are
+// `uvx galaxy-mcp>=1.8.0` (see bin/loom.js), so when Galaxy credentials are
 // configured but uv isn't installed, pi-mcp-adapter fails to start that one
 // server with a spawn error buried in the logs and Galaxy tools silently
 // vanish. We detect the gap up front and print an actionable notice. Orbit
