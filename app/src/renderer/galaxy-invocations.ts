@@ -1,5 +1,6 @@
 /**
- * Galaxy invocations panel — third section in the Activity tab. Parses
+ * Galaxy invocations panel — an Activity-tab section (rendered after the
+ * Galaxy history section). Parses
  * `loom-invocation` YAML blocks from `notebook.md` and draws a live
  * progress row per active workflow.
  *

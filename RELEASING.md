@@ -1,8 +1,8 @@
 # Releasing Orbit
 
 This repo ships Orbit as platform-specific installer artifacts via electron-forge,
-triggered by pushing a git tag. The first packaged targets are macOS (arm64 and
-x64). Linux and Windows installers will follow in subsequent passes.
+triggered by pushing a git tag. Current packaged targets are macOS (arm64 + x64)
+and Linux (x64 + arm64). A native Windows build is in flight on a feature branch.
 
 ## Quick path
 
@@ -20,29 +20,34 @@ git push origin v0.1.0-alpha.1
 ```
 
 The `release` workflow (`.github/workflows/release.yml`) fires on any pushed
-`v*` tag. It runs `electron-forge make` on a macOS arm64 runner and a macOS
-x64 runner, then attaches both DMGs (and matching `.zip` archives) to a
-**draft** GitHub Release. Review the draft and publish manually when ready.
+`v*` tag. It runs `electron-forge make` across a build matrix (macOS arm64 +
+x64, Linux x64 + arm64) and attaches every installer (DMGs, `.zip` archives,
+`.deb`, `.rpm`) to a **draft** GitHub Release. Review the draft and publish
+manually when ready.
 
 ## What gets built
 
-| Runner        | Arch  | Artifacts                                                                                  |
-| ------------- | ----- | ------------------------------------------------------------------------------------------ |
-| macos-latest  | arm64 | `Orbit-<version>-arm64.dmg`, `Orbit-darwin-arm64-<version>.zip`                            |
-| macos-13      | x64   | `Orbit-<version>-x64.dmg`, `Orbit-darwin-x64-<version>.zip`                                |
-| ubuntu-latest | x64   | `orbit_<version>_amd64.deb`, `orbit-<version>.x86_64.rpm`, `Orbit-linux-x64-<version>.zip` |
+| Runner           | Arch  | Artifacts                                                                                       |
+| ---------------- | ----- | ----------------------------------------------------------------------------------------------- |
+| macos-latest     | arm64 | `Orbit-<version>-arm64.dmg`, `Orbit-darwin-arm64-<version>.zip`                                 |
+| macos-26-intel   | x64   | `Orbit-<version>-x64.dmg`, `Orbit-darwin-x64-<version>.zip`                                     |
+| ubuntu-latest    | x64   | `orbit_<version>_amd64.deb`, `orbit-<version>-1.x86_64.rpm`, `Orbit-linux-x64-<version>.zip`    |
+| ubuntu-24.04-arm | arm64 | `orbit_<version>_arm64.deb`, `orbit-<version>-1.aarch64.rpm`, `Orbit-linux-arm64-<version>.zip` |
 
 The macOS builds run on native GitHub runners — no cross-compilation, no universal binary.
-The Linux x64 build runs on `ubuntu-latest`; it produces a `.deb` (Debian/Ubuntu),
-`.rpm` (Fedora/RHEL/openSUSE), and a `.zip` tarball. The `.deb` also works inside
-**WSL2 with WSLg** on Windows 11 — the recommended path for Windows users until a
-native Windows build is added.
+The Linux builds run on `ubuntu-latest` (x64) and `ubuntu-24.04-arm` (arm64); each
+produces a `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL/openSUSE), and a `.zip`
+tarball. The Linux x64 `.deb` also works inside **WSL2 with WSLg** on Windows 11 —
+the recommended path for Windows users until a native Windows build lands.
+The Linux arm64 leg unblocks arm64 hosts (Jetson, Raspberry Pi, arm64 servers)
+that can't run the x64 installer or its bundled x64 `uv`.
 
-> **Heads-up:** `macos-13` is the only remaining x64-native runner in GitHub's
-> fleet and is on the deprecation track. When it sunsets, the x64 row above
-> stops working. Options at that point: drop x64 native builds, cross-compile
-> from arm64, or build x64 on a self-hosted Intel runner. Worth re-evaluating
-> based on x64 download share once we have release telemetry.
+> **Heads-up:** `macos-26-intel` is the newest standard Intel runner GitHub
+> offers (free for public repos), and macOS 26 is expected to be the last
+> Intel-capable macOS release. When this runner sunsets, the Intel mac row
+> above stops working. Options at that point: drop x64-native builds, cross-
+> compile from arm64, or build x64 on a self-hosted Intel runner. Worth
+> re-evaluating based on x64 download share once we have release telemetry.
 
 ## Code signing
 
@@ -61,15 +66,21 @@ workflow.
 
 ## Local make (developer sanity check)
 
-To produce a DMG locally on macOS without going through CI:
+To produce an installer locally without going through CI, run electron-forge
+make on a host that matches the target platform (no cross-platform packaging):
 
 ```bash
 cd app
 npm ci
+# macOS: produces a .dmg + .zip
 npx electron-forge make --arch=arm64    # or --arch=x64
+# Linux: produces .deb + .rpm + .zip
+npx electron-forge make --arch=arm64    # or --arch=x64; needs `fakeroot` + `rpm`
 ```
 
-Output lands in `app/out/make/`. The DMG is not signed by this path either.
+Output lands in `app/out/make/`. macOS installers built this way are
+unsigned. The bundled per-arch Node + `uv` (see `forge.config.ts`) are pulled
+on first run and cached in `.loom-stage/cache/`.
 
 ## Version-check banner
 
@@ -91,8 +102,8 @@ on a throwaway pattern and delete it after:
 ```bash
 git tag v0.0.0-mac-test
 git push origin v0.0.0-mac-test
-# Watch .github/workflows/release.yml run. Verify both DMGs attach to the
-# draft Release.
+# Watch .github/workflows/release.yml run. Verify every matrix leg's
+# installer attaches to the draft Release.
 git tag -d v0.0.0-mac-test
 git push origin :refs/tags/v0.0.0-mac-test
 # Then delete the draft Release in the GitHub UI.

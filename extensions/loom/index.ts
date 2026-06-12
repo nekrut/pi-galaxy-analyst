@@ -17,6 +17,7 @@ import { registerSessionLifecycle } from "./session-lifecycle";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerFeedbackCommand } from "./feedback-command";
+import { registerTesterIdCommand } from "./tester-id-command";
 import { registerTeamTools } from "./teams/tool";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { registerSessionIndexTools } from "./session-index/tools";
@@ -25,6 +26,7 @@ import { registerConfusablesHint } from "./confusables-hint";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
 import { isLocalExecDisabled } from "./local-exec";
+import { registerSecretRedaction } from "./secret-redaction";
 import * as fs from "fs";
 import { getState, getNotebookPath, getNotebookWidgetMode, setNotebookWidgetMode } from "./state";
 import {
@@ -33,13 +35,10 @@ import {
   switchProfile,
   profileNameFromUrl,
   normalizeGalaxyUrl,
-  warnOnUnusableActiveProfile,
 } from "./profiles";
 import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
-  warnOnUnusableActiveProfile();
-
   // Local-execution safety gate + opt-in bash sandbox. Both only make sense
   // when the brain has a local execution surface. A shell that runs the brain
   // with no local exec -- the web/container remote shell (and eventually native
@@ -59,6 +58,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     // radius). Default-on file-write confinement lives in the gate itself.
     registerSandbox(pi);
   }
+  // Data-shaped backstop to the path-shaped gate: scrub known secret VALUES out
+  // of tool OUTPUT before it returns to the model, so an approved/slipped read
+  // (or an `env` dump) can't push API keys into the provider's logs (#183).
+  // Passive and prompt-free, so it stays on even when a remote shell owns the
+  // tool_call boundary and the gate above is skipped.
+  registerSecretRedaction(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
@@ -69,6 +74,7 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
   registerSyncCommand(pi);
   registerExecutionCommands(pi);
   registerFeedbackCommand(pi);
+  registerTesterIdCommand(pi);
   registerConfusablesHint(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);

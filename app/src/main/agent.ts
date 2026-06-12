@@ -9,6 +9,16 @@ import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
 import { loadSessionHistory, newestSessionFile } from "./session-replay.js";
 import { collectDescendantsOf } from "./proc-monitor.js";
 import { buildBrainEnv as buildBaseBrainEnv } from "../../../shared/brain-env.js";
+import { TurnWatchdog } from "./turn-watchdog.js";
+import { formatWindowTitle } from "./window-title.js";
+
+/**
+ * How long the brain may stay completely silent mid-turn before Orbit treats the
+ * turn as stalled and recovers the UI (#185). Generous on purpose: tool runs and
+ * UI modals are excluded by the watchdog, so the only window this guards is
+ * "waiting on the model", where multi-minute silence is unambiguously a failure.
+ */
+export const TURN_SILENCE_TIMEOUT_MS = 120_000;
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -29,24 +39,26 @@ function buildSecretEnv(): Record<string, string> {
   const cfg = loadConfig();
 
   const provider = cfg.llm?.active || "anthropic";
-  const llmKey = resolveLlmApiKey(cfg);
   const isCustom = Boolean(cfg.llm?.providers?.[provider]?.baseUrl);
   // OAuth providers ignore env-var keys -- the brain reads ~/.pi/agent/auth.json.
   // If the user switched away from an API-key provider the old key is still in
   // config.json (preserved on purpose so they can switch back); don't leak it
   // into the env under a misrouted variable name.
-  if (llmKey && !OAUTH_PROVIDERS.has(provider)) {
-    if (isCustom) {
-      // Custom OpenAI-compatible endpoint: the brain converts this into
-      // pi's --api-key (a built-in env var wouldn't map to the provider).
-      env.LOOM_ACTIVE_LLM_API_KEY = llmKey;
-    } else {
-      const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
-      env[envVar] = llmKey;
-    }
+  if (!OAUTH_PROVIDERS.has(provider)) {
+    // Custom OpenAI-compatible endpoints route through pi's --api-key via
+    // LOOM_ACTIVE_LLM_API_KEY; built-in providers use their own env var.
+    const targetVar = isCustom
+      ? "LOOM_ACTIVE_LLM_API_KEY"
+      : PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
+    // Config key wins; otherwise fall back to a key exported into Orbit's own
+    // env (`export ANTHROPIC_API_KEY=...; npm start`). In dev with safeStorage
+    // off this is the only key path; in prod it's a handy CI/power-user override.
+    const llmKey = resolveLlmApiKey(cfg) ?? process.env[targetVar];
+    if (llmKey) env[targetVar] = llmKey;
   }
 
-  const galaxyKey = resolveGalaxyApiKey(cfg);
+  // Galaxy key: config wins, else an exported GALAXY_API_KEY.
+  const galaxyKey = resolveGalaxyApiKey(cfg) ?? process.env.GALAXY_API_KEY;
   if (galaxyKey) {
     env.GALAXY_API_KEY = galaxyKey;
   }
@@ -67,7 +79,7 @@ function resolveLoomBin(): string {
   return path.resolve(__dirname, "../../../bin/loom.js");
 }
 
-// Resolve the Node binary the brain runs under. Dev assumes Node 20+ on PATH.
+// Resolve the Node binary the brain runs under. Dev assumes Node 22.19+ on PATH.
 // Packaged Orbit ships its own Node next to Loom (Resources/node/) so users
 // don't need to have Node installed; this also keeps native module ABI in sync
 // with whatever Node ran `npm ci` during prePackage staging.
@@ -166,9 +178,28 @@ export class AgentManager {
   private static readonly MAX_RESTARTS_PER_WINDOW = 3;
   private static readonly RESTART_WINDOW_MS = 60_000;
 
+  // Breaks the "stuck on thinking" hang (#185): fires when a turn goes silent
+  // long enough that the provider call must have failed or stalled.
+  private readonly watchdog: TurnWatchdog;
+
   constructor(window: BrowserWindow, cwd: string) {
     this.window = window;
     this.cwd = cwd;
+    this.watchdog = new TurnWatchdog({
+      timeoutMs: TURN_SILENCE_TIMEOUT_MS,
+      onTimeout: () => this.handleTurnStalled(),
+    });
+    this.refreshWindowTitle();
+  }
+
+  /**
+   * Reflect the active analysis directory in the window title so the context
+   * is glanceable across multiple open project windows (#190). Main owns the
+   * title; see createWindow() where page-title-updated is suppressed.
+   */
+  private refreshWindowTitle(): void {
+    if (this.window.isDestroyed()) return;
+    this.window.setTitle(formatWindowTitle(this.cwd, os.homedir()));
   }
 
   /** Reset session continuity (e.g. when switching to a new analysis directory). */
@@ -184,12 +215,14 @@ export class AgentManager {
       this.hasStartedBefore = false;
     }
     this.cwd = cwd;
+    this.refreshWindowTitle();
     log("cwd set to", cwd);
   }
 
   switchCwd(cwd: string): boolean {
     if (cwd === this.cwd) return false;
     this.cwd = cwd;
+    this.refreshWindowTitle();
     this.hasStartedBefore = false;
     // Don't force-skip --continue: let start()'s hasExistingSession() check
     // decide. If the target cwd has a Pi session on disk, we want to resume
@@ -457,6 +490,11 @@ export class AgentManager {
     const json = JSON.stringify(obj);
     log("→ stdin:", json.slice(0, 200));
     this.process.stdin.write(json + "\n");
+    // A prompt (including streamed steer/followUp) starts a turn we must watch
+    // for a silent stall. Other commands (abort, set_model, ...) don't.
+    if (obj.type === "prompt") {
+      this.watchdog.promptSent();
+    }
   }
 
   /**
@@ -528,6 +566,8 @@ export class AgentManager {
     // Process death (clean or otherwise) ends any in-flight turn.
     if (status === "stopped" || status === "error") {
       this.turnActive = false;
+      // The process is gone; never let a pending watchdog fire against it.
+      this.watchdog.stop();
     }
     log("status:", status, message || "");
     // During a silent restart we suppress the transient stopped→running flicker;
@@ -536,6 +576,30 @@ export class AgentManager {
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:status", status, message);
     }
+  }
+
+  /**
+   * The brain went silent mid-turn (#185): a provider call failed or stalled
+   * without emitting a terminal event, so the renderer is pinned on "thinking".
+   * Surface a recoverable error through the existing `error` event path, mark the
+   * turn done, and best-effort tell the brain to abort so its streaming state
+   * clears and the next prompt isn't queued behind a dead turn.
+   */
+  private handleTurnStalled(): void {
+    log("turn stalled: no brain activity for", TURN_SILENCE_TIMEOUT_MS, "ms");
+    this.turnActive = false;
+    if (!this.window.isDestroyed()) {
+      this.window.webContents.send("agent:event", {
+        type: "error",
+        message:
+          "The assistant stopped responding. The request may have failed or " +
+          "been blocked -- please try again.",
+      });
+    }
+    // Best-effort: unstick pi's streaming state so the next prompt runs. If the
+    // brain is wedged on a dead socket this may not land, but the UI is already
+    // recovered either way.
+    this.send({ type: "abort" });
   }
 
   private handleLine(line: string): void {
@@ -552,6 +616,10 @@ export class AgentManager {
     const type = data.type as string;
     const noisy = type === "message_update" || type === "tool_execution_update";
     log("← event:", type, noisy ? "" : JSON.stringify(data).slice(0, 150));
+
+    // Any line from the brain is a sign of life: reset/pause/disarm the stall
+    // watchdog before we act on (or early-return from) this event.
+    this.watchdog.observe(type);
 
     if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);

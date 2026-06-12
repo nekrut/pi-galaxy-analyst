@@ -78,6 +78,19 @@ export interface LoomConfig {
     sessionIndex?: boolean;
   };
   /**
+   * Terminal/display preferences for the loom CLI.
+   */
+  ui?: {
+    /**
+     * Show the model's "thinking" blocks in the interactive terminal. Off by
+     * default -- loom hides them (writes pi's `hideThinkingBlock`) to keep the
+     * chat readable. Set true to restore pi's reasoning stream persistently.
+     * For a one-off, pi's built-in Ctrl+T toggles thinking live in-session.
+     * Terminal-only: Orbit and headless (--print) launches don't touch it.
+     */
+    showThinking?: boolean;
+  };
+  /**
    * Local-execution safety gate (exec-guard). Secure by default: the gate is
    * enabled, never bypassed, and trusts nothing until the user says otherwise.
    */

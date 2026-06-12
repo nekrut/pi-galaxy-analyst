@@ -48,6 +48,26 @@
           ×
         </button>
       </div>
+      <!-- What's-new banner. Shown on the first launch of a version newer than
+           the one last seen; clicking opens the highlights modal. Packaged
+           builds only; reads the bundled CHANGELOG (offline). -->
+      <div id="whatsnew-banner" class="hidden" role="status" aria-live="polite">
+        <span class="wn-banner-text">
+          ✨ Updated to Orbit <span id="whatsnew-banner-version"></span>
+        </span>
+        <button id="whatsnew-banner-open" class="wn-banner-link" type="button">
+          See what's new
+        </button>
+        <button
+          id="whatsnew-banner-dismiss"
+          class="wn-banner-dismiss"
+          type="button"
+          title="Dismiss"
+          aria-label="Dismiss what's-new notice"
+        >
+          ×
+        </button>
+      </div>
       <!-- Permissions-bypass banner. Shown only while the safety gate is off
            (guardian.dangerouslyBypassPermissions). Persistent and unmissable. -->
       <div id="bypass-banner" class="hidden" role="alert" aria-live="assertive">
@@ -137,6 +157,18 @@
             </button>
             <span class="pane-title-label">Chat</span>
             <button
+              id="export-chat-btn"
+              class="pane-title-btn"
+              title="Export chat as Markdown"
+              aria-label="Export chat as Markdown"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+            <button
               id="artifact-toggle"
               class="pane-title-btn"
               title="Toggle notebook pane (Ctrl+\)"
@@ -208,13 +240,14 @@
               </button>
               <button
                 id="abort-btn"
-                title="Stop"
+                title="Stop (Esc)"
                 class="hidden"
-                aria-label="Stop streaming response"
+                aria-label="Stop the current response"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="6" width="12" height="12" rx="2" />
                 </svg>
+                <span>Stop</span>
               </button>
             </div>
           </div>
@@ -251,6 +284,12 @@
               </div>
             </div>
             <div id="activity-view" class="pane-body hidden">
+              <div id="activity-galaxy-history-section" class="hidden">
+                <div class="activity-section-header">
+                  <span>Galaxy history</span>
+                </div>
+                <div id="galaxy-history-body"></div>
+              </div>
               <div id="activity-galaxy-section" class="hidden">
                 <div class="activity-section-header">
                   <span
@@ -701,6 +740,25 @@
       </div>
     </div>
 
+    <!-- What's-new highlights modal (opened from #whatsnew-banner). -->
+    <div id="whatsnew-overlay" class="modal-overlay hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="whatsnew-title">What's new</h2>
+          <button id="whatsnew-close" class="modal-close" type="button" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div class="modal-body" id="whatsnew-body"></div>
+        <div class="modal-footer">
+          <div class="modal-actions">
+            <button id="whatsnew-notes" class="plan-btn" type="button">Full release notes ↗</button>
+            <button id="whatsnew-got-it" class="plan-btn execute" type="button">Got it</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- /new confirm modal: shown when user starts a fresh session in a dir with an existing notebook -->
     <div id="new-session-overlay" class="modal-overlay hidden">
       <div class="modal">
@@ -760,55 +818,63 @@
           <button id="report-close" class="modal-close" title="Close" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
-          <div class="report-account-note">
-            Your feedback goes straight to the Loom team's private feedback store — no GitHub
-            account needed. If that service is unreachable, Orbit falls back to opening a pre-filled
-            issue on
-            <a
-              href="https://github.com/galaxyproject/loom"
-              target="_blank"
-              rel="noopener noreferrer"
-              >github.com/galaxyproject/loom</a
-            >
-            with only your title and description (no diagnostics), which you submit there.
+          <div id="report-form-fields">
+            <div class="report-account-note">
+              Your feedback goes straight to the Loom team's private feedback store — no GitHub
+              account needed. If that service is unreachable, Orbit falls back to opening a
+              pre-filled issue on
+              <a
+                href="https://github.com/galaxyproject/loom"
+                target="_blank"
+                rel="noopener noreferrer"
+                >github.com/galaxyproject/loom</a
+              >
+              with only your title and description (no diagnostics), which you submit there.
+            </div>
+            <div class="prefs-row">
+              <label for="report-title">Title</label>
+              <input id="report-title" type="text" placeholder="Short summary" required />
+            </div>
+            <div class="prefs-row">
+              <label for="report-body">What happened?</label>
+              <textarea
+                id="report-body"
+                rows="6"
+                placeholder="Steps to reproduce, expected vs actual, screenshots if relevant..."
+              ></textarea>
+            </div>
+            <div class="report-options">
+              <label
+                ><input type="checkbox" id="report-include-sysinfo" /> Include system info</label
+              >
+              <label><input type="checkbox" id="report-include-logs" /> Include logs</label>
+            </div>
+            <details class="report-disclosure">
+              <summary>What's included?</summary>
+              <p>
+                <b>System info:</b> Orbit version, OS, Electron/Node versions, LLM model + provider
+                name (no API key), Galaxy connection state (no credentials).
+              </p>
+              <p>
+                <b>Logs:</b> last 60 events of <code>activity.jsonl</code> (one line each: tool
+                name, arguments, and a truncated result -- credentials and API keys redacted) and
+                the last ~200 lines of the in-app shell stream. These can include filenames, tool
+                arguments, and command output.
+              </p>
+              <p>
+                Both are on by default for the beta so we get useful diagnostics. Feedback goes to
+                Loom's private feedback store; uncheck either box to leave it out. If the store is
+                unreachable and we fall back to a public GitHub issue, only your text is sent —
+                never these diagnostics.
+              </p>
+            </details>
           </div>
-          <div class="prefs-row">
-            <label for="report-title">Title</label>
-            <input id="report-title" type="text" placeholder="Short summary" required />
+          <div id="report-success" class="report-success hidden" role="status" aria-live="polite">
+            <div class="report-success-check" aria-hidden="true">✓</div>
+            <div class="report-success-text">Feedback received, thank you!</div>
           </div>
-          <div class="prefs-row">
-            <label for="report-body">What happened?</label>
-            <textarea
-              id="report-body"
-              rows="6"
-              placeholder="Steps to reproduce, expected vs actual, screenshots if relevant..."
-            ></textarea>
-          </div>
-          <div class="report-options">
-            <label><input type="checkbox" id="report-include-sysinfo" /> Include system info</label>
-            <label><input type="checkbox" id="report-include-logs" /> Include logs</label>
-          </div>
-          <details class="report-disclosure">
-            <summary>What's included?</summary>
-            <p>
-              <b>System info:</b> Orbit version, OS, Electron/Node versions, LLM model + provider
-              name (no API key), Galaxy connection state (no credentials).
-            </p>
-            <p>
-              <b>Logs:</b> last 60 events of <code>activity.jsonl</code> (one line each: tool name,
-              arguments, and a truncated result -- credentials and API keys redacted) and the last
-              ~200 lines of the in-app shell stream. These can include filenames, tool arguments,
-              and command output.
-            </p>
-            <p>
-              Both are on by default for the beta so we get useful diagnostics. Feedback goes to
-              Loom's private feedback store; uncheck either box to leave it out. If the store is
-              unreachable and we fall back to a public GitHub issue, only your text is sent — never
-              these diagnostics.
-            </p>
-          </details>
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer" id="report-footer">
           <div class="modal-actions">
             <button id="report-cancel" class="plan-btn">Cancel</button>
             <button id="report-submit" class="plan-btn primary">Send feedback</button>
