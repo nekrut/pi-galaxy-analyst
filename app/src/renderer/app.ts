@@ -1,11 +1,18 @@
 import { ChatPanel } from "./chat/chat-panel.js";
+import { renderMarkdown } from "./chat/markdown.js";
+import { runCostCommand, type Usage } from "./cost-table.js";
+import { detectCompactIntent } from "./chat/compact-intent.js";
 import { humanizeAgentError } from "./chat/error-humanizer.js";
+import { detectStopIntent } from "./chat/stop-intent.js";
 import { ShellPanel } from "./chat/shell-panel.js";
 import { ArtifactPanel } from "./artifacts/artifact-panel.js";
 import { FilesPanel } from "./files/files-panel.js";
 import { FileViewer } from "./files/file-viewer.js";
+import { FeedbackConfirmation } from "./feedback-confirmation.js";
 import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
+import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
+import { FeedbackDraftStore } from "./feedback-draft.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
 import {
@@ -14,6 +21,8 @@ import {
   capFeedbackPayload,
 } from "../../../shared/feedback-contract.js";
 import type { FeedbackPayload, FeedbackSysinfo } from "../../../shared/feedback-contract.js";
+import changelogRaw from "../../../CHANGELOG.md?raw";
+import { parseChangelog, decideWhatsNew, releaseUrlFor } from "../../../shared/whats-new.js";
 
 declare global {
   interface Window {
@@ -164,13 +173,6 @@ let CONTEXT_WINDOWS: Record<string, Record<string, number>> = {
     "gemini-2.5-flash": 1_048_576,
   },
 };
-
-interface Usage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
 
 const sessionUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const turnUsage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -427,6 +429,7 @@ modelIndicatorEl.addEventListener("click", () => {
 // ── Artifact pane collapse/expand ────────────────────────────────────────────
 
 const ARTIFACT_COLLAPSED_KEY = "orbit.artifactCollapsed";
+const exportChatBtn = document.getElementById("export-chat-btn")!;
 const artifactToggleBtn = document.getElementById("artifact-toggle")!;
 
 // Apply visual state without persisting; used by responsive auto-collapse.
@@ -445,6 +448,18 @@ setArtifactCollapsed(savedCollapsed === null ? true : savedCollapsed === "1");
 
 artifactToggleBtn.addEventListener("click", () => {
   setArtifactCollapsed(!document.body.classList.contains("artifact-collapsed"));
+});
+
+exportChatBtn.addEventListener("click", () => {
+  const md = chat.exportAsMarkdown();
+  if (!md.trim()) return;
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `orbit-chat-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 // Cmd/Ctrl+\ keyboard shortcut
@@ -584,10 +599,12 @@ document.addEventListener("mouseup", () => {
 // Initial tree population + live updates from the main-process watcher.
 void filesPanel.refresh();
 void refreshGalaxyInvocations(window.orbit);
+void refreshGalaxyHistory(window.orbit);
 window.orbit.onFilesChanged(() => {
   void filesPanel.refresh();
   void fileViewer.refreshFromDisk();
   void refreshGalaxyInvocations(window.orbit);
+  void refreshGalaxyHistory(window.orbit);
 });
 
 // ── Galaxy connection indicator ──────────────────────────────────────────────
@@ -616,6 +633,11 @@ async function refreshGalaxyStatus(): Promise<void> {
     galaxyStatus.classList.remove("status-dot-connected");
     galaxyStatus.title = "Galaxy: not configured (open Preferences to add a profile)";
   }
+
+  // The Galaxy history section is driven off the same connection signal so it
+  // hides on disconnect and tracks profile switches (which file changes alone
+  // would miss — disconnect doesn't touch notebook.md).
+  void refreshGalaxyHistory(window.orbit);
 }
 
 void refreshGalaxyStatus();
@@ -1379,6 +1401,46 @@ messagesEl.addEventListener("click", (e) => {
   target.replaceWith(document.createTextNode("(dismissed)"));
 });
 
+// Compact-intent nudge state (#171). Same one-time-per-session +
+// "Don't show again" persistence as the cheaper-model nudge.
+const COMPACT_NUDGE_SKIP_KEY = "loom.skipCompactNudge";
+let compactNudgeShownThisSession = false;
+
+/**
+ * The agent cannot compact its own context -- that's the `/compact` command,
+ * a harness action. Users type "compact"/"reduce the context" into chat
+ * anyway, the agent writes a notebook summary, and (before its guardrail)
+ * over-claimed it had compacted while the context-fill bar didn't move (#171).
+ * Catch that plain-text intent shell-side and point them at the real command.
+ */
+function maybeShowCompactIntentHint(text: string): void {
+  if (compactNudgeShownThisSession) return;
+  if (localStorage.getItem(COMPACT_NUDGE_SKIP_KEY) === "1") return;
+  if (!detectCompactIntent(text)) return;
+  compactNudgeShownThisSession = true;
+  chat.addInfoMessage(
+    `<i><strong>Heads up:</strong> the agent can't compact the conversation ` +
+      `itself. Writing a notebook summary won't shrink the context window. ` +
+      `Run <code>/compact</code> to actually reclaim context (the notebook is ` +
+      `kept). For a full reset, start a new session and choose ` +
+      `<strong>Keep notebook</strong>. ` +
+      `<a href="#" class="compact-nudge-dismiss">Don't show again</a></i>`,
+  );
+}
+
+messagesEl.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement | null;
+  if (!target?.classList.contains("compact-nudge-dismiss")) return;
+  e.preventDefault();
+  localStorage.setItem(COMPACT_NUDGE_SKIP_KEY, "1");
+  target.replaceWith(document.createTextNode("(dismissed)"));
+});
+
+function clearInput(): void {
+  inputEl.value = "";
+  inputEl.style.height = "auto";
+}
+
 function submit(): void {
   const text = inputEl.value.trim();
   if (!text) return;
@@ -1389,19 +1451,30 @@ function submit(): void {
   // gets the hint inline above the agent's thinking response.
   maybeShowCheaperModelNudge(text);
 
+  // Nudge plain-text "compact"/"reduce context" requests toward /compact (#171).
+  maybeShowCompactIntentHint(text);
+
+  // A bare "stop"/"abort" typed during an active turn is a halt intent, not a
+  // prompt to queue behind the very turn the user is trying to kill (#225).
+  // Abort instead of enqueueing, and acknowledge so the intent isn't silent.
+  if (streaming && detectStopIntent(text)) {
+    abortCurrentTurn();
+    chat.addInfoMessage("<i>Stopping the current response...</i>");
+    clearInput();
+    return;
+  }
+
   // If the agent is mid-turn, queue the message and flush when agent_end fires.
   // Purely local slash commands still run immediately; slash commands that
   // prompt the agent must join the FIFO queue like any other LLM turn.
   if (streaming && !isLocalSlashCommand(text)) {
     enqueueMessage(text);
-    inputEl.value = "";
-    inputEl.style.height = "auto";
+    clearInput();
     return;
   }
 
   dispatchSubmittedText(text);
-  inputEl.value = "";
-  inputEl.style.height = "auto";
+  clearInput();
 }
 
 function dispatchSubmittedText(text: string): void {
@@ -1497,7 +1570,10 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/summarize [N [M]]",
     description: "summarize prompts N–M into the notebook",
   },
-  { name: "cost", description: "append session token/cost breakdown to the notebook" },
+  {
+    name: "cost",
+    description: "show session token/cost breakdown (with opt-in append to notebook)",
+  },
   { name: "decisions", description: "show decision log" },
   { name: "connect", description: "open Galaxy connection settings" },
   { name: "help", description: "show this help" },
@@ -1687,73 +1763,48 @@ function handleSummarize(raw: string, argStr: string): void {
 }
 
 /**
- * /cost — snapshot session token usage per model, price it against the renderer's
- * pricing table, and ask the agent to append the breakdown to notebook.md.
- * The renderer is the authoritative source for usage numbers; the agent just
- * writes them out.
+ * /cost — render the session token/cost breakdown directly in chat from the
+ * renderer's own per-model usage counters, with zero model calls (issue #263).
+ *
+ * The breakdown is a snapshot of the counters at the moment /cost runs. Because
+ * the default path makes no model call, running /cost adds nothing to the
+ * session total — so this snapshot stays consistent with the footer. An opt-in
+ * "Append to notebook" button persists the same table via the agent (the only
+ * path that costs a model call).
  */
 function handleCost(raw: string): void {
-  if (perModelUsage.size === 0) {
-    chat.addUserMessage(raw);
-    chat.addErrorMessage("No billable assistant turns recorded yet in this renderer session.");
-    return;
-  }
-
-  const rows: string[] = [];
-  let totalCostKnown = true;
-  let grandCost = 0;
-  const totals: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-
-  for (const [model, u] of perModelUsage) {
-    totals.input += u.input;
-    totals.output += u.output;
-    totals.cacheRead += u.cacheRead;
-    totals.cacheWrite += u.cacheWrite;
-    const cost = computeCost(u, model);
-    const costStr = cost === null ? "unknown (no pricing entry)" : `$${cost.toFixed(4)}`;
-    if (cost === null) totalCostKnown = false;
-    else grandCost += cost;
-    rows.push(
-      `| \`${model}\` | ${u.input.toLocaleString()} | ${u.output.toLocaleString()} | ` +
-        `${u.cacheRead.toLocaleString()} | ${u.cacheWrite.toLocaleString()} | ${costStr} |`,
-    );
-  }
-
-  const totalCostStr = totalCostKnown
-    ? `$${grandCost.toFixed(4)}`
-    : `≥$${grandCost.toFixed(4)} (some models unpriced)`;
-  rows.push(
-    `| **Total** | **${totals.input.toLocaleString()}** | **${totals.output.toLocaleString()}** | ` +
-      `**${totals.cacheRead.toLocaleString()}** | **${totals.cacheWrite.toLocaleString()}** | **${totalCostStr}** |`,
-  );
-
-  const table =
-    `| Model | Input tokens | Output tokens | Cache read | Cache write | Cost (USD) |\n` +
-    `|-------|-------------:|--------------:|-----------:|------------:|-----------:|\n` +
-    rows.join("\n");
-
-  const heading = "## Session cost";
-  const prompt =
-    `Append the following session cost breakdown verbatim to the notebook file ` +
-    `(notebook.md) in the current working directory. Use Edit or Write to append — ` +
-    `do NOT regenerate, reformat, or wrap the table. The numbers below are authoritative ` +
-    `(captured from the renderer's usage counters, same source as the masthead), so ` +
-    `use them as-is.\n\n` +
-    `Use exactly this heading (H2, verbatim) on its own line, followed by a blank line, ` +
-    `then the table:\n` +
-    `    ${heading}\n\n` +
-    `--- Cost table ---\n` +
-    table +
-    `\n--- end table ---`;
-
-  chat.addUserMessage(raw);
-  chat.addInfoMessage(
-    `<i>Asking the agent to append the session cost breakdown to ` +
-      `<code>notebook.md</code>…</i>`,
-  );
-  chat.showThinking();
-  setStatusBadge("thinking", "thinking...");
-  promptAgent(prompt);
+  runCostCommand(raw, perModelUsage, computeCost, {
+    addUserMessage: (text) => chat.addUserMessage(text),
+    addErrorMessage: (text) => chat.addErrorMessage(text),
+    renderBreakdown: (table, onAppend) => {
+      const el = chat.addInfoMessage(
+        `<div class="cost-breakdown">` +
+          `<h3>Session cost</h3>` +
+          renderMarkdown(table) +
+          `<button type="button" class="cost-append-btn" data-cost-append>Append to notebook</button>` +
+          `</div>`,
+      );
+      const btn = el.querySelector<HTMLButtonElement>("[data-cost-append]");
+      btn?.addEventListener(
+        "click",
+        () => {
+          btn.disabled = true;
+          btn.textContent = "Appending to notebook…";
+          onAppend();
+        },
+        { once: true },
+      );
+    },
+    beginNotebookAppend: () => {
+      chat.addInfoMessage(
+        `<i>Asking the agent to append the session cost breakdown to ` +
+          `<code>notebook.md</code>…</i>`,
+      );
+      chat.showThinking();
+      setStatusBadge("thinking", "thinking...");
+    },
+    promptAgent: (message) => promptAgent(message),
+  });
 }
 
 /**
@@ -2264,6 +2315,11 @@ window.orbit.onAgentEvent((event) => {
       const msg = (event as { message?: { role?: string } }).message;
       if (msg?.role === "user") {
         chat.finishAssistantMessage();
+      } else if (msg?.role === "assistant") {
+        // A new assistant message in the same turn (agentic loop step) keeps
+        // streaming into the active chat message, so separate its text from the
+        // previous message's prose with a blank line (issue #200).
+        chat.separateNextBlock();
       }
       break;
     }
@@ -2301,7 +2357,10 @@ window.orbit.onAgentEvent((event) => {
         const delta = ame.delta as string;
         if (delta) chat.appendDelta(delta);
       } else if (ameType === "text_end") {
-        // text block finished, but agent turn might continue
+        // Text block finished, but the agent turn might continue with a tool
+        // call and then more text. Separate that next block from this one so
+        // they don't render butted together (issue #200).
+        chat.separateNextBlock();
       }
       break;
     }
@@ -3460,6 +3519,27 @@ const reportTitle = document.getElementById("report-title") as HTMLInputElement;
 const reportBody = document.getElementById("report-body") as HTMLTextAreaElement;
 const reportIncludeSysinfo = document.getElementById("report-include-sysinfo") as HTMLInputElement;
 const reportIncludeLogs = document.getElementById("report-include-logs") as HTMLInputElement;
+const reportFormFields = document.getElementById("report-form-fields")!;
+const reportSuccess = document.getElementById("report-success")!;
+const reportFooter = document.getElementById("report-footer")!;
+
+// How long the "Feedback received, thank you!" state stays up before the modal
+// closes itself -- long enough to read, short enough to not nag.
+const REPORT_CONFIRM_MS = 1500;
+const reportConfirmation = new FeedbackConfirmation({
+  delayMs: REPORT_CONFIRM_MS,
+  onShowSuccess: () => {
+    reportFormFields.classList.add("hidden");
+    reportFooter.classList.add("hidden");
+    reportSuccess.classList.remove("hidden");
+  },
+  onClose: () => closeReportModal(),
+});
+
+// Issue #234: hold the in-progress title/body so dismissing the modal to copy
+// something from chat and reopening it doesn't wipe the draft. Module-scope so
+// it survives every open/close within a session; cleared only on a sent report.
+const feedbackDraft = new FeedbackDraftStore();
 
 // Budget for the *encoded* body in the GitHub URL. The whole URL
 // (~"https://github.com/galaxyproject/loom/issues/new?title=…&body=…")
@@ -3469,19 +3549,40 @@ const reportIncludeLogs = document.getElementById("report-include-logs") as HTML
 const REPORT_URL_BUDGET = 7000;
 
 function openReportModal(): void {
-  reportTitle.value = "";
-  reportBody.value = "";
+  // Drop any pending auto-close so reopening within the thank-you window can't
+  // close the freshly opened modal, and reset back to the form state.
+  reportConfirmation.cancel();
+  reportSuccess.classList.add("hidden");
+  reportFormFields.classList.remove("hidden");
+  reportFooter.classList.remove("hidden");
+  // Restore any in-progress draft instead of clearing the fields (#234).
+  const draft = feedbackDraft.load();
+  reportTitle.value = draft.title;
+  reportBody.value = draft.body;
   // Default ON: the primary destination is Loom's private capture store, not a
   // public issue, so opt-out is fine. The user can still uncheck before sending,
   // and the public GitHub fallback (POST failure) sends text only -- no
-  // diagnostics -- so this never auto-publishes logs to a public issue.
+  // diagnostics -- so this never auto-publishes logs to a public issue. The
+  // toggles intentionally reset each open; only the typed text is a draft.
   reportIncludeSysinfo.checked = true;
   reportIncludeLogs.checked = true;
   reportOverlay.classList.remove("hidden");
   reportTitle.focus();
 }
+// Every dismiss path routes through here, so stashing the current text here
+// keeps the draft alive no matter how the modal is closed (#234). A sent report
+// empties the fields first (clearReportForm), so this saves nothing in that case.
 function closeReportModal(): void {
+  reportConfirmation.cancel();
+  feedbackDraft.save({ title: reportTitle.value, body: reportBody.value });
   reportOverlay.classList.add("hidden");
+}
+// Report sent: drop the held draft and blank the fields so the next open starts
+// clean. Pair with closeReportModal(), which then has an empty form to stash.
+function clearReportForm(): void {
+  feedbackDraft.clear();
+  reportTitle.value = "";
+  reportBody.value = "";
 }
 
 // Cap a body on its URL-encoded length for the GitHub-issue fallback. The "new
@@ -3606,7 +3707,11 @@ reportSubmit.addEventListener("click", async () => {
     const payload = await buildFeedbackPayload();
     const result = await window.orbit.submitFeedback(payload);
     if (result.ok) {
-      closeReportModal();
+      // Clear the held draft and blank the fields first, so the auto-close that
+      // confirm() schedules stashes nothing, then show the inline "Feedback
+      // received, thank you!" before the modal closes itself (#213 + #234).
+      clearReportForm();
+      reportConfirmation.confirm();
       return;
     }
     // Fallback: the private store was unreachable. Open a PUBLIC GitHub issue
@@ -3616,6 +3721,7 @@ reportSubmit.addEventListener("click", async () => {
         "\n\n_(sent via fallback; diagnostics omitted -- the feedback service was unreachable)_",
     );
     await window.orbit.openIssueReport({ title, body: fallbackBody });
+    clearReportForm();
     closeReportModal();
   } finally {
     reportSubmit.disabled = false;
@@ -3897,6 +4003,82 @@ window.orbit.onProcUpdate((procs) => {
       // Linux (and any non-darwin): the GitHub-releases notify-link banner.
       void showNotifyLinkBanner();
     }
+  }
+}
+
+// ── What's-new (first launch after an update) ────────────────────────────────
+//
+// Backward-looking: compare the running version to a persisted stamp. Newer ->
+// show a banner that opens the highlights modal (accumulating any skipped
+// versions), then advance the stamp. Fresh install stamps silently. Packaged
+// builds only, so `npm start` dev versions never trigger it. Offline -- reads
+// the bundled CHANGELOG, no network.
+{
+  const wnBanner = document.getElementById("whatsnew-banner");
+  const wnVersionEl = document.getElementById("whatsnew-banner-version");
+  const wnOpenBtn = document.getElementById("whatsnew-banner-open");
+  const wnDismissBtn = document.getElementById("whatsnew-banner-dismiss");
+  const wnOverlay = document.getElementById("whatsnew-overlay");
+  const wnBody = document.getElementById("whatsnew-body");
+  const wnTitle = document.getElementById("whatsnew-title");
+  const wnClose = document.getElementById("whatsnew-close");
+  const wnGotIt = document.getElementById("whatsnew-got-it");
+  const wnNotes = document.getElementById("whatsnew-notes");
+
+  const WN_SEEN_KEY = "orbit:whatsnew-last-seen";
+  let wnReleaseUrl: string | null = null;
+
+  if (wnBanner && wnVersionEl && wnOpenBtn && wnDismissBtn && wnOverlay && wnBody) {
+    wnOpenBtn.addEventListener("click", () => wnOverlay.classList.remove("hidden"));
+    wnClose?.addEventListener("click", () => wnOverlay.classList.add("hidden"));
+    wnGotIt?.addEventListener("click", () => wnOverlay.classList.add("hidden"));
+    wnDismissBtn.addEventListener("click", () => wnBanner.classList.add("hidden"));
+    wnNotes?.addEventListener("click", () => {
+      if (wnReleaseUrl) void window.orbit.openReleasePage(wnReleaseUrl);
+    });
+
+    void (async () => {
+      try {
+        const { version, isPackaged } = await window.orbit.getVersion();
+        if (!isPackaged) return; // dev builds never show what's-new
+        let lastSeen: string | undefined;
+        try {
+          lastSeen = localStorage.getItem(WN_SEEN_KEY) ?? undefined;
+        } catch {}
+        const decision = decideWhatsNew(
+          parseChangelog(changelogRaw),
+          lastSeen,
+          version,
+          "accumulate",
+        );
+        if (decision.entries.length) {
+          wnVersionEl.textContent = version;
+          if (wnTitle) wnTitle.textContent = `What's new in ${version}`;
+          wnReleaseUrl = releaseUrlFor(version);
+          wnBody.replaceChildren();
+          for (const entry of decision.entries) {
+            const wrap = document.createElement("div");
+            wrap.className = "whatsnew-entry";
+            const h = document.createElement("h3");
+            h.textContent = entry.date ? `${entry.version} (${entry.date})` : entry.version;
+            const ul = document.createElement("ul");
+            for (const hi of entry.highlights) {
+              const li = document.createElement("li");
+              li.textContent = hi;
+              ul.appendChild(li);
+            }
+            wrap.append(h, ul);
+            wnBody.appendChild(wrap);
+          }
+          wnBanner.classList.remove("hidden");
+        }
+        if (decision.stamp) {
+          try {
+            localStorage.setItem(WN_SEEN_KEY, decision.stamp);
+          } catch {}
+        }
+      } catch {}
+    })();
   }
 }
 

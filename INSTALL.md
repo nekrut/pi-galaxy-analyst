@@ -72,6 +72,12 @@ sudo apt-get install -f   # resolves any missing dependencies
 orbit                     # launch from terminal, or find it in your app launcher
 ```
 
+Not showing up in your application menu? Some desktop environments don't
+refresh their app database right after a `dpkg` install, so the Orbit icon can
+be missing even though the install worked. Run `sudo update-desktop-database
+/usr/share/applications` (or just log out and back in) and it'll appear. Either
+way, `orbit` from the terminal always launches it.
+
 ### Install (.rpm — Fedora/RHEL)
 
 ```bash

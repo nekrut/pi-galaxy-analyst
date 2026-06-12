@@ -8,7 +8,10 @@ import {
   pullNotebookFromGalaxy,
   linkGalaxyPage,
   resumeGalaxyPage,
+  UNTRUSTED_BEGIN,
+  UNTRUSTED_END,
 } from "../extensions/loom/galaxy-pages-sync";
+import { loomToGalaxyMarkdown } from "../extensions/loom/galaxy-markdown-adapter";
 
 vi.mock("../extensions/loom/galaxy-pages-api");
 vi.mock("../extensions/loom/galaxy-api");
@@ -72,6 +75,45 @@ describe("pushNotebookToGalaxy", () => {
     expect(written).toContain("```loom-galaxy-page");
     expect(written).toContain("page_id: p1");
     expect(written).toContain("last_synced_revision: r1");
+  });
+
+  it("projects loom-invocation blocks to a carrier + validated directive on the page", async () => {
+    // galaxyGet echoes back the same id, so galaxyInvocationValidator reports it
+    // valid and the rich push emits the directive alongside the hidden carrier.
+    vi.mocked(galaxyApi.galaxyGet).mockResolvedValue({ id: "f2db41e1fa331b3e" });
+    const notebook = [
+      "# Analysis",
+      "",
+      "```loom-invocation",
+      "invocation_id: f2db41e1fa331b3e",
+      'galaxy_server_url: "https://galaxy.example"',
+      "notebook_anchor: plan-a-step-2",
+      "label: BWA alignment",
+      "submitted_at: 2026-05-20T12:00:00Z",
+      "status: completed",
+      "```",
+      "",
+    ].join("\n");
+    vi.mocked(notebookWriter.readNotebook).mockResolvedValue(notebook);
+    vi.mocked(pagesApi.createPage).mockResolvedValue({
+      id: "p1",
+      slug: "analysis",
+      latest_revision_id: "r1",
+      revision_ids: ["r1"],
+      title: "Analysis",
+      create_time: "2026-05-20T00:00:00Z",
+      update_time: "2026-05-20T00:00:00Z",
+    });
+
+    await pushNotebookToGalaxy({ historyId: "h1", title: "Analysis" });
+
+    const sent = vi.mocked(pagesApi.createPage).mock.calls[0][0].content;
+    expect(sent).toMatch(/^\[loom-invocation:v1\]: #loom "/m);
+    expect(sent).toContain("invocation_outputs(invocation_id=f2db41e1fa331b3e)");
+    expect(sent).not.toContain("```loom-invocation");
+    // the local notebook stays canonical -- the raw fence, not the projection
+    const writtenLocal = vi.mocked(notebookWriter.writeNotebook).mock.calls[0][1];
+    expect(writtenLocal).toContain("```loom-invocation");
   });
 
   it("updates the existing page when a binding is present", async () => {
@@ -205,6 +247,57 @@ describe("pullNotebookFromGalaxy", () => {
     expect(written).not.toContain("Some local edits.");
     expect(written).toContain("```loom-galaxy-page");
     expect(written).toContain("last_synced_revision: r2");
+  });
+
+  it("reconstructs loom carriers and wraps the reconstructed body in untrusted markers", async () => {
+    const bound = [
+      "Local edits.",
+      "",
+      "```loom-galaxy-page",
+      "page_id: p1",
+      "page_slug: a",
+      'galaxy_server_url: "https://galaxy.example"',
+      "history_id: h1",
+      "last_synced_revision: r1",
+      "bound_at: 2026-05-20T10:00:00Z",
+      "```",
+      "",
+    ].join("\n");
+    vi.mocked(notebookWriter.readNotebook).mockResolvedValue(bound);
+
+    // A page body as it would look after a Loom push: the loom-invocation fence
+    // is encoded to a render-invisible carrier. Pull must decode it back AND
+    // still apply the untrusted-content wrap -- the two transforms compose.
+    const loomBlock = ["```loom-invocation", "invocation_id: abc123", "label: QC", "```"].join(
+      "\n",
+    );
+    const remoteWithCarrier = loomToGalaxyMarkdown(`# Remote report\n\n${loomBlock}\n`);
+    vi.mocked(pagesApi.getPage).mockResolvedValue({
+      id: "p1",
+      slug: "a",
+      latest_revision_id: "r2",
+      revision_ids: ["r1", "r2"],
+      title: "A",
+      content: remoteWithCarrier,
+      content_format: "markdown",
+      create_time: "2026-05-20T00:00:00Z",
+      update_time: "2026-05-21T00:00:00Z",
+    });
+
+    await pullNotebookFromGalaxy();
+
+    const written = vi.mocked(notebookWriter.writeNotebook).mock.calls.at(-1)![1];
+    // Carrier decoded back to the original fence; the raw carrier is gone.
+    expect(written).toContain("```loom-invocation");
+    expect(written).toContain("invocation_id: abc123");
+    expect(written).not.toContain("[loom-invocation:v1]");
+    // Untrusted wrap is present and encloses the reconstructed body.
+    const begin = written.indexOf(UNTRUSTED_BEGIN);
+    const block = written.indexOf("```loom-invocation");
+    const end = written.indexOf(UNTRUSTED_END);
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(block).toBeGreaterThan(begin);
+    expect(end).toBeGreaterThan(block);
   });
 });
 

@@ -30,6 +30,7 @@ const LOOM_BUNDLE_FILES = [
   "bin",
   "extensions",
   "shared",
+  "CHANGELOG.md",
   "package.json",
   "package-lock.json",
   "README.md",
@@ -205,7 +206,7 @@ function pruneNodeBundle(): void {
   }
 }
 
-// Bundle uv/uvx so Galaxy MCP (`uvx galaxy-mcp>=1.6.0`) doesn't need a
+// Bundle uv/uvx so Galaxy MCP (`uvx galaxy-mcp>=1.8.0`) doesn't need a
 // system-installed uv. Pulls the latest release tarball from astral-sh/uv.
 // "latest" resolves to a specific tag at fetch time -- the cached tarball
 // won't auto-refresh; remove `.loom-stage/cache/` to pick up newer uv.
@@ -289,7 +290,15 @@ const macCodesign: Partial<Pick<PackagerOptions, "osxSign" | "osxNotarize">> =
 const config: ForgeConfig = {
   packagerConfig: {
     name: "Orbit",
-    executableName: "orbit",
+    // @electron/packager derives CFBundleDisplayName (the name Finder shows
+    // under the app icon) from executableName, not from `name` above -- so a
+    // lowercase value here makes the macOS app read "orbit" even though the
+    // bundle is Orbit.app. The lowercase binary is only wanted for the Linux
+    // deb/rpm CLI command; macOS has no need for it. Use the proper-cased name
+    // on darwin and keep lowercase elsewhere. Each platform builds on its own
+    // native runner (same assumption the codesign gate below relies on), so
+    // process.platform reflects the target OS family here.
+    executableName: process.platform === "darwin" ? "Orbit" : "orbit",
     icon: "resources/icon",
     appBundleId: "org.galaxyproject.orbit",
     appCategoryType: "public.app-category.developer-tools",
@@ -335,6 +344,12 @@ const config: ForgeConfig = {
         options: {
           maintainer: "Galaxy Project contributors",
           homepage: "https://galaxyproject.org",
+          // electron-installer-debian's computed default depends omit ALSA, but
+          // Electron links libasound.so.2 -- without it Orbit fails to launch on
+          // Ubuntu/WSL2 with "error while loading shared libraries". depends is
+          // unioned with the defaults, so this only adds the missing lib.
+          // libasound2t64 on newer Ubuntu satisfies libasound2 via Provides.
+          depends: ["libasound2"],
         },
       },
     },

@@ -7,7 +7,7 @@ name: release
 # GitHub Release (promote the draft manually), and publishes the @galaxyproject/loom
 # npm package via OIDC trusted publishing (no token, no 2FA prompt).
 #
-# All three installer platforms (arm64 mac, Intel mac, linux) build in one
+# All five installer legs (arm64 mac, Intel mac, linux x64/arm64, win32 x64) build in one
 # matrix that `publish` waits on. The Intel leg used to run decoupled off to the
 # side: GitHub's now-retired macos-13 Intel fleet was small and could sit queued
 # for hours (~19h on the alpha.1 cut), which would have held the draft Release
@@ -56,6 +56,14 @@ jobs:
           # Linux and inside WSL2 (with WSLg) on Windows 11.
           - os: ubuntu-latest
             arch: x64
+            platform: linux
+          # Linux arm64 — same .deb/.rpm/.zip outputs, built natively on
+          # GitHub's free arm64 Linux runner (public repos). Unblocks arm64
+          # hosts (Jetson, Raspberry Pi, arm64 servers) that can't run the x64
+          # installer or its bundled x64 uv. ubuntu-24.04-arm is the arm64
+          # counterpart to ubuntu-latest (currently 24.04).
+          - os: ubuntu-24.04-arm
+            arch: arm64
             platform: linux
           # Native Windows (x64). Ships remote-only (Galaxy I/O; no local bash).
           # Squirrel .exe, unsigned for beta -- SmartScreen "Unknown publisher"

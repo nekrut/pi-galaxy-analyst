@@ -8,6 +8,7 @@ import { execSync } from "node:child_process";
 import { loadConfig, saveConfig, type LoomConfig } from "./config.js";
 import { encryptSecret, isAvailable as safeStorageAvailable } from "./secure-config.js";
 import { getProviders, getModels } from "@earendil-works/pi-ai";
+import { isDeprecatedModelId } from "./model-catalog.js";
 import { checkLatestVersion } from "./version-check.js";
 import { postFeedback } from "./feedback.js";
 import type { FeedbackPayload } from "../../../shared/feedback-contract.js";
@@ -563,6 +564,14 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return await checkLatestVersion();
   });
 
+  // Running app version + packaged flag for the what's-new banner. Unlike
+  // version:check this never hits the network and ignores updateCheck -- the
+  // what's-new surface is local and must work even with update checks off.
+  ipcMain.handle("version:current", () => ({
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+  }));
+
   // Opens the GitHub releases page in the user's default browser when they
   // click the "update available" banner. Hard-coded URL — renderer never
   // gets a generic openExternal capability.
@@ -573,6 +582,44 @@ export function registerIpcHandlers(agent: AgentManager): void {
         ? url
         : releasesPage;
     await shell.openExternal(target);
+    return { opened: true };
+  });
+
+  // Opens the bound Galaxy history in the user's default browser when the user
+  // clicks the link in the Activity tab. The renderer never gets a generic
+  // openExternal capability. We pin the destination to the configured Galaxy
+  // server: the URL must be http(s), its origin must match the active Galaxy
+  // profile, and its path must end in the canonical /histories/view view. The
+  // origin pin is the real trust boundary; the path suffix is a sanity check.
+  // pathname.endsWith (not ===) is required so subpath deployments
+  // (https://example.org/galaxy/histories/view) are accepted.
+  ipcMain.handle("galaxy:open-history", async (_e, url: unknown) => {
+    if (typeof url !== "string") return { opened: false };
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return { opened: false };
+    }
+    const httpScheme = parsed.protocol === "https:" || parsed.protocol === "http:";
+    if (!httpScheme || !parsed.pathname.endsWith("/histories/view")) {
+      return { opened: false };
+    }
+    // Pin the host to the active Galaxy profile so a compromised renderer
+    // cannot point this at an attacker-controlled host that also serves
+    // /histories/view.
+    const cfg = loadConfig();
+    const active = cfg.galaxy?.active;
+    const serverUrl = active ? cfg.galaxy?.profiles?.[active]?.url : undefined;
+    if (!serverUrl) return { opened: false };
+    let expectedOrigin: string;
+    try {
+      expectedOrigin = new URL(serverUrl).origin;
+    } catch {
+      return { opened: false };
+    }
+    if (parsed.origin !== expectedOrigin) return { opened: false };
+    await shell.openExternal(parsed.toString());
     return { opened: true };
   });
 
@@ -631,7 +678,9 @@ export function registerIpcHandlers(agent: AgentManager): void {
     try {
       for (const provider of getProviders()) {
         if (!USER_FACING_PROVIDERS.has(provider)) continue;
-        const models = getModels(provider);
+        // Drop generations the provider's live API has retired -- pi's registry
+        // still lists them but they 404 on use, so they shouldn't reach the picker (#221).
+        const models = getModels(provider).filter((m) => !isDeprecatedModelId(provider, m.id));
         if (!models.length) continue;
         out[provider] = models.map((m) => {
           const cleanName = m.name.replace(/^Claude\s+/i, "");

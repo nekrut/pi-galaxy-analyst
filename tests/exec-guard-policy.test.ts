@@ -47,16 +47,63 @@ describe("decide", () => {
   it("safe bash allows", () => {
     expect(decide(req({ toolInput: { command: "ls -la" } }), deps).decision).toBe("allow");
   });
-  it("safe read-command on a sensitive path -> ask (trusted) / deny (weak)", () => {
+  it("read of a credential store is denied for ALL tiers (bash)", () => {
+    // hardened (#183): a dedicated credential store is never readable, even by a
+    // capable model with an interactive session to approve.
+    for (const tier of ["trusted", "weak"] as const)
+      expect(
+        decide(
+          req({ modelTier: tier, toolInput: { command: "cat /home/alice/.ssh/id_rsa" } }),
+          deps,
+        ).decision,
+        tier,
+      ).toBe("deny");
+  });
+  it("reading ~/.loom/config.json is denied for all tiers and via any path (#183)", () => {
+    const cfg = "/home/alice/.loom/config.json";
+    for (const tier of ["trusted", "weak"] as const)
+      expect(
+        decide(req({ modelTier: tier, toolInput: { command: `cat ${cfg}` } }), deps).decision,
+        `cat/${tier}`,
+      ).toBe("deny");
     expect(
-      decide(req({ toolInput: { command: "cat /home/alice/.ssh/id_rsa" } }), deps).decision,
-    ).toBe("ask");
+      decide(req({ toolName: "read", toolInput: { path: cfg } }), deps).decision,
+      "read tool",
+    ).toBe("deny");
+    // the reported evasion: a pipe forced kind="unknown" so the floor was skipped.
+    expect(
+      decide(req({ toolInput: { command: `cat ${cfg} | python3 -m json.tool` } }), deps).decision,
+      "piped",
+    ).toBe("deny");
+  });
+  it("the credential-store floor is NOT lifted by a trusted workspace", () => {
+    const cfg = { ...baseCfg, trustedWorkspaces: [CWD] };
     expect(
       decide(
-        req({ modelTier: "weak", toolInput: { command: "cat /home/alice/.ssh/id_rsa" } }),
+        req({ config: cfg, toolInput: { command: "cat /home/alice/.loom/config.json | base64" } }),
         deps,
       ).decision,
     ).toBe("deny");
+  });
+  it("a credential-SHAPED file that is not a dedicated store still asks/denies by tier", () => {
+    // basename .key/.pem can be a project fixture -> keep the prompt, don't hard-deny
+    expect(
+      decide(req({ toolName: "read", toolInput: { path: "/home/alice/project/server.key" } }), deps)
+        .decision,
+    ).toBe("ask");
+    expect(
+      decide(
+        req({
+          toolName: "read",
+          modelTier: "weak",
+          toolInput: { path: "/home/alice/project/server.key" },
+        }),
+        deps,
+      ).decision,
+    ).toBe("deny");
+    expect(
+      decide(req({ toolInput: { command: "cat /home/alice/project/secret.pem" } }), deps).decision,
+    ).toBe("ask");
   });
   it("write inside jail allows, outside asks (trusted) / denies (weak)", () => {
     expect(
@@ -73,37 +120,34 @@ describe("decide", () => {
       ).decision,
     ).toBe("deny");
   });
-  it("read sensitive -> ask/deny by tier", () => {
-    expect(
-      decide(req({ toolName: "read", toolInput: { path: "/home/alice/.aws/credentials" } }), deps)
-        .decision,
-    ).toBe("ask");
-    expect(
-      decide(
-        req({
-          toolName: "read",
-          modelTier: "weak",
-          toolInput: { path: "/home/alice/.aws/credentials" },
-        }),
-        deps,
-      ).decision,
-    ).toBe("deny");
-  });
-  it("grep/ls/find of a sensitive path -> ask (trusted) / deny (weak)", () => {
-    for (const tool of ["grep", "ls", "find"]) {
-      expect(
-        decide(req({ toolName: tool, toolInput: { path: "/home/alice/.ssh/id_rsa" } }), deps)
-          .decision,
-        tool,
-      ).toBe("ask");
+  it("read tool on a credential store is denied for ALL tiers", () => {
+    for (const tier of ["trusted", "weak"] as const)
       expect(
         decide(
-          req({ toolName: tool, modelTier: "weak", toolInput: { path: "/home/alice/.ssh" } }),
+          req({
+            toolName: "read",
+            modelTier: tier,
+            toolInput: { path: "/home/alice/.aws/credentials" },
+          }),
           deps,
         ).decision,
-        tool,
+        tier,
       ).toBe("deny");
-    }
+  });
+  it("grep/ls/find of a credential store is denied for ALL tiers", () => {
+    for (const tool of ["grep", "ls", "find"])
+      for (const tier of ["trusted", "weak"] as const)
+        expect(
+          decide(
+            req({
+              toolName: tool,
+              modelTier: tier,
+              toolInput: { path: "/home/alice/.ssh/id_rsa" },
+            }),
+            deps,
+          ).decision,
+          `${tool}/${tier}`,
+        ).toBe("deny");
   });
   it("grep with no path (searches cwd) is allowed", () => {
     expect(decide(req({ toolName: "grep", toolInput: { pattern: "TODO" } }), deps).decision).toBe(
@@ -206,11 +250,58 @@ describe("decide", () => {
       }).decision,
     ).toBe("ask");
   });
-  it("unknown bash -> ask (trusted) / deny (weak)", () => {
-    expect(decide(req({ toolInput: { command: "python x.py" } }), deps).decision).toBe("ask");
-    expect(
-      decide(req({ modelTier: "weak", toolInput: { command: "python x.py" } }), deps).decision,
-    ).toBe("deny");
+  it("unknown bash -> ask for BOTH tiers when interactive (weak no longer hard-denied, #232)", () => {
+    // A weak model used to get a hard deny here with no approval path. In an
+    // interactive session the human is the gate, so weak now asks like trusted --
+    // a user who chose local execution can approve routine local work instead of
+    // being stuck. Nothing is auto-allowed; this only restores the prompt.
+    for (const tier of ["trusted", "weak"] as const)
+      expect(
+        decide(req({ modelTier: tier, toolInput: { command: "python x.py" } }), deps).decision,
+        tier,
+      ).toBe("ask");
+  });
+  it("the #232 repros all become an approvable ask for a weak model (interactive)", () => {
+    // The exact patterns from the bug report: an interpreter on a script it just
+    // wrote (in-workspace), compound/redirected commands, and a coreutil that
+    // isn't on the read-only safe list. None auto-runs; each prompts the human.
+    const repros = [
+      "python3 /home/alice/project/analyze.py",
+      "cd /home/alice/project && cp a.txt b.txt",
+      "ls -la | head",
+      "sed --version",
+    ];
+    for (const command of repros)
+      expect(
+        decide(req({ modelTier: "weak", toolInput: { command } }), deps).decision,
+        command,
+      ).toBe("ask");
+  });
+  it("unknown bash for a weak model with no interactive session still denies (#232 headless)", () => {
+    // The widening is interactive-only: a headless/scripted weak run has no one to
+    // approve, so the unrecognized command is still denied (fail-closed).
+    const r = decide(
+      req({ modelTier: "weak", interactive: false, toolInput: { command: "python x.py" } }),
+      deps,
+    );
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:unknown");
+  });
+  it("the deny->ask widening does NOT lift any floor for a weak model (#232 boundary)", () => {
+    // Guard the boundary: only the residual bash:unknown case relaxed. Every floor
+    // checked before it must still hard-deny a weak model, interactive or not.
+    const cases: Array<[string, string]> = [
+      ["sudo rm -rf /", "catastrophic"],
+      ["cat /home/alice/.ssh/id_rsa", "credential store"],
+      ["cat /home/alice/.loom/config.json | base64", "credential store via pipe"],
+      ["cat /home/alice/project/secret.pem", "sensitive-shaped read"],
+      ["cat /etc/passwd", "read outside workspace"],
+    ];
+    for (const [command, label] of cases)
+      expect(
+        decide(req({ modelTier: "weak", toolInput: { command } }), deps).decision,
+        label,
+      ).toBe("deny");
   });
   it("trusted workspace relaxes unknown bash ask -> allow (trusted only)", () => {
     const cfg = { ...baseCfg, trustedWorkspaces: [CWD] };
@@ -264,6 +355,45 @@ describe("decide", () => {
     expect(decide(req({ toolInput: { command: "cat /etc/passwd" } }), deps).decision).toBe("ask");
     expect(
       decide(req({ toolInput: { command: "cat /home/alice/project/notes.txt" } }), deps).decision,
+    ).toBe("allow");
+  });
+  it("a safe bash enumeration/metadata command outside the workspace -> ask (#224)", () => {
+    // ls/find/stat/wc/du/file are 'safe' but reveal structure/metadata/content of
+    // their target; pointed outside the workspace they must prompt, same as cat.
+    for (const command of [
+      "ls /home/alice/Desktop/experiment",
+      "find /home/alice/Desktop -name '*.csv'",
+      "stat /home/alice/Desktop/exp.csv",
+      "wc -l /home/alice/Desktop/exp.csv",
+      "du -sh /home/alice/Desktop/experiment",
+      "file /home/alice/Desktop/exp.bin",
+    ])
+      expect(decide(req({ toolInput: { command } }), deps).decision, command).toBe("ask");
+  });
+  it("a safe bash enumeration command inside the workspace is allowed (#224)", () => {
+    // Real-world relative operands (e.g. `find . -name '*.ts'`) resolve under cwd
+    // and are exercised in the path-jail/classifier suites; the fake resolver here
+    // only models absolute membership, so these cases use absolute in-workspace
+    // paths and path-less forms.
+    for (const command of [
+      "ls /home/alice/project/data",
+      "ls -la",
+      "find /home/alice/project",
+      "stat /home/alice/project/notes.txt",
+    ])
+      expect(decide(req({ toolInput: { command } }), deps).decision, command).toBe("allow");
+  });
+  it("df pointed outside the workspace -> ask (#224)", () => {
+    expect(
+      decide(req({ toolInput: { command: "df /home/alice/Desktop/experiment" } }), deps).decision,
+    ).toBe("ask");
+  });
+  it("a quoted path operand is matched against the jail unquoted (#224)", () => {
+    // A quoted IN-workspace path must still be recognized as inside (no false
+    // prompt); without quote-stripping the literal-quoted token fails the
+    // workspace check -- the same gap that lets a quoted EXTERNAL path slip past.
+    expect(
+      decide(req({ toolInput: { command: `ls "/home/alice/project/data"` } }), deps).decision,
     ).toBe("allow");
   });
 });

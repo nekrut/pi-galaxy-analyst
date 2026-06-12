@@ -1,6 +1,18 @@
 import { classifyBash } from "./bash-risk";
-import { isSensitivePath, isProtectedWritePath } from "./sensitive-read";
+import { isSensitivePath, isCredentialStore, isProtectedWritePath } from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
+
+// A dedicated credential store's CONTENTS are never readable by the agent --
+// denied for every tier, not downgraded to an ask. This is the floor that closes
+// #183: a capable model that gets to read ~/.loom/config.json echoes the keys
+// straight into the provider's request logs. Approval can't override it.
+function denyCredentialStore(p: string): PolicyResult {
+  return {
+    decision: "deny",
+    category: "read:credential-store",
+    reason: `access to credential store ${p} blocked for all models`,
+  };
+}
 
 const FILE_WRITE_TOOLS = new Set(["write", "edit"]);
 // Read-like pi tools that take an optional `path`. grep reads file CONTENTS, so
@@ -47,13 +59,23 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     if (c.kind === "catastrophic") {
       return { decision: "deny", category: "bash:catastrophic", reason: c.reason };
     }
-    // Floor: detectable read-args of a "safe" command still face sensitive-read +
-    // the workspace jail. A read pointed outside the work dir prompts, same as a write.
-    for (const p of c.readPaths) {
-      const { inside, resolved } = deps.resolver.contains(p);
+    // Sensitive-read floor: every content-read target, including inside a pipe or
+    // compound command (closes the `cat secret | tool` evasion). A dedicated
+    // credential store is denied for ALL tiers; any other sensitive path
+    // downgrades to an ask (deny for weak / non-interactive).
+    for (const p of c.sensitiveReadPaths) {
+      const { resolved } = deps.resolver.contains(p);
+      if (isCredentialStore(resolved, deps.home)) {
+        return denyCredentialStore(p);
+      }
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `read of sensitive path ${p}`);
       }
+    }
+    // Workspace-jail floor: only confidently-parsed simple read commands, so a
+    // compound command's jail semantics stay unchanged (it falls to "unknown").
+    for (const p of c.readPaths) {
+      const { inside } = deps.resolver.contains(p);
       if (!inside) {
         return finalizeAsk(req, "read:escape", `read outside workspace: ${p}`);
       }
@@ -82,13 +104,33 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
       }
       return { decision: "ask", category: "bash:trusted-workspace", reason: c.reason };
     }
-    return finalizeAsk(req, "bash:unknown", c.reason);
+    // Unrecognized command in an untrusted workspace. Both tiers get a human
+    // approval prompt when interactive -- a weak model is no longer hard-denied
+    // here, so a user who explicitly chose local execution can approve routine
+    // local work (run a script it just wrote, a compound/redirected command)
+    // instead of being stuck (#232). Nothing is auto-allowed: the silent pass
+    // stays reserved for a trusted model in a trusted workspace (above), and the
+    // catastrophic / credential-store / sensitive-read / jail floors are all
+    // enforced before this point, so this branch only governs the residual
+    // "command we can't reason about" case. A headless session still denies --
+    // there is no one to approve.
+    if (!req.interactive) {
+      return {
+        decision: "deny",
+        category: "bash:unknown",
+        reason: `${c.reason} (denied: no interactive session to approve)`,
+      };
+    }
+    return { decision: "ask", category: "bash:unknown", reason: c.reason };
   }
 
   if (FILE_READ_TOOLS.has(toolName)) {
     const p = pick(req.toolInput, "path");
     if (p) {
       const { inside, resolved } = deps.resolver.contains(p);
+      if (isCredentialStore(resolved, deps.home)) {
+        return denyCredentialStore(p);
+      }
       if (isSensitivePath(resolved, deps.home)) {
         return finalizeAsk(req, "read:sensitive", `${req.toolName} of sensitive path ${p}`);
       }
