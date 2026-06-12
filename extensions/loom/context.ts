@@ -215,7 +215,7 @@ flip the toggle to Cloud if they want Galaxy back.
  * Galaxy connection status block — replaces the old Local|Remote toggle
  * with agent-side per-plan routing decisions.
  */
-function buildGalaxyContextBlock(): string {
+export function buildGalaxyContextBlock(): string {
   const cfg = loadConfig();
   // Local mode short-circuits — no Galaxy guidance, even if connected.
   if (cfg.executionMode === "local") {
@@ -226,6 +226,20 @@ function buildGalaxyContextBlock(): string {
   const connected = Boolean(galaxyUrl && apiKey);
 
   if (!connected) {
+    // With no local shell there is no local fallback -- claiming "all
+    // execution is local" here would contradict buildNoLocalShellBlock in
+    // the same prompt. The only actionable fact is that Galaxy isn't
+    // connected yet.
+    if (isLocalShellDisabled()) {
+      return `
+## Galaxy connection: NOT CONNECTED
+
+No Galaxy credentials configured (\`GALAXY_URL\` / \`GALAXY_API_KEY\`), and this
+build has no local execution path, so nothing can run yet. Ask the user to
+connect a Galaxy server via \`/connect\` before proposing analysis steps, and
+don't suggest local alternatives.
+`;
+    }
     return `
 ## Galaxy connection: NOT CONNECTED
 
