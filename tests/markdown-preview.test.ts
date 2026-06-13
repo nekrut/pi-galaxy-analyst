@@ -91,6 +91,38 @@ describe("rewritePreviewImageHref", () => {
       "orbit-artifact://cwd/x.png",
     );
   });
+
+  it("leaves a ref that climbs above the cwd root unrewritten (honest broken image, no silent redirect)", () => {
+    // `../../secret.png` from reports/ would, if rewritten, fold via URL
+    // canonicalization to cwd/secret.png and silently serve the wrong file.
+    expect(rewritePreviewImageHref("reports", "../../secret.png")).toBe("../../secret.png");
+    expect(rewritePreviewImageHref("", "../secret.png")).toBe("../secret.png");
+  });
+
+  it("neutralizes percent-encoded traversal by encoding it as a literal segment", () => {
+    // `%2e%2e` must NOT be folded into `..` by URL parsing — encode it so the
+    // handler sees a literal (non-existent) directory name and 404s.
+    const out = rewritePreviewImageHref("reports", "%2e%2e/secret.png");
+    expect(out).toContain("%252e%252e");
+    expect(out).not.toContain("/../");
+  });
+
+  it("percent-encodes reserved URL characters in filenames so the handler round-trips them", () => {
+    expect(rewritePreviewImageHref("", "my plot.png")).toBe("orbit-artifact://cwd/my%20plot.png");
+    expect(rewritePreviewImageHref("", "a#b.png")).toBe("orbit-artifact://cwd/a%23b.png");
+    expect(rewritePreviewImageHref("", "a?b.png")).toBe("orbit-artifact://cwd/a%3Fb.png");
+    expect(rewritePreviewImageHref("", "a%b.png")).toBe("orbit-artifact://cwd/a%25b.png");
+  });
+
+  it("encodes non-ASCII filenames", () => {
+    expect(rewritePreviewImageHref("", "café.png")).toBe("orbit-artifact://cwd/caf%C3%A9.png");
+  });
+
+  it("treats backslash separators as path separators (Windows-authored reports)", () => {
+    expect(rewritePreviewImageHref("", "figs\\plot.png")).toBe(
+      "orbit-artifact://cwd/figs/plot.png",
+    );
+  });
 });
 
 describe("buildPreviewMarked", () => {
@@ -114,6 +146,11 @@ describe("buildPreviewMarked", () => {
 
   it("leaves relative links (non-images) to default rendering — only images are rewritten", () => {
     const html = renderMarkdown("[see data](data.csv)", buildPreviewMarked("reports"));
+    expect(html).not.toContain("orbit-artifact");
+  });
+
+  it("does not emit an orbit-artifact src for a ref that escapes the cwd root", () => {
+    const html = renderMarkdown("![x](../../secret.png)", buildPreviewMarked("reports"));
     expect(html).not.toContain("orbit-artifact");
   });
 

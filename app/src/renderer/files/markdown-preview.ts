@@ -22,7 +22,11 @@
 
 import { Marked } from "marked";
 
-/** Leading scheme (`https:`, `data:`, `orbit-artifact:`) or protocol-relative `//`. */
+// Leading scheme (`https:`, `data:`, `orbit-artifact:`) or protocol-relative
+// `//`. Matches the notebook pane's guard (artifact-panel.ts) on purpose so both
+// panes treat the same hrefs as absolute. Known limitation kept for that
+// consistency: a relative filename that contains a colon (`a:b.png`, legal on
+// POSIX) reads as a scheme and stays unrewritten — author can prefix `./`.
 const ABSOLUTE_OR_SCHEME = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
 /**
@@ -57,15 +61,29 @@ function normalizePosix(p: string): string {
  * ignored), matching the notebook pane's convention.
  *
  * The `orbit-artifact` protocol handler re-resolves the path against the live
- * cwd and refuses anything that escapes it via `..`/symlinks, so this is the
- * single security boundary — we only produce a best-effort clean path here.
+ * cwd and refuses (via realpath) anything that escapes it through `..`/symlinks
+ * — that is the security boundary. Here we additionally:
+ *   - leave a ref that climbs above the cwd root unrewritten, so it renders as
+ *     an honest broken image instead of silently folding (via URL `..`
+ *     canonicalization) to a same-named file at the cwd root;
+ *   - percent-encode each path segment, so reserved URL characters (`#`, `?`,
+ *     `%`, space) and pre-encoded traversal (`%2e%2e`) round-trip as literal
+ *     filenames through the handler's `decodeURIComponent` rather than break or
+ *     re-fold into `..`.
  */
 export function rewritePreviewImageHref(baseDir: string, href: string): string {
   if (ABSOLUTE_OR_SCHEME.test(href)) return href;
-  const rooted = href.startsWith("/");
-  const joined = rooted || !baseDir ? href.replace(/^\/+/, "") : `${baseDir}/${href}`;
+  // Windows-authored reports may use backslash separators; the cwd jail and the
+  // orbit-artifact handler speak forward slashes.
+  const ref = href.replace(/\\/g, "/");
+  const rooted = ref.startsWith("/");
+  const joined = rooted || !baseDir ? ref.replace(/^\/+/, "") : `${baseDir}/${ref}`;
   const normalized = normalizePosix(joined);
-  return `orbit-artifact://cwd/${normalized}`;
+  if (normalized === "" || normalized === ".." || normalized.startsWith("../")) {
+    return href;
+  }
+  const encoded = normalized.split("/").map(encodeURIComponent).join("/");
+  return `orbit-artifact://cwd/${encoded}`;
 }
 
 function escapeAttr(s: string): string {
