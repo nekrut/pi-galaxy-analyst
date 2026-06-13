@@ -1,5 +1,12 @@
 # Gotchas and operational notes
 
+> **Stopgap, not a home.** Much of this file encodes _process_ -- behavior the
+> agent should follow -- as prompt-level nudges. That is a pragmatic patch for
+> loom, not where this belongs. Each such entry is a candidate to migrate into a
+> more durable substrate (the galaxy-mcp protocol, a skill, or a deterministic
+> check) and to be deleted here once that substrate enforces it. Prefer fixing
+> the substrate over growing this file.
+
 ## Local-tool environment
 
 When running tools locally, use a per-analysis conda environment rooted
@@ -64,6 +71,17 @@ match it exactly — do not guess input names. The fastest path:
 3. Use flattened keys for nested params: `section|param`,
    `conditional|selector`, `repeat_0|param` (and `repeat_1|...` for more
    repeat instances).
+
+   **Repeat keys use `|`, never `_`, before the child param.** Writing
+   `operations_1_op_name` instead of `operations_1|op_name` is a silent trap:
+   Galaxy _accepts_ the underscore form, ignores the unbound key, and runs the
+   job to `ok` with a wrong (default-filled) value -- a data-correctness failure
+   with no error to catch. The repeat-instance index is `_N`; the separator to
+   its child param is always `|`.
+
+<!-- Remove this underscore-vs-pipe warning once galaxy-mcp surfaces it at
+     submit/enrich time (galaxyproject/galaxy-mcp#52): when the protocol catches
+     the malformed key, this prompt nudge is redundant. -->
 
 If a tool call fails with an opaque or parameter-shaped error — in
 particular `Required parameter(s) kwd not provided in request` — treat it
