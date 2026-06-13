@@ -36,7 +36,17 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     // Idempotent — start() stops any prior timer first. Pass the shell
     // notifier so a backgrounded invocation toasts the user on completion
     // (async-by-default execution: submit, hand back, notify-on-finish).
-    startGalaxyPoller((text, level) => ctx.ui.notify(text, level));
+    // The poller fires this from a 15s timer, so the captured session_start
+    // ctx may be headless (rpc/--print/web) or stale after a session swap —
+    // ctx.ui/hasUI assert an active context and can throw. Guard like the
+    // compaction notifier (see registerCommand("compact") in index.ts).
+    startGalaxyPoller((text, level) => {
+      try {
+        if (ctx.hasUI) ctx.ui.notify(text, level);
+      } catch {
+        /* stale/headless context — a dropped completion toast is fine */
+      }
+    });
 
     sessionStart = {
       id: ctx.sessionManager?.getSessionId?.() ?? `session-${Date.now()}`,
