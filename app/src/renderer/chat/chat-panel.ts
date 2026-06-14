@@ -1,5 +1,6 @@
 import { renderMarkdown } from "./markdown.js";
 import { joinTextBlocks } from "./block-spacing.js";
+import { computeCopyButtonPlacement } from "./copy-button.js";
 import {
   TEAM_DISPATCH_KIND,
   type TeamDispatchDetails,
@@ -468,13 +469,18 @@ export class ChatPanel {
     document.addEventListener("mousedown", (e) => {
       // contains() so clicking the button's inner <svg> (a child) still counts
       // as the button -- otherwise the icon hit hides it before the copy fires.
-      if (!btn.contains(e.target as Node)) { btn.hidden = true; mouseIsDown = true; }
+      if (!btn.contains(e.target as Node)) {
+        btn.hidden = true;
+        mouseIsDown = true;
+      }
     });
     document.addEventListener("mouseup", () => {
       mouseIsDown = false;
       updateBtn();
     });
-    window.addEventListener("blur", () => { btn.hidden = true; });
+    window.addEventListener("blur", () => {
+      btn.hidden = true;
+    });
 
     btn.addEventListener("click", () => {
       const sel = window.getSelection();
@@ -500,19 +506,51 @@ export class ChatPanel {
       updateBtn();
     });
 
+    // The button is position:fixed at the selection's viewport coords, but the
+    // chat re-renders and autoscrolls during streaming. Without re-validating on
+    // scroll the button stays frozen where the selection used to be, stranded in
+    // the middle of the pane (#299). Re-running updateBtn repositions it to track
+    // the selection, or hides it once the selection scrolls away / is gone.
+    this.container.addEventListener("scroll", () => updateBtn());
+
+    // A guaranteed dismiss: Escape clears the selection and hides the button.
+    // Scoped to when the button is showing so it never disturbs selections
+    // elsewhere (e.g. in an input).
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !btn.hidden) {
+        btn.hidden = true;
+        window.getSelection()?.removeAllRanges();
+      }
+    });
+
     const updateBtn = () => {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) { btn.hidden = true; return; }
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        btn.hidden = true;
+        return;
+      }
       const range = sel.getRangeAt(0);
-      if (!this.container.contains(range.commonAncestorContainer)) { btn.hidden = true; return; }
       const rect = range.getBoundingClientRect();
-      if (!rect.width && !rect.height) { btn.hidden = true; return; }
+      const placement = computeCopyButtonPlacement({
+        isCollapsed: sel.isCollapsed,
+        rangeCount: sel.rangeCount,
+        inContainer: this.container.contains(range.commonAncestorContainer),
+        rect: {
+          top: rect.top,
+          bottom: rect.bottom,
+          right: rect.right,
+          width: rect.width,
+          height: rect.height,
+        },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      });
+      if (placement.hidden) {
+        btn.hidden = true;
+        return;
+      }
       btn.hidden = false;
-      const bh = 28, bw = 80;
-      const top = rect.bottom + 6 + bh > window.innerHeight ? rect.top - bh - 4 : rect.bottom + 4;
-      const left = Math.max(4, Math.min(rect.right - bw, window.innerWidth - bw - 4));
-      btn.style.top = `${top}px`;
-      btn.style.left = `${left}px`;
+      btn.style.top = `${placement.top}px`;
+      btn.style.left = `${placement.left}px`;
     };
 
     return btn;
@@ -558,7 +596,9 @@ export function historyToMarkdown(records: MessageRecord[]): string {
       lines.push(`**Assistant**\n\n${rec.text}\n`);
     } else if (rec.role === "tool") {
       const badge = rec.status === "done" ? "✓" : rec.status === "error" ? "✗" : "…";
-      lines.push(`*Tool call ${badge}: \`${rec.name}\`*${rec.result ? `\n\n\`\`\`\n${rec.result}\n\`\`\`` : ""}\n`);
+      lines.push(
+        `*Tool call ${badge}: \`${rec.name}\`*${rec.result ? `\n\n\`\`\`\n${rec.result}\n\`\`\`` : ""}\n`,
+      );
     } else if (rec.role === "error") {
       lines.push(`*Error: ${rec.text}*\n`);
     }
@@ -578,9 +618,15 @@ function nodeToMd(node: Node): string {
   const inner = () => Array.from(el.childNodes).map(nodeToMd).join("");
 
   switch (tag) {
-    case "strong": case "b": return `**${inner()}**`;
-    case "em": case "i": return `*${inner()}*`;
-    case "del": case "s": return `~~${inner()}~~`;
+    case "strong":
+    case "b":
+      return `**${inner()}**`;
+    case "em":
+    case "i":
+      return `*${inner()}*`;
+    case "del":
+    case "s":
+      return `~~${inner()}~~`;
     case "code":
       if (el.closest("pre")) return el.textContent ?? "";
       return `\`${el.textContent ?? ""}\``;
@@ -589,21 +635,47 @@ function nodeToMd(node: Node): string {
       const lang = (code?.className ?? "").match(/language-(\w+)/)?.[1] ?? "";
       return `\`\`\`${lang}\n${(code ?? el).textContent ?? ""}\n\`\`\``;
     }
-    case "h1": return `# ${inner()}\n`;
-    case "h2": return `## ${inner()}\n`;
-    case "h3": return `### ${inner()}\n`;
-    case "h4": return `#### ${inner()}\n`;
-    case "h5": return `##### ${inner()}\n`;
-    case "h6": return `###### ${inner()}\n`;
-    case "p": return `${inner()}\n\n`;
-    case "br": return "\n";
-    case "ul": return Array.from(el.children).map(li => `- ${nodeToMd(li)}`).join("\n") + "\n";
-    case "ol": return Array.from(el.children).map((li, i) => `${i + 1}. ${nodeToMd(li)}`).join("\n") + "\n";
-    case "li": return inner();
-    case "a": return `[${inner()}](${el.getAttribute("href") ?? ""})`;
-    case "blockquote": return inner().split("\n").map(l => `> ${l}`).join("\n");
-    case "hr": return "---\n";
-    default: return inner();
+    case "h1":
+      return `# ${inner()}\n`;
+    case "h2":
+      return `## ${inner()}\n`;
+    case "h3":
+      return `### ${inner()}\n`;
+    case "h4":
+      return `#### ${inner()}\n`;
+    case "h5":
+      return `##### ${inner()}\n`;
+    case "h6":
+      return `###### ${inner()}\n`;
+    case "p":
+      return `${inner()}\n\n`;
+    case "br":
+      return "\n";
+    case "ul":
+      return (
+        Array.from(el.children)
+          .map((li) => `- ${nodeToMd(li)}`)
+          .join("\n") + "\n"
+      );
+    case "ol":
+      return (
+        Array.from(el.children)
+          .map((li, i) => `${i + 1}. ${nodeToMd(li)}`)
+          .join("\n") + "\n"
+      );
+    case "li":
+      return inner();
+    case "a":
+      return `[${inner()}](${el.getAttribute("href") ?? ""})`;
+    case "blockquote":
+      return inner()
+        .split("\n")
+        .map((l) => `> ${l}`)
+        .join("\n");
+    case "hr":
+      return "---\n";
+    default:
+      return inner();
   }
 }
 
