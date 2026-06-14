@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveGalaxyStatus } from "../app/src/main/galaxy-status.js";
+import {
+  resolveGalaxyStatus,
+  resolveGalaxyServerUrl,
+  resolveGalaxyHistoryOpenUrl,
+} from "../app/src/main/galaxy-status.js";
 import type { LoomConfig } from "../shared/loom-config.js";
 
 const noConfigKey = () => null;
@@ -61,5 +65,85 @@ describe("resolveGalaxyStatus", () => {
       noConfigKey,
     );
     expect(status.connected).toBe(true);
+  });
+});
+
+describe("resolveGalaxyServerUrl", () => {
+  it("falls back to the exported GALAXY_URL when no profile is saved (#290)", () => {
+    expect(
+      resolveGalaxyServerUrl(
+        {} as LoomConfig,
+        { GALAXY_URL: "https://env.example" } as NodeJS.ProcessEnv,
+      ),
+    ).toBe("https://env.example");
+  });
+
+  it("uses the active profile URL with no env", () => {
+    expect(
+      resolveGalaxyServerUrl(profileConfig("https://main.example"), {} as NodeJS.ProcessEnv),
+    ).toBe("https://main.example");
+  });
+
+  it("prefers the active profile URL over an exported GALAXY_URL", () => {
+    expect(
+      resolveGalaxyServerUrl(profileConfig("https://profile.example"), {
+        GALAXY_URL: "https://env.example",
+      } as NodeJS.ProcessEnv),
+    ).toBe("https://profile.example");
+  });
+
+  it("is null with no profile and no env", () => {
+    expect(resolveGalaxyServerUrl({} as LoomConfig, {} as NodeJS.ProcessEnv)).toBeNull();
+  });
+});
+
+describe("resolveGalaxyHistoryOpenUrl", () => {
+  const HISTORY = "https://env.example/histories/view?id=h1";
+
+  it("accepts a same-origin history URL pinned to the effective env server (#290)", () => {
+    // The env-driven case: no saved profile, server URL comes from GALAXY_URL.
+    const serverUrl = resolveGalaxyServerUrl(
+      {} as LoomConfig,
+      { GALAXY_URL: "https://env.example" } as NodeJS.ProcessEnv,
+    );
+    expect(resolveGalaxyHistoryOpenUrl(HISTORY, serverUrl)).toBe(HISTORY);
+  });
+
+  it("accepts a subpath deployment whose origin matches the server", () => {
+    expect(
+      resolveGalaxyHistoryOpenUrl(
+        "https://example.org/galaxy/histories/view?id=h1",
+        "https://example.org/galaxy",
+      ),
+    ).toBe("https://example.org/galaxy/histories/view?id=h1");
+  });
+
+  it("rejects a cross-origin destination even with a valid path", () => {
+    expect(
+      resolveGalaxyHistoryOpenUrl("https://evil.example/histories/view", "https://env.example"),
+    ).toBeNull();
+  });
+
+  it("rejects when no server URL resolves at all", () => {
+    expect(resolveGalaxyHistoryOpenUrl(HISTORY, null)).toBeNull();
+  });
+
+  it("rejects a non-http(s) scheme", () => {
+    expect(resolveGalaxyHistoryOpenUrl("file:///etc/passwd", "https://env.example")).toBeNull();
+  });
+
+  it("rejects a URL that does not end in /histories/view", () => {
+    expect(
+      resolveGalaxyHistoryOpenUrl("https://env.example/datasets/list", "https://env.example"),
+    ).toBeNull();
+  });
+
+  it("rejects a non-string requested URL", () => {
+    expect(resolveGalaxyHistoryOpenUrl(42, "https://env.example")).toBeNull();
+    expect(resolveGalaxyHistoryOpenUrl(undefined, "https://env.example")).toBeNull();
+  });
+
+  it("rejects an unparseable requested URL", () => {
+    expect(resolveGalaxyHistoryOpenUrl("not a url", "https://env.example")).toBeNull();
   });
 });

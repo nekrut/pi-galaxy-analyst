@@ -10,12 +10,17 @@
  *    `state.currentHistoryId` — the brain does not persist the live history
  *    anywhere the shell can read, so surfacing it would require a new
  *    brain->shell channel. See the test+fix notes for that follow-up.
- *  - the server origin comes from the *active Galaxy profile* (live config),
- *    not the server recorded in the binding. The binding records the server at
- *    bind time; the active profile is the connection the user is on right now.
- *    Driving off the live profile means the section hides on disconnect and
- *    tracks profile switches, and the opened link always targets the server
- *    Orbit is actually connected to.
+ *  - the server origin comes from the brain's *effective* Galaxy connection
+ *    (window.orbit.getGalaxyStatus -> { connected, url }), not the server
+ *    recorded in the binding. The binding records the server at bind time; the
+ *    effective status is the connection the user is on right now -- a saved
+ *    profile *or* an exported GALAXY_URL/GALAXY_API_KEY. Reading masked config
+ *    alone missed the env-driven / auto-connect path, so the section stayed
+ *    hidden even though the footer dot was green and a history was bound (#290,
+ *    follow-up to #284). Driving off the effective status means the section
+ *    hides on disconnect, tracks profile switches, and matches the footer dot
+ *    exactly, and the opened link always targets the server Orbit is connected
+ *    to.
  *
  * Hidden when Galaxy is not connected, when no binding exists, or when the URL
  * can't be built. Building the web URL is a shell concern — the Loom brain
@@ -87,30 +92,14 @@ export function buildHistoryUrl(serverUrl: string, historyId: string): string | 
 }
 
 /**
- * Read the active Galaxy profile's server URL from masked config, or null when
- * Galaxy is not connected. Mirrors refreshGalaxyStatus()'s connection check so
- * the section appears/hides on the same connect/disconnect/profile-switch
- * signal as the connection indicator.
- */
-function activeGalaxyServerUrl(cfg: Record<string, unknown>): string | null {
-  const galaxy = cfg.galaxy as
-    | { active?: string | null; profiles?: Record<string, { url?: string; hasApiKey?: boolean }> }
-    | undefined;
-  const active = galaxy?.active;
-  const profile = active ? galaxy?.profiles?.[active] : undefined;
-  if (!profile?.url || !profile?.hasApiKey) return null;
-  return profile.url;
-}
-
-/**
  * Render the Galaxy history section. Uses the first binding block (today's MVP
- * is one binding per notebook) for the history id and the active Galaxy profile
- * for the server. Hides the section when Galaxy is not connected, there's no
- * binding, or the URL can't be built.
+ * is one binding per notebook) for the history id and the brain's effective
+ * Galaxy connection for the server. Hides the section when Galaxy is not
+ * connected, there's no binding, or the URL can't be built.
  */
 export async function refreshGalaxyHistory(api: {
   readFile: (p: string) => Promise<{ ok: true; bytes: Uint8Array } | { ok: false }>;
-  getConfig: () => Promise<Record<string, unknown>>;
+  getGalaxyStatus: () => Promise<{ connected: boolean; url: string | null }>;
   openGalaxyHistory: (url: string) => Promise<{ opened: boolean }>;
 }): Promise<void> {
   const section = document.getElementById("activity-galaxy-history-section");
@@ -124,9 +113,12 @@ export async function refreshGalaxyHistory(api: {
 
   let serverUrl: string | null = null;
   try {
-    serverUrl = activeGalaxyServerUrl(await api.getConfig());
+    const status = await api.getGalaxyStatus();
+    // Gate on the same `connected` notion the footer dot uses (which decrypts
+    // the key) rather than URL presence, so the section and the dot agree.
+    if (status.connected) serverUrl = status.url;
   } catch {
-    /* config unavailable — treat as not connected */
+    /* status unavailable — treat as not connected */
   }
   if (!serverUrl) {
     hide();

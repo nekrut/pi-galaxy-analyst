@@ -1,5 +1,10 @@
+// @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
-import { buildHistoryUrl, parseGalaxyHistoryBindings } from "../app/src/renderer/galaxy-history";
+import {
+  buildHistoryUrl,
+  parseGalaxyHistoryBindings,
+  refreshGalaxyHistory,
+} from "../app/src/renderer/galaxy-history";
 
 describe("buildHistoryUrl", () => {
   it("builds the canonical view URL for a root-path server", () => {
@@ -93,5 +98,139 @@ describe("parseGalaxyHistoryBindings", () => {
       { historyId: "first" },
       { historyId: "second" },
     ]);
+  });
+});
+
+describe("refreshGalaxyHistory", () => {
+  const NOTEBOOK_WITH_BINDING = [
+    "# Notebook",
+    "",
+    "```loom-galaxy-page",
+    "page_id: page123",
+    "history_id: hist456",
+    "```",
+    "",
+  ].join("\n");
+
+  function setupDom(): { section: HTMLElement; body: HTMLElement } {
+    document.body.innerHTML = `
+      <div id="activity-galaxy-history-section" class="hidden">
+        <div id="galaxy-history-body"></div>
+      </div>
+    `;
+    return {
+      section: document.getElementById("activity-galaxy-history-section")!,
+      body: document.getElementById("galaxy-history-body")!,
+    };
+  }
+
+  function api(opts: {
+    status: { connected: boolean; url: string | null };
+    notebook?: string;
+    onOpen?: (url: string) => void;
+  }): Parameters<typeof refreshGalaxyHistory>[0] {
+    return {
+      getGalaxyStatus: async () => opts.status,
+      readFile: async () =>
+        opts.notebook !== undefined
+          ? { ok: true as const, bytes: new TextEncoder().encode(opts.notebook) }
+          : { ok: false as const },
+      openGalaxyHistory: async (url: string) => {
+        opts.onOpen?.(url);
+        return { opened: true };
+      },
+    };
+  }
+
+  it("shows the section and builds the view URL from the effective env URL when connected (#290)", async () => {
+    // Env-driven session: no saved profile, status reports connected with the
+    // exported GALAXY_URL. Used to hide because it read the (empty) profile.
+    const { section, body } = setupDom();
+    await refreshGalaxyHistory(
+      api({
+        status: { connected: true, url: "https://env.example" },
+        notebook: NOTEBOOK_WITH_BINDING,
+      }),
+    );
+    expect(section.classList.contains("hidden")).toBe(false);
+    const link = body.querySelector<HTMLAnchorElement>("a.galaxy-history-link");
+    expect(link?.getAttribute("href")).toBe("https://env.example/histories/view?id=hist456");
+  });
+
+  it("routes a click through the host-pinned IPC path with the built URL", async () => {
+    const { body } = setupDom();
+    let opened: string | null = null;
+    await refreshGalaxyHistory(
+      api({
+        status: { connected: true, url: "https://env.example" },
+        notebook: NOTEBOOK_WITH_BINDING,
+        onOpen: (url) => {
+          opened = url;
+        },
+      }),
+    );
+    body.querySelector<HTMLAnchorElement>("a.galaxy-history-link")!.click();
+    expect(opened).toBe("https://env.example/histories/view?id=hist456");
+  });
+
+  it("still works for a saved-profile URL (no regression)", async () => {
+    const { section, body } = setupDom();
+    await refreshGalaxyHistory(
+      api({
+        status: { connected: true, url: "https://main.example" },
+        notebook: NOTEBOOK_WITH_BINDING,
+      }),
+    );
+    expect(section.classList.contains("hidden")).toBe(false);
+    expect(
+      body.querySelector<HTMLAnchorElement>("a.galaxy-history-link")?.getAttribute("href"),
+    ).toBe("https://main.example/histories/view?id=hist456");
+  });
+
+  it("hides the section when not connected", async () => {
+    const { section, body } = setupDom();
+    await refreshGalaxyHistory(
+      api({ status: { connected: false, url: null }, notebook: NOTEBOOK_WITH_BINDING }),
+    );
+    expect(section.classList.contains("hidden")).toBe(true);
+    expect(body.children.length).toBe(0);
+  });
+
+  it("hides even if a URL is present but the effective status is disconnected", async () => {
+    // Match the footer dot exactly: gate on `connected`, not URL presence.
+    const { section } = setupDom();
+    await refreshGalaxyHistory(
+      api({
+        status: { connected: false, url: "https://env.example" },
+        notebook: NOTEBOOK_WITH_BINDING,
+      }),
+    );
+    expect(section.classList.contains("hidden")).toBe(true);
+  });
+
+  it("hides when connected but the notebook has no binding", async () => {
+    const { section } = setupDom();
+    await refreshGalaxyHistory(
+      api({
+        status: { connected: true, url: "https://env.example" },
+        notebook: "# Notebook\n\njust prose\n",
+      }),
+    );
+    expect(section.classList.contains("hidden")).toBe(true);
+  });
+
+  it("hides when the status lookup throws", async () => {
+    const { section } = setupDom();
+    await refreshGalaxyHistory({
+      getGalaxyStatus: async () => {
+        throw new Error("ipc down");
+      },
+      readFile: async () => ({
+        ok: true as const,
+        bytes: new TextEncoder().encode(NOTEBOOK_WITH_BINDING),
+      }),
+      openGalaxyHistory: async () => ({ opened: true }),
+    });
+    expect(section.classList.contains("hidden")).toBe(true);
   });
 });
