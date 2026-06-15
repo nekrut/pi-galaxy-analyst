@@ -6,6 +6,7 @@ import { loadGuardianConfig, resolveSandbox } from "../exec-guard/guardian-confi
 import { isSandboxActive, setSandboxActive } from "../exec-guard/runtime-state";
 import { buildSandboxConfig } from "./sandbox-config";
 import { createSandboxedBashOps } from "./sandbox-bash";
+import { describeSandboxInitFailure } from "./sandbox-init-message";
 
 /**
  * Bash OS sandbox (opt-in). When enabled (`--sandbox` / LOOM_SANDBOX=1 /
@@ -78,7 +79,10 @@ export function registerSandbox(pi: ExtensionAPI): void {
     } catch (err) {
       setSandboxActive(false);
       ctx.ui.notify(
-        `Bash sandbox init failed (${err instanceof Error ? err.message : String(err)}); bash stays gated per action.`,
+        describeSandboxInitFailure(
+          process.platform,
+          err instanceof Error ? err.message : String(err),
+        ),
         "error",
       );
     }

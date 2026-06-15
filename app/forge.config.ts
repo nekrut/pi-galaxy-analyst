@@ -350,6 +350,13 @@ const config: ForgeConfig = {
           // unioned with the defaults, so this only adds the missing lib.
           // libasound2t64 on newer Ubuntu satisfies libasound2 via Provides.
           depends: ["libasound2"],
+          // Runtime prerequisites for the opt-in bash sandbox (ASRT shells out to
+          // these on Linux): ripgrep -> rg, socat -> socat, bubblewrap -> bwrap.
+          // recommends (not depends) because the sandbox is off by default -- apt
+          // pulls them on a normal install, but a vanilla box that never enables
+          // the toggle isn't forced to. recommends is unioned with the defaults
+          // like depends. See #305.
+          recommends: ["ripgrep", "socat", "bubblewrap"],
         },
       },
     },
