@@ -735,13 +735,18 @@ body:not(.artifact-collapsed) #artifact-toggle {
 /* Children of .pane-title default to "drag" (titlebar drag region on macOS).
    Re-enable clicks on interactive children. If you add a new interactive
    element (textarea, [role=button], a custom clickable container, etc.) inside
-   any .pane-title, add it here or it will swallow clicks on macOS. */
+   any .pane-title, add it here or it will swallow clicks on macOS.
+
+   Non-interactive text labels (.pane-title-label, .files-title-label) are
+   deliberately NOT listed -- they stay part of the drag region. The chat title
+   centers its label with `flex: 1`, so a no-drag label spans nearly the whole
+   band and leaves only the ~8px edge padding draggable, which is why dragging
+   the window over the chat pane only caught in the gaps (#315). Keep plain
+   text labels out of this list. */
 .pane-title button,
 .pane-title input,
 .pane-title select,
 .pane-title a,
-.pane-title .pane-title-label,
-.pane-title .files-title-label,
 .pane-title .pane-title-actions,
 .pane-title .files-title-actions {
   -webkit-app-region: no-drag;
