@@ -44,6 +44,16 @@ export interface Assertions {
    */
   plan?: PlanAssertions;
   exitCode?: number;
+  behavior?: BehaviorAssertions;
+}
+
+export interface BehaviorAssertions {
+  /**
+   * The agent should ask a clarifying question rather than fabricate a plan.
+   * Passes iff the final chat contains a `?` AND no plan heading was emitted
+   * in chat or notebook.
+   */
+  asksClarifyingQuestion?: boolean;
 }
 
 export interface NotebookAssertions {

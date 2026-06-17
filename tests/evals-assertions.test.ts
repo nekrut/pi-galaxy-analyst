@@ -122,3 +122,34 @@ describe("evals assertions: source-aware plan (Assertions.plan)", () => {
     expect(f[0].dimension).toBe("routing");
   });
 });
+
+describe("evals assertions: behavior asksClarifyingQuestion", () => {
+  it("passes when the agent asks a question and writes no plan", () => {
+    const run = makeRun({
+      events: textEvents("Happy to help! What data do you have, and what's the goal?"),
+      notebookContent: null,
+      assertions: { behavior: { asksClarifyingQuestion: true } },
+    });
+    expect(evaluate(run)).toHaveLength(0);
+  });
+
+  it("fails (behavior) when the agent fabricates a plan instead of asking", () => {
+    const run = makeRun({
+      events: textEvents("## Plan 1: Guessed [galaxy]\n- [ ] 1. **Align** -- assume RNA-seq here"),
+      notebookContent: null,
+      assertions: { behavior: { asksClarifyingQuestion: true } },
+    });
+    const f = evaluate(run);
+    expect(f.some((x) => x.dimension === "behavior")).toBe(true);
+  });
+
+  it("fails when the agent neither asks nor errors out (no question mark)", () => {
+    const run = makeRun({
+      events: textEvents("Okay."),
+      notebookContent: null,
+      assertions: { behavior: { asksClarifyingQuestion: true } },
+    });
+    const f = evaluate(run);
+    expect(f.some((x) => x.assertion.includes("asksClarifyingQuestion"))).toBe(true);
+  });
+});

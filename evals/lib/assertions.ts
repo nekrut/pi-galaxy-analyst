@@ -11,6 +11,7 @@ import { parseLatestPlan } from "./notebook-parser.js";
 import type {
   AnyEvent,
   Assertions,
+  BehaviorAssertions,
   Dimension,
   NotebookAssertions,
   PlanAssertions,
@@ -36,6 +37,7 @@ export function evaluate(run: ScenarioRun): ScenarioFailure[] {
   evaluateChatText(run.events, a, stripThink, failures);
   evaluateChatPlan(run.events, a.chatPlan, stripThink, failures);
   evaluateUnifiedPlan(run, a.plan, stripThink, failures);
+  evaluateBehavior(run, a.behavior, stripThink, failures);
   evaluateNotebook(run.notebookContent, a.notebook, failures);
 
   return failures;
@@ -161,6 +163,38 @@ function collectChatText(events: AnyEvent[]): string {
 
 function stripThinking(text: string): string {
   return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}
+
+function evaluateBehavior(
+  run: ScenarioRun,
+  a: BehaviorAssertions | undefined,
+  stripThinkingTags: boolean,
+  failures: ScenarioFailure[],
+): void {
+  if (!a) return;
+  if (a.asksClarifyingQuestion) {
+    let chat = collectChatText(run.events);
+    if (stripThinkingTags) chat = stripThinking(chat);
+    const askedQuestion = chat.includes("?");
+    const chatPlan = parseLatestPlan(chat);
+    const notebookPlan = run.notebookContent ? parseLatestPlan(run.notebookContent) : null;
+    const fabricatedPlan = chatPlan !== null || notebookPlan !== null;
+
+    if (!askedQuestion) {
+      failures.push({
+        assertion: "behavior.asksClarifyingQuestion",
+        detail: "agent did not ask a clarifying question (no '?' in chat)",
+        dimension: "behavior",
+      });
+    }
+    if (fabricatedPlan) {
+      failures.push({
+        assertion: "behavior.asksClarifyingQuestion",
+        detail: "agent fabricated a plan instead of asking for clarification",
+        dimension: "behavior",
+      });
+    }
+  }
 }
 
 function evaluateNotebook(
