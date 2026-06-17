@@ -55,9 +55,13 @@ async function main() {
     const scenario = readScenario(dir);
     const cells: (ModelEntry | null)[] = scenario.requiresModel ? [...matrix.available] : [null];
     for (const model of cells) {
-      const run = await runScenario(dir, model);
-      run.failures = evaluate(run);
-      runs.push(run);
+      const runCount = scenario.requiresModel ? (scenario.runs ?? 3) : (scenario.runs ?? 1);
+      for (let i = 0; i < runCount; i++) {
+        const run = await runScenario(dir, model);
+        run.runIndex = i;
+        run.failures = evaluate(run);
+        runs.push(run);
+      }
     }
     if (scenario.requiresModel && matrix.available.length === 0) {
       console.warn(`[skip] ${scenario.name} -- requiresModel but no available models in matrix`);

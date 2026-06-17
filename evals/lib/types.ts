@@ -106,6 +106,9 @@ export interface Scenario {
    * path (slash-command preflight, etc.) leave it false and run once.
    */
   requiresModel?: boolean;
+  /** How many times to run each (scenario, model) cell. Default 3 when
+   *  requiresModel, else 1. Lets flaky models surface as pass-rates. */
+  runs?: number;
   inputs: string[];
   env?: Record<string, string>;
   /**
@@ -186,6 +189,8 @@ export interface ScenarioRun {
   scenario: Scenario;
   /** null for Tier 1 scenarios that don't traverse the matrix. */
   model: ModelEntry | null;
+  /** 0-based index of this run within its (scenario, model) cell. */
+  runIndex?: number;
   exitCode: number;
   events: AnyEvent[];
   stdout: string;
@@ -199,4 +204,17 @@ export interface ScenarioRun {
 export interface AnyEvent {
   type: string;
   [k: string]: unknown;
+}
+
+export interface CellDimension {
+  pass: number;
+  total: number;
+  verdict: boolean;
+}
+
+export interface Cell {
+  scenarioName: string;
+  modelId: string;
+  runs: number;
+  dimensions: Partial<Record<Dimension, CellDimension>>;
 }
