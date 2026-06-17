@@ -331,7 +331,7 @@ function evaluatePlan(
       }
       if (a.mentionsOneOf?.length || a.mentionsNoneOf?.length) {
         failures.push({
-          assertion: `${prefix}.mentionsOneOf`,
+          assertion: `${prefix}.mentions`,
           detail: `no plan in ${surfaceLabel}, so tools could not be graded`,
           dimension: "tools",
         });
