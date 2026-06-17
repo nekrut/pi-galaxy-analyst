@@ -16,6 +16,7 @@ import { loadConfig } from "./config";
 import { listEnabledSkillRepos } from "./skills";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { isLocalShellDisabled } from "./local-exec.js";
+import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -108,6 +109,8 @@ Use \`notebook_push_to_galaxy\` to share progress with the user (creates a new
 revision of the Galaxy page). Use \`notebook_pull_from_galaxy\` to fetch
 updates the user made on the Galaxy side -- only when the user explicitly
 asks for it, since pull discards local edits since the last sync.
+
+${GALAXY_PAGE_MARKDOWN_GUIDANCE}
 `;
 }
 

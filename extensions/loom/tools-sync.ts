@@ -16,6 +16,17 @@ import {
   resumeGalaxyPage,
 } from "./galaxy-pages-sync";
 import { listRecentPages } from "./galaxy-pages-api";
+import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
+
+export const NOTEBOOK_PUSH_TO_GALAXY_DESCRIPTION = `Push the local notebook.md to a Galaxy page. If the notebook already
+has a loom-galaxy-page binding block, updates that page in place (creates a
+new revision). If there's no binding yet, pass history_id (and optionally title,
+slug, annotation) to create a new page attached to that history and bind it.
+Strips loom-galaxy-page blocks from the body sent to Galaxy, but keeps
+loom-invocation blocks (they're analysis content). Unconditional local-wins:
+any concurrent Galaxy-UI edits since the last sync are overwritten.
+
+${GALAXY_PAGE_MARKDOWN_GUIDANCE}`;
 
 function errorContent(e: unknown) {
   return {
@@ -79,13 +90,7 @@ notebook_resume_from_galaxy with its page_id.`,
   pi.registerTool({
     name: "notebook_push_to_galaxy",
     label: "Push notebook to Galaxy page",
-    description: `Push the local notebook.md to a Galaxy page. If the notebook already
-has a loom-galaxy-page binding block, updates that page in place (creates a
-new revision). If there's no binding yet, pass history_id (and optionally title,
-slug, annotation) to create a new page attached to that history and bind it.
-Strips loom-galaxy-page blocks from the body sent to Galaxy, but keeps
-loom-invocation blocks (they're analysis content). Unconditional local-wins:
-any concurrent Galaxy-UI edits since the last sync are overwritten.`,
+    description: NOTEBOOK_PUSH_TO_GALAXY_DESCRIPTION,
     parameters: Type.Object({
       history_id: Type.Optional(
         Type.String({
