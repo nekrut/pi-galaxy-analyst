@@ -361,6 +361,12 @@ function evaluatePlan(
     }
   }
 
+  // Mention checks scan the whole surface (`content`), not just the parsed
+  // plan section, by design: tool names legitimately land in sub-bullets and
+  // param tables the parser doesn't capture, so scoping to step lines would
+  // cause false negatives. The trade-off is a coarse heuristic -- a tool named
+  // in surrounding prose can pass mentionsOneOf -- which the suite accepts;
+  // nuance is the (deferred) judge layer's job.
   const lower = content.toLowerCase();
   if (a.mentionsOneOf && a.mentionsOneOf.length > 0) {
     const hit = a.mentionsOneOf.some((t) => lower.includes(t.toLowerCase()));

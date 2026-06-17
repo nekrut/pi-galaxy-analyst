@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -21,6 +21,11 @@ const baseProviderConfig = {
 describe("evals matrix: writePiModelsConfig", () => {
   beforeEach(() => {
     process.env.PROXY_URL = "https://proxy.example/v1";
+  });
+
+  afterEach(() => {
+    // don't leak the fake PROXY_URL into other test files in this worker
+    delete process.env.PROXY_URL;
   });
 
   it("marks a reasoning model with reasoning:true and the configured maxTokens", () => {
