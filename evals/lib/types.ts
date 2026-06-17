@@ -132,6 +132,12 @@ export interface ModelEntry {
    * thinking-mode models (Qwen3-32B) emit them by default.
    */
   stripThinkingTags?: boolean;
+  /**
+   * Reasoning models (gpt-oss-120b) emit chain-of-thought in `reasoning_content`
+   * rather than inline. Surface that to Pi so it gives the model room and reads
+   * the field instead of returning empty `content`.
+   */
+  reasoningModel?: boolean;
 }
 
 export interface ModelMatrix {
