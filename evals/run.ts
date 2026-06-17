@@ -48,15 +48,34 @@ async function main() {
   }
 
   const matrix = loadMatrix(args.modelFilter);
+
+  // Guard 1: --model filter matched nothing in models.json at all.
+  if (
+    args.modelFilter &&
+    matrix.available.length === 0 &&
+    matrix.skipped.length === 0
+  ) {
+    console.error(
+      `error: --model filter matched no models in models.json: ${args.modelFilter.join(", ")}`,
+    );
+    process.exit(2);
+  }
+
   for (const { model, missing } of matrix.skipped) {
     console.warn(`[skip] ${model.id} -- missing env: ${missing.join(", ")}`);
   }
 
   const runs: ScenarioRun[] = [];
+  let hasRequiresModel = false;
+  let modelCellsRun = 0;
   for (const dir of scenarioDirs) {
     const scenario = readScenario(dir);
     const cells: (ModelEntry | null)[] = scenario.requiresModel ? [...matrix.available] : [null];
+    if (scenario.requiresModel) {
+      hasRequiresModel = true;
+    }
     for (const model of cells) {
+      if (model !== null) modelCellsRun++;
       const runCount = scenario.requiresModel ? (scenario.runs ?? 3) : (scenario.runs ?? 1);
       for (let i = 0; i < runCount; i++) {
         const run = await runScenario(dir, model);
@@ -68,6 +87,12 @@ async function main() {
     if (scenario.requiresModel && matrix.available.length === 0) {
       console.warn(`[skip] ${scenario.name} -- requiresModel but no available models in matrix`);
     }
+  }
+
+  // Guard 2: had requiresModel scenarios but no model actually ran (no creds).
+  if (hasRequiresModel && modelCellsRun === 0) {
+    console.error("error: no models available; graded 0 model evals -- check credentials");
+    process.exit(1);
   }
 
   report(runs);
