@@ -153,3 +153,29 @@ describe("evals assertions: behavior asksClarifyingQuestion", () => {
     expect(f.some((x) => x.assertion.includes("asksClarifyingQuestion"))).toBe(true);
   });
 });
+
+describe("evals assertions: null plan fails all declared dimensions", () => {
+  it("produces validity, routing, AND tools failures when no plan is found", () => {
+    // A run with no plan anywhere -- empty events, null notebookContent.
+    // The scenario declares routing and tools assertions alongside exists.
+    // Before the fix, only a single validity failure was pushed; routing and
+    // tools dimensions were silently skipped, making the leaderboard look green.
+    const run = makeRun({
+      events: [],
+      notebookContent: null,
+      assertions: {
+        plan: {
+          exists: true,
+          routingIn: ["galaxy"],
+          minPendingSteps: 4,
+          mentionsOneOf: ["STAR"],
+        },
+      },
+    });
+    const failures = evaluate(run);
+    const dims = new Set(failures.map((f) => f.dimension));
+    expect(dims).toContain("validity");
+    expect(dims).toContain("routing");
+    expect(dims).toContain("tools");
+  });
+});

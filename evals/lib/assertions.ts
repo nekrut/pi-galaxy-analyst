@@ -314,11 +314,28 @@ function evaluatePlan(
       a.mentionsOneOf ||
       a.mentionsNoneOf
     ) {
+      // Validity is the gate -- emit the primary existence failure first.
       failures.push({
         assertion: `${prefix}.exists`,
         detail: `no \`## Plan X: <title> [routing]\` heading found in ${surfaceLabel}`,
         dimension: "validity",
       });
+      // Also fail every other declared dimension so the leaderboard doesn't
+      // show false-green scores for a model that emitted no plan at all.
+      if (a.routingIn) {
+        failures.push({
+          assertion: `${prefix}.routingIn`,
+          detail: `no plan in ${surfaceLabel}, so routing could not be graded`,
+          dimension: "routing",
+        });
+      }
+      if (a.mentionsOneOf?.length || a.mentionsNoneOf?.length) {
+        failures.push({
+          assertion: `${prefix}.mentionsOneOf`,
+          detail: `no plan in ${surfaceLabel}, so tools could not be graded`,
+          dimension: "tools",
+        });
+      }
     }
     return;
   }
