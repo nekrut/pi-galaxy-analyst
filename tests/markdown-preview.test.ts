@@ -92,11 +92,25 @@ describe("rewritePreviewImageHref", () => {
     );
   });
 
-  it("leaves a ref that climbs above the cwd root unrewritten (honest broken image, no silent redirect)", () => {
-    // `../../secret.png` from reports/ would, if rewritten, fold via URL
-    // canonicalization to cwd/secret.png and silently serve the wrong file.
-    expect(rewritePreviewImageHref("reports", "../../secret.png")).toBe("../../secret.png");
-    expect(rewritePreviewImageHref("", "../secret.png")).toBe("../secret.png");
+  it("fails closed (empty src) on a ref that climbs above the cwd root", () => {
+    // `../../secret.png` can't be jailed; returning it raw would let the renderer
+    // resolve it against the app base URL, so it must fail closed to "".
+    expect(rewritePreviewImageHref("reports", "../../secret.png")).toBe("");
+    expect(rewritePreviewImageHref("", "../secret.png")).toBe("");
+  });
+
+  it("fails closed on a rooted ref that climbs above the cwd root", () => {
+    expect(rewritePreviewImageHref("reports", "/../secret.png")).toBe("");
+    expect(rewritePreviewImageHref("", "/../../secret.png")).toBe("");
+  });
+
+  it("fails closed on backslash traversal (Windows-authored reports)", () => {
+    expect(rewritePreviewImageHref("reports", "..\\..\\secret.png")).toBe("");
+    expect(rewritePreviewImageHref("reports", "sub\\..\\..\\..\\secret.png")).toBe("");
+  });
+
+  it("fails closed on a UNC path", () => {
+    expect(rewritePreviewImageHref("reports", "\\\\server\\share\\plot.png")).toBe("");
   });
 
   it("neutralizes percent-encoded traversal by encoding it as a literal segment", () => {
@@ -139,7 +153,10 @@ describe("buildPreviewMarked", () => {
   });
 
   it("does not rewrite absolute image URLs", () => {
-    const html = renderMarkdown("![remote](https://example.com/x.png)", buildPreviewMarked("reports"));
+    const html = renderMarkdown(
+      "![remote](https://example.com/x.png)",
+      buildPreviewMarked("reports"),
+    );
     expect(html).toContain('src="https://example.com/x.png"');
     expect(html).not.toContain("orbit-artifact");
   });
@@ -149,9 +166,13 @@ describe("buildPreviewMarked", () => {
     expect(html).not.toContain("orbit-artifact");
   });
 
-  it("does not emit an orbit-artifact src for a ref that escapes the cwd root", () => {
+  it("emits no usable src for a ref that escapes the cwd root (fails closed)", () => {
     const html = renderMarkdown("![x](../../secret.png)", buildPreviewMarked("reports"));
     expect(html).not.toContain("orbit-artifact");
+    // The raw traversal href must NOT survive into the rendered HTML at all --
+    // no src attribute the renderer could resolve against its own base URL.
+    expect(html).not.toContain("secret.png");
+    expect(html).not.toMatch(/src=/);
   });
 
   it("the rewritten src survives DOMPurify sanitization", () => {
