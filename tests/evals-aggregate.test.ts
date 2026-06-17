@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { aggregateCells, declaredDimensions } from "../evals/lib/aggregate";
+import { renderLeaderboard } from "../evals/lib/report";
 import type { Assertions, Scenario, ScenarioRun } from "../evals/lib/types";
 
 function run(modelId: string, runIndex: number, failDims: string[]): ScenarioRun {
@@ -42,5 +43,36 @@ describe("evals aggregate", () => {
     expect(cells[0].dimensions.routing.pass).toBe(2);
     expect(cells[0].dimensions.routing.total).toBe(3);
     expect(cells[0].dimensions.routing.verdict).toBe(true); // 2/3 majority
+  });
+});
+
+describe("evals leaderboard render", () => {
+  it("renders a model x dimension grid with pass-rates", () => {
+    const cells = [
+      {
+        scenarioName: "s1",
+        modelId: "tacc:qwen3-32b",
+        runs: 3,
+        dimensions: {
+          routing: { pass: 3, total: 3, verdict: true },
+          tools: { pass: 2, total: 3, verdict: true },
+        },
+      },
+      {
+        scenarioName: "s1",
+        modelId: "tacc:llama-3.1-8b",
+        runs: 3,
+        dimensions: {
+          routing: { pass: 0, total: 3, verdict: false },
+          tools: { pass: 1, total: 3, verdict: false },
+        },
+      },
+    ];
+    const md = renderLeaderboard(cells);
+    expect(md).toContain("tacc:qwen3-32b");
+    expect(md).toContain("tacc:llama-3.1-8b");
+    expect(md).toContain("routing");
+    // qwen passed routing in 3/3 -> shows 3/3; llama 0/3
+    expect(md).toMatch(/tacc:qwen3-32b.*3\/3/s);
   });
 });

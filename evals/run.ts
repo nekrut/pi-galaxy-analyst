@@ -19,7 +19,9 @@ import { fileURLToPath } from "url";
 import { evaluate } from "./lib/assertions.js";
 import { loadDotEnv } from "./lib/env.js";
 import { loadMatrix } from "./lib/matrix.js";
-import { report } from "./lib/report.js";
+import { aggregateCells } from "./lib/aggregate.js";
+import { renderLeaderboard, report } from "./lib/report.js";
+import { writeResultsJsonl } from "./lib/persist.js";
 import { runScenario } from "./lib/runner.js";
 import type { ModelEntry, Scenario, ScenarioRun } from "./lib/types.js";
 
@@ -68,8 +70,20 @@ async function main() {
     }
   }
 
-  const { failed } = report(runs);
-  process.exit(failed === 0 ? 0 : 1);
+  report(runs);
+
+  const cells = aggregateCells(runs);
+  if (cells.some((c) => c.modelId !== "(none)")) {
+    console.log("");
+    console.log(renderLeaderboard(cells));
+  }
+
+  const resultsDir = path.join(evalsDir, "results");
+  const written = writeResultsJsonl(runs, resultsDir);
+  if (written) console.log(`\nresults: ${path.relative(process.cwd(), written)}`);
+
+  const anyDimFailed = cells.some((c) => Object.values(c.dimensions).some((d) => d && !d.verdict));
+  process.exit(anyDimFailed ? 1 : 0);
 }
 
 function readScenario(dir: string): Scenario {
