@@ -39,4 +39,14 @@ describe("evals scenarios: every scenario.json parses with required fields", () 
     const s = loadScenario("plan-creation-pharmacogenomics");
     expect(s.assertions.plan?.routingIn).toEqual(["local", "hybrid"]);
   });
+
+  it("routing-clear-local must not route to galaxy", () => {
+    const s = loadScenario("routing-clear-local");
+    expect(s.assertions.plan?.routingIn).toEqual(["local", "hybrid"]);
+  });
+
+  it("behavior-underspecified-ask asserts asksClarifyingQuestion", () => {
+    const s = loadScenario("behavior-underspecified-ask");
+    expect(s.assertions.behavior?.asksClarifyingQuestion).toBe(true);
+  });
 });
