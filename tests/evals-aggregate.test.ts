@@ -30,6 +30,16 @@ describe("evals aggregate", () => {
     expect([...dims].sort()).toEqual(["behavior", "routing", "tools", "validity"]);
   });
 
+  it("declaredDimensions includes 'validity' when plan.exists is false", () => {
+    // exists: false means the scenario asserts no plan should appear.
+    // aggregation must count that dimension -- otherwise a model that writes a
+    // plan when it shouldn't passes silently (false green).
+    const a: Assertions = { plan: { exists: false } };
+    const s = { name: "s", tier: 2, inputs: ["x"], assertions: a } as Scenario;
+    const dims = declaredDimensions(s);
+    expect(dims).toContain("validity");
+  });
+
   it("computes majority verdict per dimension across 3 runs", () => {
     const runs: ScenarioRun[] = [
       run("tacc:x", 0, ["routing"]),

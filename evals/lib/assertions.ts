@@ -217,12 +217,18 @@ function evaluateNotebook(
 
   if (content === null) {
     // remaining checks need content; bail with a clear failure if any were asked for
-    if (a.contains?.length || a.mustNotContain?.length || a.plan) {
+    if (a.contains?.length || a.mustNotContain?.length) {
       failures.push({
         assertion: "notebook",
         detail: "notebook.md was not present at end of run",
         dimension: "other",
       });
+    }
+    // Run evaluatePlan against empty content so every declared plan dimension
+    // (validity, routing, tools) gets a failure -- not just a generic 'other'.
+    // Without this, a model that emits no notebook looks green on routing/tools.
+    if (a.plan) {
+      evaluatePlan("", a.plan, failures, "notebook.plan", "notebook");
     }
     return;
   }

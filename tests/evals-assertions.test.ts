@@ -154,6 +154,31 @@ describe("evals assertions: behavior asksClarifyingQuestion", () => {
   });
 });
 
+describe("evals assertions: null notebook content with plan assertions", () => {
+  it("produces validity, routing, AND tools failures when notebook is absent but plan assertions are declared", () => {
+    // When notebookContent is null and notebook.plan is declared, the old code
+    // pushed only a single generic 'other' failure and returned early, leaving
+    // routing and tools dimensions showing false green on the leaderboard.
+    const run = makeRun({
+      notebookContent: null,
+      assertions: {
+        notebook: {
+          plan: {
+            exists: true,
+            routingIn: ["galaxy"],
+            mentionsOneOf: ["STAR"],
+          },
+        },
+      },
+    });
+    const failures = evaluate(run);
+    const dims = new Set(failures.map((f) => f.dimension));
+    expect(dims).toContain("validity");
+    expect(dims).toContain("routing");
+    expect(dims).toContain("tools");
+  });
+});
+
 describe("evals assertions: null plan fails all declared dimensions", () => {
   it("produces validity, routing, AND tools failures when no plan is found", () => {
     // A run with no plan anywhere -- empty events, null notebookContent.

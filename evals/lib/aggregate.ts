@@ -14,7 +14,7 @@ export function declaredDimensions(scenario: Scenario): Set<Dimension> {
 
   for (const p of planLikes) {
     if (!p) continue;
-    if (p.exists || p.minPendingSteps !== undefined || p.eachStepHasDescription) dims.add("validity");
+    if (p.exists !== undefined || p.minPendingSteps !== undefined || p.eachStepHasDescription) dims.add("validity");
     if (p.routingIn) dims.add("routing");
     if (p.mentionsOneOf || p.mentionsNoneOf) dims.add("tools");
   }
