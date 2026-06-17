@@ -1,6 +1,8 @@
 /**
- * Append per-run results to evals/results/<date>-<sha>.jsonl for later
+ * Write per-run results to evals/results/<date>-<sha>.jsonl for later
  * model-vs-model and prompt-regression diffing. One JSON object per run.
+ * One file is created per date + short SHA; re-running on the same commit
+ * overwrites the existing file for that slot rather than appending.
  * This is a normal Node process -- Date and git are fine to call here.
  */
 
