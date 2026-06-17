@@ -63,6 +63,14 @@ export interface PlanAssertions {
    * Mirrors init-gate's >= 8 chars heuristic (number/title/anchor stripped).
    */
   eachStepHasDescription?: boolean;
+  /**
+   * The plan-source text must mention at least one of these (case-insensitive
+   * substring). Used as a coarse tool/approach-appropriateness check -- a
+   * heuristic, not an oracle. Curate generously to limit false negatives.
+   */
+  mentionsOneOf?: string[];
+  /** The plan-source text must mention none of these (case-insensitive). */
+  mentionsNoneOf?: string[];
 }
 
 export interface Scenario {

@@ -242,7 +242,14 @@ function evaluatePlan(
   const plan = parseLatestPlan(content);
 
   if (!plan) {
-    if (a.exists || a.routingIn || a.minPendingSteps !== undefined || a.eachStepHasDescription) {
+    if (
+      a.exists ||
+      a.routingIn ||
+      a.minPendingSteps !== undefined ||
+      a.eachStepHasDescription ||
+      a.mentionsOneOf ||
+      a.mentionsNoneOf
+    ) {
       failures.push({
         assertion: `${prefix}.exists`,
         detail: `no \`## Plan X: <title> [routing]\` heading found in ${surfaceLabel}`,
@@ -286,6 +293,27 @@ function evaluatePlan(
           .map((s) => s.line + 1)
           .join(", ")})`,
         dimension: "validity",
+      });
+    }
+  }
+
+  const lower = content.toLowerCase();
+  if (a.mentionsOneOf && a.mentionsOneOf.length > 0) {
+    const hit = a.mentionsOneOf.some((t) => lower.includes(t.toLowerCase()));
+    if (!hit) {
+      failures.push({
+        assertion: `${prefix}.mentionsOneOf`,
+        detail: `${surfaceLabel} mentions none of [${a.mentionsOneOf.join(", ")}]`,
+        dimension: "tools",
+      });
+    }
+  }
+  for (const banned of a.mentionsNoneOf ?? []) {
+    if (lower.includes(banned.toLowerCase())) {
+      failures.push({
+        assertion: `${prefix}.mentionsNoneOf`,
+        detail: `${surfaceLabel} mentions banned '${banned}'`,
+        dimension: "tools",
       });
     }
   }

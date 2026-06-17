@@ -55,3 +55,37 @@ describe("evals assertions: dimension tagging", () => {
     expect(failures[0].dimension).toBe("other");
   });
 });
+
+describe("evals assertions: tool mentions", () => {
+  const nb = (body: string) => `## Plan 1: Metagenomics [galaxy]\n- [ ] 1. **Classify** -- ${body}`;
+
+  it("passes when the plan mentions one of the allowed tools (case-insensitive)", () => {
+    const run = makeRun({
+      notebookContent: nb("run kraken2 to assign taxonomy to reads"),
+      assertions: { notebook: { plan: { mentionsOneOf: ["Kraken", "MetaPhlAn"] } } },
+    });
+    expect(evaluate(run)).toHaveLength(0);
+  });
+
+  it("fails (dimension tools) when none of the allowed tools appear", () => {
+    const run = makeRun({
+      notebookContent: nb("eyeball the reads and guess the organisms"),
+      assertions: { notebook: { plan: { mentionsOneOf: ["Kraken", "MetaPhlAn"] } } },
+    });
+    const f = evaluate(run);
+    expect(f).toHaveLength(1);
+    expect(f[0].dimension).toBe("tools");
+    expect(f[0].assertion).toContain("mentionsOneOf");
+  });
+
+  it("fails when a banned tool is named", () => {
+    const run = makeRun({
+      notebookContent: nb("BLAST every read against nt, no classifier"),
+      assertions: { notebook: { plan: { mentionsNoneOf: ["BLAST"] } } },
+    });
+    const f = evaluate(run);
+    expect(f).toHaveLength(1);
+    expect(f[0].dimension).toBe("tools");
+    expect(f[0].assertion).toContain("mentionsNoneOf");
+  });
+});
