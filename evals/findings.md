@@ -135,6 +135,20 @@ Maverick especially shows nondeterminism on tool-call format.)
 | Llama-3.3-70B    | 2 / 5              | Writes to notebook on turn 1 (skips chat-draft stage). Defaults to `[local]` routing despite Galaxy-first guidance in the prompt. Heading format now correct after the worked-example fix.                                                                                                                                                                                                    |
 | Llama-4-Maverick | 3 / 5              | Highest variance run-to-run. Mostly correct format when it does write; failures are nondeterministic "drafted in chat, never invoked write tool" -- not a fundamental limit. A direct re-run of one of the eval-runner failures (pharmacogenomics) produced a perfect 5-step plan. n=3 median scoring (Phase 6) will smooth this out; today's single-run snapshot under-represents the model. |
 
+### udt-authoring-threads: progressive disclosure universal, outcome gates on capability
+
+First run of the UDT-authoring scenario (added alongside the skills-router
+fix). All three models called `skills_fetch({ path: "udt-authoring/..." })` --
+the router steering works across the whole matrix. The `$GALAXY_SLOTS` outcome
+split on capability: Qwen3-32B drafted a full `class: GalaxyUserTool` YAML
+wiring `$GALAXY_SLOTS` into the thread flag (pass); Llama-3.3-70B ran to the
+120s timeout without emitting the YAML; Llama-4-Maverick fetched then ended its
+turn in ~5s without drafting. Same "fetched the skill, never produced the
+artifact" shape the plan-creation scenarios show for the Llamas -- consistent
+with the Maverick-variance / n>=3 caveat above, not an eval defect. The positive
+`$GALAXY_SLOTS` check (vs. a brittle "must not contain `-@ 8`" absence check) is
+what lets the pass/fail track capability cleanly.
+
 ## What the eval is good at, and what it isn't
 
 **Good at:**
