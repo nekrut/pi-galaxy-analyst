@@ -1,4 +1,5 @@
 import { ipcMain, dialog, BrowserWindow, shell, app, autoUpdater } from "electron";
+import { createIdempotentIpc } from "./ipc-registry.js";
 import type { AgentManager } from "./agent.js";
 import { startFilesWatcher, resolveWithin } from "./files-handler.js";
 import { loadSessionHistory } from "./session-replay.js";
@@ -210,48 +211,52 @@ export async function confirmCwdChange(
 }
 
 export function registerIpcHandlers(agent: AgentManager): void {
-  ipcMain.handle("agent:prompt", async (_e, message: string, options?: AgentPromptOptions) => {
+  // Register through idempotent wrappers so a reopen-after-close on macOS
+  // (which re-runs this for a fresh window) can't double-register and crash (#311).
+  const ipc = createIdempotentIpc(ipcMain);
+
+  ipc.handle("agent:prompt", async (_e, message: string, options?: AgentPromptOptions) => {
     log("prompt:", message.slice(0, 80));
     agent.send(promptPayload(message, options));
   });
 
-  ipcMain.handle("agent:abort", async () => {
+  ipc.handle("agent:abort", async () => {
     log("abort");
     await agent.abort();
   });
 
-  ipcMain.handle("agent:new-session", async () => {
+  ipc.handle("agent:new-session", async () => {
     log("new-session");
     return agent.sendCommand({ type: "new_session" });
   });
 
-  ipcMain.handle("agent:get-state", async () => {
+  ipc.handle("agent:get-state", async () => {
     return agent.sendCommand({ type: "get_state" });
   });
 
-  ipcMain.handle("agent:get-status", () => {
+  ipc.handle("agent:get-status", () => {
     return agent.getStatusSnapshot();
   });
 
-  ipcMain.on("agent:ui-response", (_e, response: Record<string, unknown>) => {
+  ipc.on("agent:ui-response", (_e, response: Record<string, unknown>) => {
     log("ui-response:", JSON.stringify(response).slice(0, 120));
     agent.send(response);
   });
 
-  ipcMain.handle("agent:restart", async () => {
+  ipc.handle("agent:restart", async () => {
     log("restart");
     agent.stop();
     agent.start();
   });
 
-  ipcMain.handle("agent:reset-session", async () => {
+  ipc.handle("agent:reset-session", async () => {
     log("reset session — fresh start, no --continue");
     agent.stop();
     agent.resetSession();
     agent.start();
   });
 
-  ipcMain.handle("agent:get-cwd", () => {
+  ipc.handle("agent:get-cwd", () => {
     return agent.getCwd();
   });
 
@@ -259,7 +264,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // by /chat and by display:resume after wake-from-sleep. Reads only from
   // the pinned session file, so a fresh /new start (pinned = null) returns
   // empty instead of surfacing stale per-cwd history.
-  ipcMain.handle("chat:replay", async (e) => {
+  ipc.handle("chat:replay", async (e) => {
     const window = BrowserWindow.fromWebContents(e.sender);
     if (!window || window.isDestroyed()) return { ok: false, error: "no window" };
     const file = agent.getReplaySessionFile();
@@ -276,7 +281,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     }
   });
 
-  ipcMain.handle("dialog:browse-directory", async () => {
+  ipc.handle("dialog:browse-directory", async () => {
     const result = await dialog.showOpenDialog({
       title: "Choose directory",
       defaultPath: agent.getCwd(),
@@ -285,7 +290,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle("dialog:select-directory", async (e) => {
+  ipc.handle("dialog:select-directory", async (e) => {
     const window = BrowserWindow.fromWebContents(e.sender) ?? undefined;
     if (!(await confirmCwdChange(window))) return null;
     const result = await dialog.showOpenDialog({
@@ -304,7 +309,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return dir;
   });
 
-  ipcMain.handle("config:get", () => {
+  ipc.handle("config:get", () => {
     // Distinct from web's `_mode:"remote"` (which strips all config and skips
     // first-run): the desktop keeps real Galaxy/LLM config + cwd and only hides
     // the local-exec-only UI when there's no shell.
@@ -314,11 +319,11 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // Effective Galaxy connection for the footer dot -- reflects the brain's own
   // GALAXY_URL/GALAXY_API_KEY view (profile or exported env), not just the
   // masked config, so env-driven sessions read connected (#284).
-  ipcMain.handle("galaxy:status", () => {
+  ipc.handle("galaxy:status", () => {
     return resolveGalaxyStatus(loadConfig(), process.env, resolveGalaxyApiKey);
   });
 
-  ipcMain.handle(
+  ipc.handle(
     "apiKey:validate",
     async (
       _e,
@@ -373,7 +378,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return out as LoomConfig;
   }
 
-  ipcMain.handle("config:save", async (_e, config: LoomConfig) => {
+  ipc.handle("config:save", async (_e, config: LoomConfig) => {
     try {
       const safe = sanitizeConfig(config);
       const reconciled = reconcileIncomingConfig(safe as Record<string, unknown>);
@@ -394,7 +399,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // Enabling bypass requires a NATIVE confirm dialog in the main process, which
   // renderer-side injection (e.g. a markdown XSS) cannot auto-dismiss. The brain
   // reads guardian config live per tool call, so no agent restart is needed.
-  ipcMain.handle("guardian:set-bypass", async (e, enabled: unknown) => {
+  ipc.handle("guardian:set-bypass", async (e, enabled: unknown) => {
     const turnOn = enabled === true;
     if (turnOn) {
       const window = BrowserWindow.fromWebContents(e.sender) ?? undefined;
@@ -424,14 +429,14 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return { ok: true, enabled: turnOn };
   });
 
-  ipcMain.handle("oauth:status", (_e, provider: string) => {
+  ipc.handle("oauth:status", (_e, provider: string) => {
     if (!isOAuthProvider(provider)) {
       return { signedIn: false };
     }
     return getOAuthStatus(provider);
   });
 
-  ipcMain.handle("oauth:sign-in", async (_e, provider: string) => {
+  ipc.handle("oauth:sign-in", async (_e, provider: string) => {
     if (provider !== "openai-codex") {
       return { ok: false as const, error: `Unknown OAuth provider: ${provider}` };
     }
@@ -446,7 +451,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     }
   });
 
-  ipcMain.handle("oauth:sign-out", async (_e, provider: string) => {
+  ipc.handle("oauth:sign-out", async (_e, provider: string) => {
     if (!isOAuthProvider(provider)) {
       return { ok: false as const, error: `Unknown OAuth provider: ${provider}` };
     }
@@ -460,7 +465,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     return { ok: true as const };
   });
 
-  ipcMain.handle("notebook:status", (): { exists: boolean; hasContent: boolean } => {
+  ipc.handle("notebook:status", (): { exists: boolean; hasContent: boolean } => {
     const notebookPath = path.join(agent.getCwd(), "notebook.md");
     if (!fs.existsSync(notebookPath)) return { exists: false, hasContent: false };
     try {
@@ -471,7 +476,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     }
   });
 
-  ipcMain.handle(
+  ipc.handle(
     "notebook:clear-artifacts",
     async (): Promise<{ cleared: boolean; error?: string }> => {
       const cwd = agent.getCwd();
@@ -509,7 +514,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     },
   );
 
-  ipcMain.handle("notebook:load", async () => {
+  ipc.handle("notebook:load", async () => {
     const nbPath = path.join(agent.getCwd(), "notebook.md");
     try {
       const content = fs.readFileSync(nbPath, "utf-8");
@@ -519,7 +524,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
     }
   });
 
-  ipcMain.handle("file:open", async (_e, filePath: string) => {
+  ipc.handle("file:open", async (_e, filePath: string) => {
     log("open file:", filePath);
 
     // Path clamp: the renderer can pass any string here, including paths
@@ -562,7 +567,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
   // Issue reporter: returns sysinfo for the renderer to bundle into the
   // report body. No secrets — just versions + platform + arch.
-  ipcMain.handle("report:sysinfo", () => ({
+  ipc.handle("report:sysinfo", () => ({
     appVersion: app.getVersion(),
     electronVersion: process.versions.electron,
     nodeVersion: process.versions.node,
@@ -576,14 +581,14 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // Squirrel.Mac); a packaged build user manually downloads the new DMG.
   // Renderer is rate-limited to one call per session — checkLatestVersion
   // itself caches the GitHub response for 24h on disk.
-  ipcMain.handle("version:check", async () => {
+  ipc.handle("version:check", async () => {
     return await checkLatestVersion();
   });
 
   // Running app version + packaged flag for the what's-new banner. Unlike
   // version:check this never hits the network and ignores updateCheck -- the
   // what's-new surface is local and must work even with update checks off.
-  ipcMain.handle("version:current", () => ({
+  ipc.handle("version:current", () => ({
     version: app.getVersion(),
     isPackaged: app.isPackaged,
   }));
@@ -591,7 +596,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // Opens the GitHub releases page in the user's default browser when they
   // click the "update available" banner. Hard-coded URL — renderer never
   // gets a generic openExternal capability.
-  ipcMain.handle("version:open-release", async (_e, url: unknown) => {
+  ipc.handle("version:open-release", async (_e, url: unknown) => {
     const releasesPage = "https://github.com/galaxyproject/loom/releases/latest";
     const target =
       typeof url === "string" && /^https:\/\/github\.com\/galaxyproject\/loom\/releases\//.test(url)
@@ -608,7 +613,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // an env-driven session has no saved profile, so pinning to the profile alone
   // left history links dead, #290) and enforces the http(s) + /histories/view
   // checks. It returns the normalized URL to open, or null to reject.
-  ipcMain.handle("galaxy:open-history", async (_e, url: unknown) => {
+  ipc.handle("galaxy:open-history", async (_e, url: unknown) => {
     const serverUrl = resolveGalaxyServerUrl(loadConfig(), process.env);
     const target = resolveGalaxyHistoryOpenUrl(url, serverUrl);
     if (!target) return { opened: false };
@@ -618,7 +623,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
 
   // Apply a downloaded macOS update + relaunch. autoUpdater.quitAndInstall is a
   // no-op unless an update was actually downloaded, so this is safe to call.
-  ipcMain.handle("update:restart", () => {
+  ipc.handle("update:restart", () => {
     autoUpdater.quitAndInstall();
     return { restarting: true };
   });
@@ -626,7 +631,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // Issue reporter: opens a pre-filled GitHub "new issue" URL in the user's
   // browser. The renderer never gets a generic openExternal capability —
   // we hard-code the repo here so a compromised renderer can't redirect.
-  ipcMain.handle("report:open-issue", async (_e, payload: { title?: unknown; body?: unknown }) => {
+  ipc.handle("report:open-issue", async (_e, payload: { title?: unknown; body?: unknown }) => {
     const title = typeof payload?.title === "string" ? payload.title : "";
     const body = typeof payload?.body === "string" ? payload.body : "";
     const params = new URLSearchParams({ title, body });
@@ -639,7 +644,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // endpoint URL (and any shared secret) live in main only -- see feedback.ts --
   // so a compromised renderer can't redirect it. Returns {ok,...} so the
   // renderer can fall back to the GitHub-issue flow when the POST fails.
-  ipcMain.handle("feedback:submit", async (_e, payload: FeedbackPayload) => {
+  ipc.handle("feedback:submit", async (_e, payload: FeedbackPayload) => {
     // Stamp the opaque tester code from config in main (authoritative; the
     // renderer never sets it). Non-secret; lets the team attribute the report.
     const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
@@ -652,7 +657,7 @@ export function registerIpcHandlers(agent: AgentManager): void {
   // a fallback if this IPC fails for any reason).
   //
   // Filtered to user-facing direct providers (no Bedrock/regional aliases).
-  ipcMain.handle("models:list-all", () => {
+  ipc.handle("models:list-all", () => {
     const USER_FACING_PROVIDERS: ReadonlySet<string> = new Set([
       "anthropic",
       "openai",
