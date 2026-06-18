@@ -13,6 +13,7 @@ import { refreshGalaxyInvocations } from "./galaxy-invocations.js";
 import { refreshGalaxyHistory } from "./galaxy-history.js";
 import { PromptQueue, queuedPreview } from "./prompt-queue.js";
 import { FeedbackDraftStore } from "./feedback-draft.js";
+import { caretVisualLineFlags, shouldRecallOnArrow } from "./input-history-nav.js";
 import { LoomWidgetKey, decodeMarkdownWidget } from "../../../shared/loom-shell-contract.js";
 import { ALLOWED_SKILLS_PREFIX, isAllowedSkillUrl } from "../../../shared/loom-config.js";
 import {
@@ -2058,19 +2059,6 @@ function appendHistoryEntry(text: string): void {
   savePromptHistory();
 }
 
-/** Should ↑/↓ recall instead of moving the caret? Yes when input is empty
- *  or the caret is on the first/last visual line, mirroring shell semantics. */
-function shouldRecallOnArrow(direction: "up" | "down"): boolean {
-  if (inputEl.value === "") return true;
-  const pos = inputEl.selectionStart ?? 0;
-  if (direction === "up") {
-    // First line iff there's no \n before the caret.
-    return inputEl.value.lastIndexOf("\n", pos - 1) === -1;
-  }
-  // Last line iff there's no \n at or after the caret.
-  return inputEl.value.indexOf("\n", pos) === -1;
-}
-
 function recallHistory(direction: "up" | "down"): void {
   if (direction === "up") {
     if (historyCursor <= 0) return;
@@ -2235,7 +2223,7 @@ inputEl.addEventListener("keydown", (e) => {
     // Enter falls through to the regular submit path below.
   }
 
-  if (e.key === "ArrowUp" && shouldRecallOnArrow("up")) {
+  if (e.key === "ArrowUp" && shouldRecallOnArrow("up", caretVisualLineFlags(inputEl))) {
     if (promptHistory.length === 0) return;
     e.preventDefault();
     recallHistory("up");
@@ -2243,7 +2231,7 @@ inputEl.addEventListener("keydown", (e) => {
   }
   if (
     e.key === "ArrowDown" &&
-    shouldRecallOnArrow("down") &&
+    shouldRecallOnArrow("down", caretVisualLineFlags(inputEl)) &&
     historyCursor < promptHistory.length
   ) {
     e.preventDefault();
