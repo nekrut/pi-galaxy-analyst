@@ -122,6 +122,16 @@ describe("humanizeAgentError", () => {
       expect(result.text).toMatch(/incomplete/i);
     });
 
+    it("flags incompleteness even when api_error carries no upstream message", () => {
+      // A bare 500 (no message) is the exact shape behind issue #316; the note
+      // has to land on the message-less branch too, not just the errMsg one.
+      const raw = JSON.stringify({ type: "error", error: { type: "api_error" } });
+      const result = humanizeAgentError(raw);
+      expect(result.retriable).toBe(true);
+      expect(result.text).toMatch(/incomplete/i);
+      expect(result.text).not.toContain("{");
+    });
+
     it("does not leak raw JSON noise while adding the note", () => {
       const raw = JSON.stringify({
         type: "error",
