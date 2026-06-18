@@ -8,6 +8,7 @@
  */
 
 import { ipcMain, BrowserWindow } from "electron";
+import { createIdempotentIpc } from "./ipc-registry.js";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -251,7 +252,11 @@ export function stopFilesWatcher(): void {
 // --- IPC registration ---------------------------------------------------
 
 export function registerFilesIpc(getCwd: () => string): void {
-  ipcMain.handle("files:list", async (_e, opts?: { includeHidden?: boolean }) => {
+  // Idempotent registration so a macOS reopen-after-close (which re-runs this
+  // for the new window) can't double-register and crash (#311).
+  const ipc = createIdempotentIpc(ipcMain);
+
+  ipc.handle("files:list", async (_e, opts?: { includeHidden?: boolean }) => {
     const cwd = getCwd();
     try {
       const children = await walkDir(cwd, "", opts?.includeHidden ?? false, 0);
@@ -267,7 +272,7 @@ export function registerFilesIpc(getCwd: () => string): void {
     }
   });
 
-  ipcMain.handle("files:read", async (_e, relPath: string, opts?: { tail?: boolean }) => {
+  ipc.handle("files:read", async (_e, relPath: string, opts?: { tail?: boolean }) => {
     const cwd = getCwd();
     try {
       const abs = resolveWithin(cwd, relPath);
@@ -368,7 +373,7 @@ export function registerFilesIpc(getCwd: () => string): void {
     }
   });
 
-  ipcMain.handle("files:write", async (_e, relPath: string, content: string) => {
+  ipc.handle("files:write", async (_e, relPath: string, content: string) => {
     const cwd = getCwd();
     try {
       const abs = resolveWithin(cwd, relPath);
