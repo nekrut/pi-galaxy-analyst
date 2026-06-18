@@ -1,13 +1,20 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resetState, initSessionArtifacts, getNotebookPath } from "./state.js";
+import {
+  resetState,
+  initSessionArtifacts,
+  getNotebookPath,
+  stopWatchingNotebook,
+} from "./state.js";
 import { startGalaxyPoller, stopGalaxyPoller } from "./galaxy-poller.js";
 import {
-  appendSessionSummaryBlock,
+  upsertSessionSummaryBlock,
   readNotebook,
   withNotebookLock,
   writeNotebook,
   type SessionSummaryYaml,
 } from "./notebook-writer.js";
+import { activeGalaxyStatus, type ActiveGalaxyStatus } from "./profiles.js";
+import { maybeNudgeGalaxyReconnect } from "./galaxy-cred-drift.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -27,8 +34,20 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     initSessionArtifacts(process.cwd());
 
     // Background poller for in-flight Galaxy invocations (#67 part 2).
-    // Idempotent — start() stops any prior timer first.
-    startGalaxyPoller();
+    // Idempotent — start() stops any prior timer first. Pass the shell
+    // notifier so a backgrounded invocation toasts the user on completion
+    // (async-by-default execution: submit, hand back, notify-on-finish).
+    // The poller fires this from a 15s timer, so the captured session_start
+    // ctx may be headless (rpc/--print/web) or stale after a session swap —
+    // ctx.ui/hasUI assert an active context and can throw. Guard like the
+    // compaction notifier (see registerCommand("compact") in index.ts).
+    startGalaxyPoller((text, level) => {
+      try {
+        if (ctx.hasUI) ctx.ui.notify(text, level);
+      } catch {
+        /* stale/headless context — a dropped completion toast is fine */
+      }
+    });
 
     sessionStart = {
       id: ctx.sessionManager?.getSessionId?.() ?? `session-${Date.now()}`,
@@ -36,12 +55,20 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
     };
 
     const freshSession = process.env.LOOM_FRESH_SESSION === "1";
+    const isResume = process.argv.includes("--continue");
 
-    if (freshSession || process.argv.includes("--continue")) {
+    // Galaxy credential drift: on a resume the startup greeting -- the only
+    // thing that prompts galaxy_connect() -- is suppressed, so a key/server
+    // change made while this session was idle would leave the model believing
+    // it's still connected as the old account. Refresh the per-cwd credential
+    // baseline and, on a resume where it changed, nudge a reconnect.
+    maybeNudgeGalaxyReconnect(pi, { isResume });
+
+    if (freshSession || isResume) {
       return;
     }
 
-    sendStartupGreeting(pi);
+    sendStartupGreeting(pi, ctx);
   });
 
   // Compaction recovery: snapshot the notebook so the post-compact agent can
@@ -54,6 +81,12 @@ export function registerSessionLifecycle(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async () => {
     stopGalaxyPoller();
+    // Close the notebook FSWatcher before the summary write below. The watcher
+    // otherwise keeps the event loop alive (so --print never exits) and, since
+    // writeSessionSummary() writes to notebook.md, would fire its callback
+    // against a now-stale ctx. Closing first releases the loop and silences
+    // that fire. #271
+    stopWatchingNotebook();
     await writeSessionSummary();
     snapshotNotebook(pi);
   });
@@ -71,10 +104,14 @@ function snapshotNotebook(pi: ExtensionAPI): void {
 }
 
 /**
- * Append a `loom-session` block to the notebook on shutdown so a future
+ * Write a `loom-session` block to the notebook on shutdown so a future
  * session can see what was running. `orphaned_active_steps` is 0 today
  * (typed plan-step blocks don't exist yet); this writer is the receiving
  * end of that future change.
+ *
+ * Upserts by session id (#260): Pi reuses the same session id when an idle
+ * session is resumed, so a second shutdown continues the existing block
+ * rather than appending a duplicate under the same id.
  *
  * Uses the same per-path mutex chain as the invocation poller so a
  * concurrent `galaxy_invocation_check_*` write at shutdown doesn't lose
@@ -93,7 +130,7 @@ async function writeSessionSummary(): Promise<void> {
   try {
     await withNotebookLock(nbPath, async () => {
       const content = await readNotebook(nbPath);
-      const updated = appendSessionSummaryBlock(content, summary);
+      const updated = upsertSessionSummaryBlock(content, summary);
       await writeNotebook(nbPath, updated);
     });
   } catch (err) {
@@ -137,36 +174,59 @@ function syncSessionJsonlSymlink(ctx: ExtensionContext): void {
   }
 }
 
-function sendStartupGreeting(pi: ExtensionAPI): void {
-  const hasCredentials = Boolean(process.env.GALAXY_URL && process.env.GALAXY_API_KEY);
-  const isOrbit = process.env.LOOM_SHELL_KIND === "orbit";
+type GreetingAction =
+  | { kind: "model"; message: string }
+  | { kind: "notify"; text: string; level: "info" | "warning" };
 
-  // Note: Galaxy MCP gets credentials via env vars; agent calls
-  // galaxy_connect() if needed. Just nudge it.
-  const connectInstr = hasCredentials
-    ? ` Galaxy credentials are configured -- call galaxy_connect() to establish the connection.` +
-      ` Do NOT call other Galaxy tools until connected.`
-    : "";
-
-  if (hasCredentials) {
-    pi.sendUserMessage(
+/**
+ * Decide the startup greeting from the active Galaxy credential status. Pure so
+ * it can be unit-tested without a live session.
+ *
+ * `usable` keeps a real model turn -- it has to nudge galaxy_connect(). The
+ * other two states are pure pleasantries, so they render as a static notify:
+ * no model round-trip, no leaked instruction, and the same call surfaces in
+ * both the terminal TUI and Orbit (which renders the notify RPC event).
+ */
+export function planStartupGreeting(status: ActiveGalaxyStatus, isOrbit: boolean): GreetingAction {
+  if (status === "usable") {
+    const message =
       `Session started in this project directory. Read \`notebook.md\` to see prior work. ` +
-        (isOrbit
-          ? `Reply with one short sentence: "What do you want to work on next?" ` +
-            `No greeting, no emojis, no product branding.`
-          : `Give a brief welcome, then ask what to work on next, referencing the notebook contents if there is prior work. ` +
-            `Keep it to 2-3 sentences.`) +
-        connectInstr,
-    );
-    return;
+      (isOrbit
+        ? `Reply with one short sentence: "What do you want to work on next?" ` +
+          `No greeting, no emojis, no product branding.`
+        : `Give a brief welcome, then ask what to work on next, referencing the notebook contents if there is prior work. ` +
+          `Keep it to 2-3 sentences.`) +
+      ` Galaxy credentials are configured -- call galaxy_connect() to establish the connection.` +
+      ` Do NOT call other Galaxy tools until connected.`;
+    return { kind: "model", message };
   }
 
-  pi.sendUserMessage(
-    `Session started in this project directory. No Galaxy server configured. ` +
-      (isOrbit
-        ? `Reply with two short sentences: mention /connect for Galaxy, then ask "What do you want to work on?". ` +
-          `No greeting, no emojis, no product branding.`
-        : `Give a brief welcome, mention /connect to set up a Galaxy server, and ask what to work on. ` +
-          `Keep it to 2-3 sentences.`),
-  );
+  if (status === "configured-unusable") {
+    return {
+      kind: "notify",
+      level: "warning",
+      text:
+        `Welcome to Loom. A Galaxy profile is configured, but its API key only decrypts inside Orbit -- ` +
+        `Galaxy tools won't work in this terminal. Run from Orbit, export GALAXY_API_KEY, or /connect a server. ` +
+        `What would you like to work on?`,
+    };
+  }
+
+  return {
+    kind: "notify",
+    level: "info",
+    text:
+      `Welcome to Loom. No Galaxy server is configured, so work runs locally for now -- use /connect to set one up. ` +
+      `What would you like to work on?`,
+  };
+}
+
+export function sendStartupGreeting(pi: ExtensionAPI, ctx: ExtensionContext): void {
+  const isOrbit = process.env.LOOM_SHELL_KIND === "orbit";
+  const action = planStartupGreeting(activeGalaxyStatus(), isOrbit);
+  if (action.kind === "model") {
+    pi.sendUserMessage(action.message);
+  } else {
+    ctx.ui.notify(action.text, action.level);
+  }
 }

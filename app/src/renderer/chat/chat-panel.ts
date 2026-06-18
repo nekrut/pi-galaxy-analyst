@@ -1,4 +1,6 @@
 import { renderMarkdown } from "./markdown.js";
+import { joinTextBlocks } from "./block-spacing.js";
+import { computeCopyButtonPlacement } from "./copy-button.js";
 import {
   TEAM_DISPATCH_KIND,
   type TeamDispatchDetails,
@@ -9,10 +11,21 @@ import type {
   ParameterSpec,
 } from "../../../../shared/loom-shell-contract.js";
 
+export type MessageRecord =
+  | { role: "user"; text: string }
+  | { role: "assistant"; text: string }
+  | { role: "tool"; id: string; name: string; status: string; result?: string }
+  | { role: "info"; text: string }
+  | { role: "error"; text: string };
+
 export class ChatPanel {
   private container: HTMLElement;
   private currentMessage: HTMLElement | null = null;
   private currentText = "";
+  // When true, the next streamed delta starts a new assistant text block and is
+  // separated from the prior block with a blank line (issue #200) so successive
+  // segments around tool calls don't render butted together ("Galaxy.Creating").
+  private pendingBlockBreak = false;
   private toolCards = new Map<string, HTMLElement>();
   private scrollLocked = true;
   private thinkingEl: HTMLElement | null = null;
@@ -23,9 +36,27 @@ export class ChatPanel {
   private lastErrorEl: HTMLElement | null = null;
   private lastErrorText = "";
   private lastErrorCount = 0;
+  private history: MessageRecord[] = [];
+  // Assistant text accumulated since the last export flush (message start or a
+  // tool card). Flushed as its own record so prose keeps its order around tool
+  // cards instead of all collapsing to one block pushed at message end.
+  private pendingSegment = "";
+  private copyBtn: HTMLElement;
 
   constructor(container: HTMLElement) {
     this.container = container;
+    this.copyBtn = this.initCopyButton();
+
+    this.container.addEventListener("copy", (e) => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const frag = sel.getRangeAt(0).cloneContents();
+      const tmp = document.createElement("div");
+      tmp.appendChild(frag);
+      const md = fragmentToMarkdown(tmp);
+      e.preventDefault();
+      e.clipboardData!.setData("text/plain", md);
+    });
 
     this.container.addEventListener("scroll", () => {
       const { scrollTop, scrollHeight, clientHeight } = this.container;
@@ -85,6 +116,7 @@ export class ChatPanel {
   }
 
   addUserMessage(text: string): void {
+    this.history.push({ role: "user", text });
     this.resetErrorDedup();
     const n = ++this.promptCounter;
     const turn = document.createElement("div");
@@ -117,6 +149,7 @@ export class ChatPanel {
    * counter equals the replay's count. Live numbers continue from there.
    */
   addReplayUserMessage(text: string, promptNum: number): void {
+    this.history.push({ role: "user", text });
     this.resetErrorDedup();
     this.promptCounter = promptNum;
     const turn = document.createElement("div");
@@ -147,8 +180,11 @@ export class ChatPanel {
     this.container.innerHTML = "";
     this.currentMessage = null;
     this.currentText = "";
+    this.pendingSegment = "";
+    this.pendingBlockBreak = false;
     this.toolCards.clear();
     this.thinkingEl = null;
+    this.history = [];
   }
 
   showThinking(): void {
@@ -229,6 +265,8 @@ export class ChatPanel {
 
   startAssistantMessage(): void {
     this.currentText = "";
+    this.pendingSegment = "";
+    this.pendingBlockBreak = false;
     const el = document.createElement("div");
     el.className = "message assistant";
     el.innerHTML = '<span class="cursor-blink"></span>';
@@ -237,9 +275,26 @@ export class ChatPanel {
     this.scrollToBottom();
   }
 
+  /**
+   * Mark that the current assistant text block has ended (a tool call or a new
+   * assistant message follows). The next streamed delta then opens a new block,
+   * separated from the previous one by a blank line so they don't run together
+   * in the rendered markdown (issue #200). No-op once the message is finished.
+   */
+  separateNextBlock(): void {
+    if (this.currentMessage) this.pendingBlockBreak = true;
+  }
+
   appendDelta(delta: string): void {
     if (!this.currentMessage) return;
-    this.currentText += delta;
+    if (this.pendingBlockBreak) {
+      this.pendingBlockBreak = false;
+      this.currentText = joinTextBlocks(this.currentText, delta);
+      this.pendingSegment = joinTextBlocks(this.pendingSegment, delta);
+    } else {
+      this.currentText += delta;
+      this.pendingSegment += delta;
+    }
     this.renderCurrentMessage();
     this.scrollToBottom();
   }
@@ -250,11 +305,26 @@ export class ChatPanel {
     }
     // Clean up any stray cursors across the whole container
     this.container.querySelectorAll(".cursor-blink").forEach((c) => c.remove());
+    this.flushAssistantSegment();
     this.currentMessage = null;
     this.currentText = "";
+    this.pendingBlockBreak = false;
+  }
+
+  /**
+   * Push the assistant text accumulated since the last flush as one export
+   * record. Called at each tool card and at message end so prose keeps its
+   * position relative to tool cards.
+   */
+  private flushAssistantSegment(): void {
+    const segment = this.pendingSegment.trim();
+    if (segment) this.history.push({ role: "assistant", text: segment });
+    this.pendingSegment = "";
   }
 
   addToolCard(id: string, name: string): void {
+    this.flushAssistantSegment();
+    this.history.push({ role: "tool", id, name, status: "running" });
     const card = document.createElement("div");
     card.className = "tool-card";
     card.innerHTML = `
@@ -299,6 +369,16 @@ export class ChatPanel {
     const dot = card.querySelector(".tool-status")!;
     dot.className = `tool-status ${status}`;
 
+    // Sync the export record up front, keyed by id. The team_dispatch branch
+    // below returns early, so doing this here keeps those records from being
+    // frozen at "running"; matching on id (not the rendered name) stops two
+    // same-named tools in a turn from clobbering each other.
+    const rec = this.history.findLast((r) => r.role === "tool" && r.id === id);
+    if (rec && rec.role === "tool") {
+      rec.status = status;
+      if (result) rec.result = result.slice(0, 2000);
+    }
+
     // Specialized branch: team_dispatch details render as a collapsible card.
     if (details && (details as { kind?: string }).kind === TEAM_DISPATCH_KIND) {
       const body = card.querySelector(".tool-card-body")!;
@@ -320,12 +400,18 @@ export class ChatPanel {
   }
 
   addErrorMessage(text: string): void {
+    // Flush any prose streamed before this error so the export keeps order.
+    this.flushAssistantSegment();
     if (this.lastErrorEl && this.lastErrorText === text) {
       this.lastErrorCount += 1;
       this.lastErrorEl.textContent = `${text}  (x${this.lastErrorCount})`;
       this.scrollToBottom();
       return;
     }
+    // Record only when a new card is actually rendered -- duplicates collapse
+    // into the card above, so one record per visible card keeps the export in
+    // sync with what the user sees.
+    this.history.push({ role: "error", text });
     const el = document.createElement("div");
     el.className = "message assistant";
     el.style.color = "var(--error)";
@@ -352,12 +438,124 @@ export class ChatPanel {
   }
 
   /** Add a system/info message with neutral styling and HTML support. */
-  addInfoMessage(html: string): void {
+  addInfoMessage(html: string): HTMLElement {
     const el = document.createElement("div");
     el.className = "message assistant system-info";
     el.innerHTML = html;
     this.container.appendChild(el);
     this.scrollToBottom();
+    return el;
+  }
+
+  /** Export the current conversation as a Markdown string. */
+  exportAsMarkdown(): string {
+    return historyToMarkdown(this.history);
+  }
+
+  private initCopyButton(): HTMLElement {
+    const btn = document.createElement("button");
+    btn.className = "chat-copy-btn";
+    btn.hidden = true;
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
+    document.body.appendChild(btn);
+
+    // selectionchange fires while a mousedown is still in progress and the old
+    // selection is still live, which would immediately re-show the button we
+    // just hid. Track mousedown state so selectionchange can't re-show it.
+    let mouseIsDown = false;
+
+    btn.addEventListener("mousedown", (e) => e.preventDefault()); // keep selection alive on button click
+
+    document.addEventListener("mousedown", (e) => {
+      // contains() so clicking the button's inner <svg> (a child) still counts
+      // as the button -- otherwise the icon hit hides it before the copy fires.
+      if (!btn.contains(e.target as Node)) {
+        btn.hidden = true;
+        mouseIsDown = true;
+      }
+    });
+    document.addEventListener("mouseup", () => {
+      mouseIsDown = false;
+      updateBtn();
+    });
+    window.addEventListener("blur", () => {
+      btn.hidden = true;
+    });
+
+    btn.addEventListener("click", () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const frag = sel.getRangeAt(0).cloneContents();
+      const tmp = document.createElement("div");
+      tmp.appendChild(frag);
+      const md = fragmentToMarkdown(tmp);
+      navigator.clipboard.writeText(md).then(() => {
+        btn.textContent = "✓ Copied";
+        setTimeout(() => {
+          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
+          btn.hidden = true;
+          sel.removeAllRanges();
+        }, 1200);
+      });
+    });
+
+    // Keyboard selection (Shift+arrow, Ctrl+A, etc.) — selectionchange is safe
+    // here because there's no mousedown race.
+    document.addEventListener("selectionchange", () => {
+      if (mouseIsDown) return;
+      updateBtn();
+    });
+
+    // The button is position:fixed at the selection's viewport coords, but the
+    // chat re-renders and autoscrolls during streaming. Without re-validating on
+    // scroll the button stays frozen where the selection used to be, stranded in
+    // the middle of the pane (#299). Re-running updateBtn repositions it to track
+    // the selection, or hides it once the selection scrolls away / is gone.
+    this.container.addEventListener("scroll", () => updateBtn());
+
+    // A guaranteed dismiss: Escape clears the selection and hides the button.
+    // Scoped to when the button is showing so it never disturbs selections
+    // elsewhere (e.g. in an input).
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !btn.hidden) {
+        btn.hidden = true;
+        window.getSelection()?.removeAllRanges();
+      }
+    });
+
+    const updateBtn = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        btn.hidden = true;
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      const crect = this.container.getBoundingClientRect();
+      const placement = computeCopyButtonPlacement({
+        isCollapsed: sel.isCollapsed,
+        rangeCount: sel.rangeCount,
+        inContainer: this.container.contains(range.commonAncestorContainer),
+        rect: {
+          top: rect.top,
+          bottom: rect.bottom,
+          right: rect.right,
+          width: rect.width,
+          height: rect.height,
+        },
+        container: { top: crect.top, bottom: crect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      });
+      if (placement.hidden) {
+        btn.hidden = true;
+        return;
+      }
+      btn.hidden = false;
+      btn.style.top = `${placement.top}px`;
+      btn.style.left = `${placement.left}px`;
+    };
+
+    return btn;
   }
 
   private renderCurrentMessage(): void {
@@ -388,6 +586,98 @@ export class ChatPanel {
         this.container.scrollTop = this.container.scrollHeight;
       });
     }
+  }
+}
+
+export function historyToMarkdown(records: MessageRecord[]): string {
+  const lines: string[] = [];
+  for (const rec of records) {
+    if (rec.role === "user") {
+      lines.push(`**You**\n\n${rec.text}\n`);
+    } else if (rec.role === "assistant") {
+      lines.push(`**Assistant**\n\n${rec.text}\n`);
+    } else if (rec.role === "tool") {
+      const badge = rec.status === "done" ? "✓" : rec.status === "error" ? "✗" : "…";
+      lines.push(
+        `*Tool call ${badge}: \`${rec.name}\`*${rec.result ? `\n\n\`\`\`\n${rec.result}\n\`\`\`` : ""}\n`,
+      );
+    } else if (rec.role === "error") {
+      lines.push(`*Error: ${rec.text}*\n`);
+    }
+  }
+  return lines.join("\n---\n\n");
+}
+
+export function fragmentToMarkdown(el: HTMLElement): string {
+  return nodeToMd(el).trim();
+}
+
+function nodeToMd(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  const inner = () => Array.from(el.childNodes).map(nodeToMd).join("");
+
+  switch (tag) {
+    case "strong":
+    case "b":
+      return `**${inner()}**`;
+    case "em":
+    case "i":
+      return `*${inner()}*`;
+    case "del":
+    case "s":
+      return `~~${inner()}~~`;
+    case "code":
+      if (el.closest("pre")) return el.textContent ?? "";
+      return `\`${el.textContent ?? ""}\``;
+    case "pre": {
+      const code = el.querySelector("code");
+      const lang = (code?.className ?? "").match(/language-(\w+)/)?.[1] ?? "";
+      return `\`\`\`${lang}\n${(code ?? el).textContent ?? ""}\n\`\`\``;
+    }
+    case "h1":
+      return `# ${inner()}\n`;
+    case "h2":
+      return `## ${inner()}\n`;
+    case "h3":
+      return `### ${inner()}\n`;
+    case "h4":
+      return `#### ${inner()}\n`;
+    case "h5":
+      return `##### ${inner()}\n`;
+    case "h6":
+      return `###### ${inner()}\n`;
+    case "p":
+      return `${inner()}\n\n`;
+    case "br":
+      return "\n";
+    case "ul":
+      return (
+        Array.from(el.children)
+          .map((li) => `- ${nodeToMd(li)}`)
+          .join("\n") + "\n"
+      );
+    case "ol":
+      return (
+        Array.from(el.children)
+          .map((li, i) => `${i + 1}. ${nodeToMd(li)}`)
+          .join("\n") + "\n"
+      );
+    case "li":
+      return inner();
+    case "a":
+      return `[${inner()}](${el.getAttribute("href") ?? ""})`;
+    case "blockquote":
+      return inner()
+        .split("\n")
+        .map((l) => `> ${l}`)
+        .join("\n");
+    case "hr":
+      return "---\n";
+    default:
+      return inner();
   }
 }
 

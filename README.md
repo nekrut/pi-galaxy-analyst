@@ -10,6 +10,8 @@ The names trace real cosmology. The universe's large-scale structure is the _cos
 
 Future shells — a Galaxy-embedded web UI, a hosted server mode, anything else — talk to the same brain over RPC.
 
+That web shell already has a working seed today: a browser-served build of the Orbit renderer, running the same brain over RPC, reachable from another device on your LAN -- handy for chatting from a phone, and a natural home for Galaxy interactive tools later on. It's an unauthenticated single-user dev tool for now, so keep it on a trusted network; setup and the security caveats are in [`web/README.md`](web/README.md).
+
 ## How it works
 
 1. You open Orbit (or run `loom`) in an analysis directory. A `notebook.md` is created on first launch and committed to git.
@@ -223,11 +225,11 @@ Three paths, depending on what you want.
 
 ### Desktop app (Orbit)
 
-Orbit ships as a native installer that bundles its own Node runtime, `uv`, and Loom -- no separate prerequisites. The macOS (Apple Silicon) build is Developer ID signed + notarized, so it opens with a normal double-click; Linux ships `.deb`/`.rpm`/`.zip`. Both are attached to each [release](https://github.com/galaxyproject/loom/releases). Windows runs via WSL2. See [INSTALL.md](INSTALL.md) for per-platform steps and [RELEASING.md](RELEASING.md) for how a release is cut. Intel Macs and other unpackaged targets can use the developer install below.
+Orbit ships as a native installer that bundles its own Node runtime, `uv`, and Loom -- no separate prerequisites. The macOS (Apple Silicon) build is Developer ID signed + notarized, so it opens with a normal double-click; Linux ships `.deb`/`.rpm`/`.zip`; Windows ships a native `Orbit-<version> Setup.exe` (remote-only -- no local bash shell). All installers are attached to each [release](https://github.com/galaxyproject/loom/releases). See [INSTALL.md](INSTALL.md) for per-platform steps and [RELEASING.md](RELEASING.md) for how a release is cut. Intel Macs and other unpackaged targets can use the developer install below.
 
 ### Loom CLI from npm
 
-Run the brain on the command line without Orbit. Requires Node 22+ and (for Galaxy MCP) [uv](https://docs.astral.sh/uv/).
+Run the brain on the command line without Orbit. Requires Node 22.19+ and (for Galaxy MCP) [uv](https://docs.astral.sh/uv/).
 
 ```bash
 npm install -g @galaxyproject/loom
@@ -276,7 +278,10 @@ Or use the CLI:
 node bin/loom.js                       # from repo root
 ```
 
-The developer install needs Node 20+ and `uv` on `PATH`. Per-OS bootstrap below.
+For a browser-based dev loop with hot reload (the Orbit renderer served over
+the web, against the same brain), see [`web/README.md`](web/README.md).
+
+The developer install needs Node 22.19+ (matching [`.nvmrc`](.nvmrc)) and `uv` on `PATH`. Per-OS bootstrap below.
 
 #### Linux (Ubuntu/Debian)
 
@@ -306,9 +311,18 @@ brew install node git uv
 
 Then the developer install steps above.
 
-#### Windows (WSL2)
+#### Windows
 
-Orbit runs on Windows inside WSL2. From an elevated PowerShell:
+Download the native Orbit installer (`Orbit-<version> Setup.exe`) from the
+[releases page](https://github.com/galaxyproject/loom/releases). It ships
+**remote-only**: all execution routes to Galaxy, and there is no local bash
+shell. The beta is unsigned, so SmartScreen shows "Unknown publisher" -- choose
+**More info -> Run anyway**. WSL2 (with WSLg) remains the path for _local_
+execution until a native local power mode lands.
+
+##### Windows local execution (WSL2)
+
+For local bash execution today, run Orbit inside WSL2. From an elevated PowerShell:
 
 ```powershell
 wsl --install --web-download -d Ubuntu
@@ -330,7 +344,7 @@ cd ~/loom/app && npm start
 > curl -fsSL https://raw.githubusercontent.com/galaxyproject/loom/main/scripts/setup-wsl.sh | bash
 > ```
 
-Keep your analysis data inside `~/` (the Linux filesystem) — `/mnt/c/` paths are significantly slower across the filesystem boundary.
+Keep your analysis data inside `~/` (the Linux filesystem) -- `/mnt/c/` paths are significantly slower across the filesystem boundary.
 
 ### After installation
 
@@ -479,6 +493,16 @@ export GALAXY_API_KEY="your-api-key"
 
 Galaxy credentials can also be provided via environment variables (`GALAXY_URL`, `GALAXY_API_KEY`) for CI or testing, but `~/.loom/config.json` is the primary source.
 
+#### Beta tester ID
+
+If you have a tester ID, you can set it like this:
+
+```
+/tester-id orbit-007
+```
+
+Run `/tester-id` with no argument to see the current value. It writes only the `testerId` key to `~/.loom/config.json` (the rest of the file is left untouched), and Orbit attaches it to any feedback you send so reports can be traced back to your session. It can also be supplied via the `LOOM_TESTER_ID` environment variable.
+
 ### Local LLMs
 
 Loom works with any OpenAI-compatible API -- a hosted service like [Jetstream](https://docs.jetstream-cloud.org/inference-service/overview/), or a local backend like [LiteLLM](https://litellm.ai/) or [Ollama](https://ollama.com/).
@@ -513,7 +537,7 @@ So Loom gates the model's local actions by default (the "exec-guard"):
 - **Workspace jail.** Reads, writes, and edits inside your analysis directory (plus the OS temp dir) are silent; anything that resolves outside -- including via `..`, a symlink, or `~`/`$HOME` -- prompts, or is denied for weak models. So the model reads and writes freely in your project but must ask to reach anything else on disk. Writes to control locations (`.git`, `.loom/`) always prompt, even inside the workspace -- a `.git/hooks` script would run on your next commit.
 - **Risk-classified `bash`.** Read-only/analysis commands (`ls`, `cat`, `grep`, ...) run without friction when they stay in the workspace. Catastrophic patterns (`rm -rf /`, `sudo`, `curl | sh`, `dd of=/dev/...`, fork bombs, ...) are always blocked -- including path-prefixed (`/usr/bin/sudo`), long-flag (`rm --recursive --force /`), wrapper-hidden (`env rm -rf ~`), explicit-home (`rm -rf $HOME`), and multi-line variants, plus any attempt to edit the gate's own config. Anything else prompts -- and any compound, redirected, or multi-line command (`;`, `&&`, `|`, `$(...)`, `>`, a newline) drops to a prompt rather than being trusted.
 - **Sensitive paths.** `~/.ssh`, `~/.aws`, `.env`, `*.pem`/`*.key`, `~/.loom/config.json`, OS keychains, and similar always prompt (or are denied for weak models) even inside the workspace -- whether the model uses `read`, `grep`, `ls`, `find`, or a `cat` in `bash`.
-- **Model-tier aware.** Every model is gated. Weaker models (Haiku / GPT-4o-mini / Flash class, or unknown/local models) get stricter defaults -- more actions are denied outright rather than offered for approval.
+- **Model-tier aware.** Every model is gated. Weaker models (Haiku / GPT-4o-mini / Flash class, or unknown / local / low-cost models) get stricter defaults: a sensitive path or anything resolving outside the workspace is denied outright rather than offered for approval, and they never earn the silent auto-allow a capable model gets in a trusted workspace. An ordinary unrecognized command, though -- running a script it just wrote, or a compound/redirected command -- still drops to the _same_ approval prompt a capable model would get, so scripting in explicit local mode works once you approve it. (Headless/scripted runs have no one to approve, so anything that would prompt is denied there for every tier.)
 - **Fail-closed.** With no interactive session to approve (headless / scripted runs), anything that would prompt is denied. A one-time consent notice is shown on the first gated action, and every decision is recorded in `activity.jsonl`.
 
 When a command needs approval you can allow it once, allow it for the session, or trust the workspace (which stops prompting for routine commands there).

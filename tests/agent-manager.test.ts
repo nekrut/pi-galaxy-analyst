@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
 const spawnMock = vi.fn();
-const createInterfaceMock = vi.fn(() => ({ on: vi.fn() }));
+// Capture the readline "line" handler so tests can feed brain stdout events
+// through handleLine() (the real one is wired in start()).
+let lineHandler: ((line: string) => void) | null = null;
+const createInterfaceMock = vi.fn(() => ({
+  on: (event: string, cb: (line: string) => void) => {
+    if (event === "line") lineHandler = cb;
+  },
+}));
 const existsSyncMock = vi.fn(() => false);
 const readdirSyncMock = vi.fn(() => []);
 
@@ -73,6 +80,7 @@ describe("AgentManager", () => {
     vi.resetModules();
     spawnMock.mockReset();
     createInterfaceMock.mockClear();
+    lineHandler = null;
     existsSyncMock.mockReset();
     existsSyncMock.mockReturnValue(false);
     readdirSyncMock.mockReset();
@@ -87,6 +95,7 @@ describe("AgentManager", () => {
     const { AgentManager } = await import("../app/src/main/agent.js");
     const window = {
       isDestroyed: () => false,
+      setTitle: vi.fn(),
       webContents: { send: vi.fn() },
     };
 
@@ -120,6 +129,7 @@ describe("AgentManager", () => {
     const { AgentManager } = await import("../app/src/main/agent.js");
     const window = {
       isDestroyed: () => false,
+      setTitle: vi.fn(),
       webContents: { send: vi.fn() },
     };
 
@@ -129,5 +139,122 @@ describe("AgentManager", () => {
     expect(manager.switchCwd("/analysis/same")).toBe(false);
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(firstProc.kill).not.toHaveBeenCalled();
+  });
+
+  describe("stall watchdog (#185)", () => {
+    function agentEvents(window: { webContents: { send: ReturnType<typeof vi.fn> } }) {
+      return window.webContents.send.mock.calls.filter((c: unknown[]) => c[0] === "agent:event");
+    }
+    function errorEvents(window: { webContents: { send: ReturnType<typeof vi.fn> } }) {
+      return agentEvents(window).filter(
+        (c: unknown[]) => (c[1] as { type?: string })?.type === "error",
+      );
+    }
+
+    it("surfaces a synthetic error when the brain goes silent after a prompt", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "How many histories do I have?" });
+        expect(errorEvents(window)).toHaveLength(0);
+
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS + 1);
+
+        const errors = errorEvents(window);
+        expect(errors).toHaveLength(1);
+        expect((errors[0][1] as { message?: string }).message).toMatch(/responding|stalled/i);
+        // Best-effort: tell the wedged brain to abort so the next prompt works.
+        expect(proc.stdin.write).toHaveBeenCalledWith(expect.stringMatching(/"type":"abort"/));
+        // Turn is no longer considered active after recovery.
+        expect(manager.getStatusSnapshot().turnActive).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not fire when the brain keeps streaming activity", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "hi" });
+        // Brain stays alive: an event arrives just before each deadline.
+        for (let i = 0; i < 4; i++) {
+          vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS - 1);
+          lineHandler?.(JSON.stringify({ type: "message_update" }));
+        }
+
+        expect(errorEvents(window)).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("disarms on agent_end so a completed turn never false-fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const proc = makeProcess(101);
+        spawnMock.mockReturnValue(proc);
+        const { AgentManager, TURN_SILENCE_TIMEOUT_MS } = await import("../app/src/main/agent.js");
+        const window = {
+          isDestroyed: () => false,
+          setTitle: vi.fn(),
+          webContents: { send: vi.fn() },
+        };
+        const manager = new AgentManager(window as any, "/analysis");
+        manager.start();
+
+        manager.send({ type: "prompt", message: "hi" });
+        lineHandler?.(JSON.stringify({ type: "agent_start" }));
+        lineHandler?.(JSON.stringify({ type: "agent_end" }));
+
+        vi.advanceTimersByTime(TURN_SILENCE_TIMEOUT_MS * 3);
+
+        expect(errorEvents(window)).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("sets the window title from the cwd on construction, switch, and setCwd", async () => {
+    spawnMock.mockReturnValue(makeProcess(101));
+
+    const { AgentManager } = await import("../app/src/main/agent.js");
+    const setTitle = vi.fn();
+    const window = {
+      isDestroyed: () => false,
+      setTitle,
+      webContents: { send: vi.fn() },
+    };
+
+    // os.homedir() is mocked to "/tmp/home" at the top of this file.
+    const manager = new AgentManager(window as any, "/tmp/home/projectA");
+    expect(setTitle).toHaveBeenLastCalledWith("~/projectA — Orbit");
+
+    expect(manager.switchCwd("/srv/data/projectB")).toBe(true);
+    expect(setTitle).toHaveBeenLastCalledWith("/srv/data/projectB — Orbit");
+
+    manager.setCwd("/tmp/home/projectC");
+    expect(setTitle).toHaveBeenLastCalledWith("~/projectC — Orbit");
   });
 });

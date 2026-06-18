@@ -94,15 +94,16 @@ The CLI never owns analysis semantics. Slash commands behave the same as in Orbi
 - owns shell-only state: window geometry, prompt history, preferences (`~/.orbit/`)
 - decrypts Galaxy API keys via Electron `safeStorage` and injects `GALAXY_API_KEY` into the brain at spawn time (`buildSecretEnv` in `app/src/main/agent.ts`)
 - watches `~/.loom/config.json` and re-encrypts plaintext keys the brain wrote during `/connect`
+- on Windows, ships **remote-only**: a plain Windows box has no bash, so the brain is spawned with `--exclude-tools bash` (the model never sees a shell) and flagged `LOOM_LOCAL_SHELL=off` (`isLocalShellAvailable` in `src/main/local-shell.ts`). Unlike the web Remote mode below, `LOOM_LOCAL_EXEC` stays `on` -- the exec-guard write-jail remains the file authority, so workspace file read/write still works; only the shell is gone. The init-gate rejects `[local]`/`[hybrid]` plans and the renderer hides local-exec-only controls via `body.remote-desktop`. See the [Windows remote-only design](superpowers/specs/2026-06-04-orbit-windows-remote-only-design.md).
 
-### Future web shell
+### Web shell (`web/`)
 
-Two materially different possibilities:
+The web shell shares the Orbit renderer over a WebSocket bridge to a brain subprocess (`web/server.ts`). Two run modes:
 
-- **thin local shell** -- talks to a local Loom runtime over the same shell contract Orbit uses
-- **hosted service** -- multi-user tenancy, remote session ownership, remote notebook storage, Galaxy account linking
+- **Desktop-equivalent** (default) -- single user on localhost, reads `~/.loom/config.json`, behaves like Orbit minus Electron.
+- **Remote** (`LOOM_MODE=remote`) -- env-injected credentials, ephemeral `/tmp/loom-session/` cwd, brain spawned with the `web/extensions/web-mode-gate` Pi extension that blocks `bash` and confines `edit`/`write`/`read` to `notebook.md`. No `~/.loom/config.json`, no `/connect` flow, no local-filesystem UI. Same image runs as `docker run`, behind a reverse proxy, or as a Galaxy interactive tool. See [`web/REMOTE.md`](../web/REMOTE.md) for the env contract.
 
-These are not small variations of the same architecture. The choice has to be made before the web shell grows further.
+The hosted multi-user shape is deferred -- the IT pathway gives per-user isolation for free without a multi-tenant server.
 
 ## Shared contracts
 
@@ -206,6 +207,7 @@ The shell must not:
 ## Current constraints
 
 - Local execution mode is an exception path, not a mature first-class runtime.
+- Native Windows Orbit is remote-only (no local bash shell); local execution on Windows still needs WSL2 until a WSL/container local power-mode backend lands behind the `isLocalShellAvailable` seam.
 - Orbit is the richest shell; the CLI is intentionally thinner; the web shell is undecided.
 - Notebook persistence is local-directory-based, which is correct for local shells but must be reconsidered for any hosted deployment.
 - Skill repo allowlist is `galaxyproject/*` only -- third-party skill repos would need a more permissive `isAllowedSkillUrl` (and a story for prompt-injection risk).

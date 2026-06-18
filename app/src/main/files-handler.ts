@@ -8,6 +8,7 @@
  */
 
 import { ipcMain, BrowserWindow } from "electron";
+import { createIdempotentIpc } from "./ipc-registry.js";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -80,6 +81,7 @@ const TEXT_PREVIEW_EXTS = new Set([
   ".csv",
   ".tsv",
   ".tab",
+  ".tabular",
   ".fa",
   ".fasta",
   ".fna",
@@ -87,8 +89,13 @@ const TEXT_PREVIEW_EXTS = new Set([
   ".ffn",
   ".fastq",
   ".fq",
+  ".fastqsanger",
+  ".fastqillumina",
+  ".fastqsolexa",
+  ".fastqcssanger",
   ".vcf",
   ".bed",
+  ".interval",
   ".bedgraph",
   ".wig",
   ".gff",
@@ -104,7 +111,7 @@ const TEXT_PREVIEW_EXTS = new Set([
   ".phylip",
 ]);
 
-function isTextLikeForPreview(name: string): boolean {
+export function isTextLikeForPreview(name: string): boolean {
   const dot = name.lastIndexOf(".");
   // No extension -- the renderer treats these as text (READMEs, configs).
   if (dot <= 0) return true;
@@ -191,12 +198,29 @@ async function walkDir(
 let watcher: fs.FSWatcher | null = null;
 let watchedCwd: string | null = null;
 let debounceTimer: NodeJS.Timeout | null = null;
+let pendingPaths = new Set<string>();
+let pendingUnknown = false;
 
-function emitChange(window: BrowserWindow | null): void {
+function emitChange(window: BrowserWindow | null, filename: string | null): void {
+  // Accumulate the paths changed during the debounce window. The watcher
+  // coalesces a burst of fs events into one renderer notification, so we ship
+  // the whole batch — the renderer needs every changed path to decide whether
+  // the open file is among them (#313). A null filename means the OS didn't
+  // name what changed; flag the batch unknown so the renderer refreshes anyway
+  // instead of wrongly assuming the open file is untouched.
+  if (filename) {
+    pendingPaths.add(toPosix(filename));
+  } else {
+    pendingUnknown = true;
+  }
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
+    const paths = pendingUnknown ? null : [...pendingPaths];
+    pendingPaths = new Set();
+    pendingUnknown = false;
+    debounceTimer = null;
     if (window && !window.isDestroyed()) {
-      window.webContents.send("files:changed");
+      window.webContents.send("files:changed", paths);
     }
   }, 200);
 }
@@ -211,7 +235,7 @@ export function startFilesWatcher(window: BrowserWindow, cwd: string): void {
         const firstSegment = String(filename).split(/[\\/]/)[0];
         if (FS_BLOCKLIST.has(firstSegment)) return;
       }
-      emitChange(window);
+      emitChange(window, filename ? String(filename) : null);
     });
     watcher.on("error", (err) => {
       console.warn("[files] watcher error:", err.message);
@@ -240,12 +264,18 @@ export function stopFilesWatcher(): void {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+  pendingPaths = new Set();
+  pendingUnknown = false;
 }
 
 // --- IPC registration ---------------------------------------------------
 
 export function registerFilesIpc(getCwd: () => string): void {
-  ipcMain.handle("files:list", async (_e, opts?: { includeHidden?: boolean }) => {
+  // Idempotent registration so a macOS reopen-after-close (which re-runs this
+  // for the new window) can't double-register and crash (#311).
+  const ipc = createIdempotentIpc(ipcMain);
+
+  ipc.handle("files:list", async (_e, opts?: { includeHidden?: boolean }) => {
     const cwd = getCwd();
     try {
       const children = await walkDir(cwd, "", opts?.includeHidden ?? false, 0);
@@ -261,7 +291,7 @@ export function registerFilesIpc(getCwd: () => string): void {
     }
   });
 
-  ipcMain.handle("files:read", async (_e, relPath: string, opts?: { tail?: boolean }) => {
+  ipc.handle("files:read", async (_e, relPath: string, opts?: { tail?: boolean }) => {
     const cwd = getCwd();
     try {
       const abs = resolveWithin(cwd, relPath);
@@ -362,7 +392,7 @@ export function registerFilesIpc(getCwd: () => string): void {
     }
   });
 
-  ipcMain.handle("files:write", async (_e, relPath: string, content: string) => {
+  ipc.handle("files:write", async (_e, relPath: string, content: string) => {
     const cwd = getCwd();
     try {
       const abs = resolveWithin(cwd, relPath);

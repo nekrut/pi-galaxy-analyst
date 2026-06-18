@@ -4,10 +4,22 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { app, type BrowserWindow } from "electron";
-import { loadConfig } from "./config.js";
+import { loadConfig, saveConfig, getConfigPath } from "./config.js";
 import { resolveLlmApiKey, resolveGalaxyApiKey } from "./secure-config.js";
 import { loadSessionHistory, newestSessionFile } from "./session-replay.js";
 import { collectDescendantsOf } from "./proc-monitor.js";
+import { buildBrainEnv as buildBaseBrainEnv } from "../../../shared/brain-env.js";
+import { noLocalShellSpawnExtras } from "./local-shell.js";
+import { TurnWatchdog } from "./turn-watchdog.js";
+import { formatWindowTitle } from "./window-title.js";
+
+/**
+ * How long the brain may stay completely silent mid-turn before Orbit treats the
+ * turn as stalled and recovers the UI (#185). Generous on purpose: tool runs and
+ * UI modals are excluded by the watchdog, so the only window this guards is
+ * "waiting on the model", where multi-minute silence is unambiguously a failure.
+ */
+export const TURN_SILENCE_TIMEOUT_MS = 120_000;
 
 const PROVIDER_ENV_MAP: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -28,24 +40,26 @@ function buildSecretEnv(): Record<string, string> {
   const cfg = loadConfig();
 
   const provider = cfg.llm?.active || "anthropic";
-  const llmKey = resolveLlmApiKey(cfg);
   const isCustom = Boolean(cfg.llm?.providers?.[provider]?.baseUrl);
   // OAuth providers ignore env-var keys -- the brain reads ~/.pi/agent/auth.json.
   // If the user switched away from an API-key provider the old key is still in
   // config.json (preserved on purpose so they can switch back); don't leak it
   // into the env under a misrouted variable name.
-  if (llmKey && !OAUTH_PROVIDERS.has(provider)) {
-    if (isCustom) {
-      // Custom OpenAI-compatible endpoint: the brain converts this into
-      // pi's --api-key (a built-in env var wouldn't map to the provider).
-      env.LOOM_ACTIVE_LLM_API_KEY = llmKey;
-    } else {
-      const envVar = PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
-      env[envVar] = llmKey;
-    }
+  if (!OAUTH_PROVIDERS.has(provider)) {
+    // Custom OpenAI-compatible endpoints route through pi's --api-key via
+    // LOOM_ACTIVE_LLM_API_KEY; built-in providers use their own env var.
+    const targetVar = isCustom
+      ? "LOOM_ACTIVE_LLM_API_KEY"
+      : PROVIDER_ENV_MAP[provider] || "AI_GATEWAY_API_KEY";
+    // Config key wins; otherwise fall back to a key exported into Orbit's own
+    // env (`export ANTHROPIC_API_KEY=...; npm start`). In dev with safeStorage
+    // off this is the only key path; in prod it's a handy CI/power-user override.
+    const llmKey = resolveLlmApiKey(cfg) ?? process.env[targetVar];
+    if (llmKey) env[targetVar] = llmKey;
   }
 
-  const galaxyKey = resolveGalaxyApiKey(cfg);
+  // Galaxy key: config wins, else an exported GALAXY_API_KEY.
+  const galaxyKey = resolveGalaxyApiKey(cfg) ?? process.env.GALAXY_API_KEY;
   if (galaxyKey) {
     env.GALAXY_API_KEY = galaxyKey;
   }
@@ -66,7 +80,7 @@ function resolveLoomBin(): string {
   return path.resolve(__dirname, "../../../bin/loom.js");
 }
 
-// Resolve the Node binary the brain runs under. Dev assumes Node 20+ on PATH.
+// Resolve the Node binary the brain runs under. Dev assumes Node 22.19+ on PATH.
 // Packaged Orbit ships its own Node next to Loom (Resources/node/) so users
 // don't need to have Node installed; this also keeps native module ABI in sync
 // with whatever Node ran `npm ci` during prePackage staging.
@@ -103,69 +117,22 @@ function log(...args: unknown[]): void {
   console.log("[agent]", ...args);
 }
 
-/**
- * Variables explicitly forwarded from Orbit's launch env to the brain
- * subprocess. Forwarding `process.env` wholesale would leak unrelated
- * secrets (AWS_*, GITHUB_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, etc.)
- * to every spawned MCP subprocess too; the brain only needs the small
- * set below plus its own LOOM_ / GALAXY_ / PI_ prefix vars (forwarded
- * by prefix in buildBrainEnv).
- */
-const BRAIN_ENV_PASSTHROUGH = new Set<string>([
-  // Process basics
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "TERM",
-  "PWD",
-  // Locale
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "LC_MESSAGES",
-  // Display (rarely needed by the brain itself but tools spawned by
-  // the brain — e.g. matplotlib via the bash tool — sometimes need it)
-  "DISPLAY",
-  "WAYLAND_DISPLAY",
-  "XDG_RUNTIME_DIR",
-  // Node
-  "NODE_OPTIONS",
-  "NODE_TLS_REJECT_UNAUTHORIZED",
-  // Conda / mamba (per-analysis env activation in tools)
-  "CONDA_EXE",
-  "CONDA_PREFIX",
-  "CONDA_DEFAULT_ENV",
-  "MAMBA_EXE",
-  "MAMBA_ROOT_PREFIX",
-  // CA bundles (corporate proxies)
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "REQUESTS_CA_BUNDLE",
-  "NODE_EXTRA_CA_CERTS",
-]);
-
 function buildBrainEnv(fresh: boolean): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of BRAIN_ENV_PASSTHROUGH) {
-    const v = process.env[key];
-    if (v !== undefined) env[key] = v;
-  }
-  // Forward any LOOM_*/GALAXY_*/PI_* vars by prefix — these are the brain's
-  // own knobs (provider keys, MCP config dir, feature flags).
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v === undefined) continue;
-    if (k.startsWith("LOOM_") || k.startsWith("GALAXY_") || k.startsWith("PI_")) {
-      env[k] = v;
-    }
-  }
-  // Set the shell-kind marker the extension reads, plus the optional
-  // fresh-session sentinel for /new flows.
+  // Base curation (named passthrough + LOOM_/GALAXY_/PI_ prefixes) lives in
+  // shared/brain-env.js so web/server.ts uses the same allowlist. Provider
+  // keys come from the OS keychain via buildSecretEnv on desktop, so we don't
+  // ask the base helper to forward them from shell env.
+  const env = buildBaseBrainEnv();
   env.LOOM_SHELL_KIND = "orbit";
+  // The desktop always has a local *file* surface, so exec-guard stays on
+  // everywhere. LOOM_LOCAL_EXEC is the shell->brain capability signal
+  // (extensions/loom/local-exec.ts); set it authoritatively so an ambient
+  // LOOM_LOCAL_EXEC=off in the launching environment can't silently disable the
+  // guard. Windows remote-only does NOT flip this: it keeps the file write-jail
+  // and instead removes the bash *tool* (see noLocalShellSpawnExtras / the args
+  // pushed in start()), flagging the brain via LOOM_LOCAL_SHELL=off.
+  env.LOOM_LOCAL_EXEC = "on";
+  Object.assign(env, noLocalShellSpawnExtras().env);
   if (fresh) env.LOOM_FRESH_SESSION = "1";
   // Prepend the bundled uv directory to PATH when packaged so MCP servers
   // configured with `command: "uvx"` (Galaxy MCP) find the shipped binary.
@@ -214,9 +181,28 @@ export class AgentManager {
   private static readonly MAX_RESTARTS_PER_WINDOW = 3;
   private static readonly RESTART_WINDOW_MS = 60_000;
 
+  // Breaks the "stuck on thinking" hang (#185): fires when a turn goes silent
+  // long enough that the provider call must have failed or stalled.
+  private readonly watchdog: TurnWatchdog;
+
   constructor(window: BrowserWindow, cwd: string) {
     this.window = window;
     this.cwd = cwd;
+    this.watchdog = new TurnWatchdog({
+      timeoutMs: TURN_SILENCE_TIMEOUT_MS,
+      onTimeout: () => this.handleTurnStalled(),
+    });
+    this.refreshWindowTitle();
+  }
+
+  /**
+   * Reflect the active analysis directory in the window title so the context
+   * is glanceable across multiple open project windows (#190). Main owns the
+   * title; see createWindow() where page-title-updated is suppressed.
+   */
+  private refreshWindowTitle(): void {
+    if (this.window.isDestroyed()) return;
+    this.window.setTitle(formatWindowTitle(this.cwd, os.homedir()));
   }
 
   /** Reset session continuity (e.g. when switching to a new analysis directory). */
@@ -232,12 +218,24 @@ export class AgentManager {
       this.hasStartedBefore = false;
     }
     this.cwd = cwd;
+    this.refreshWindowTitle();
     log("cwd set to", cwd);
   }
 
-  switchCwd(cwd: string): boolean {
+  /**
+   * Switch to a new analysis directory and restart the brain there.
+   *
+   * `persist` (default true) writes the new directory to config.defaultCwd so a
+   * clean restart reopens it (#312). In-app directory picks (File > Open, the
+   * top-bar change button) persist; pass `persist: false` for transient `--cwd`
+   * overrides so a one-off CLI launch never becomes the permanent default --
+   * matching the first-instance path, which routes `--cwd` through getDefaultCwd
+   * at construction and likewise doesn't persist it.
+   */
+  switchCwd(cwd: string, opts: { persist?: boolean } = {}): boolean {
     if (cwd === this.cwd) return false;
     this.cwd = cwd;
+    this.refreshWindowTitle();
     this.hasStartedBefore = false;
     // Don't force-skip --continue: let start()'s hasExistingSession() check
     // decide. If the target cwd has a Pi session on disk, we want to resume
@@ -246,11 +244,44 @@ export class AgentManager {
     this.nextStartSkipContinue = false;
     this.nextStartIsFresh = false;
     log("switching cwd to", cwd);
+    if (opts.persist !== false) this.persistCwd(cwd);
     if (this.process) {
       this.stop();
       this.start();
     }
     return true;
+  }
+
+  /**
+   * Persist the active analysis directory so a clean restart reopens it (#312).
+   * Reads-merges-writes through the shared config so unrelated keys (creds,
+   * skills, ...) survive. Best-effort: a config-write failure must not abort
+   * the in-progress directory switch, so log and move on rather than throw.
+   *
+   * Fails closed when config.json exists but won't parse: loadConfig() silently
+   * returns {} on a read/parse error, so writing that back would wipe stored
+   * credentials. Refuse rather than clobber -- a genuinely absent file is still
+   * fine to create. Mirrors setTesterId() in extensions/loom/tester-id-command.ts.
+   */
+  private persistCwd(cwd: string): void {
+    try {
+      const configPath = getConfigPath();
+      if (fs.existsSync(configPath)) {
+        try {
+          JSON.parse(fs.readFileSync(configPath, "utf-8"));
+        } catch {
+          log("skipped persisting cwd -- ~/.loom/config.json is unreadable");
+          return;
+        }
+      }
+      const cfg = loadConfig();
+      if (cfg.defaultCwd === cwd) return;
+      cfg.defaultCwd = cwd;
+      saveConfig(cfg);
+      log("persisted defaultCwd:", cwd);
+    } catch (err) {
+      log("failed to persist cwd:", err);
+    }
   }
 
   getCwd(): string {
@@ -319,6 +350,9 @@ export class AgentManager {
     if (wantsContinue) {
       args.push("--continue");
     }
+
+    // Remote-only platforms (Windows) remove the bash tool from the model.
+    args.push(...noLocalShellSpawnExtras().args);
     this.hasStartedBefore = true;
     this.nextStartSkipContinue = false;
 
@@ -505,6 +539,11 @@ export class AgentManager {
     const json = JSON.stringify(obj);
     log("→ stdin:", json.slice(0, 200));
     this.process.stdin.write(json + "\n");
+    // A prompt (including streamed steer/followUp) starts a turn we must watch
+    // for a silent stall. Other commands (abort, set_model, ...) don't.
+    if (obj.type === "prompt") {
+      this.watchdog.promptSent();
+    }
   }
 
   /**
@@ -576,6 +615,8 @@ export class AgentManager {
     // Process death (clean or otherwise) ends any in-flight turn.
     if (status === "stopped" || status === "error") {
       this.turnActive = false;
+      // The process is gone; never let a pending watchdog fire against it.
+      this.watchdog.stop();
     }
     log("status:", status, message || "");
     // During a silent restart we suppress the transient stopped→running flicker;
@@ -584,6 +625,30 @@ export class AgentManager {
     if (!this.window.isDestroyed()) {
       this.window.webContents.send("agent:status", status, message);
     }
+  }
+
+  /**
+   * The brain went silent mid-turn (#185): a provider call failed or stalled
+   * without emitting a terminal event, so the renderer is pinned on "thinking".
+   * Surface a recoverable error through the existing `error` event path, mark the
+   * turn done, and best-effort tell the brain to abort so its streaming state
+   * clears and the next prompt isn't queued behind a dead turn.
+   */
+  private handleTurnStalled(): void {
+    log("turn stalled: no brain activity for", TURN_SILENCE_TIMEOUT_MS, "ms");
+    this.turnActive = false;
+    if (!this.window.isDestroyed()) {
+      this.window.webContents.send("agent:event", {
+        type: "error",
+        message:
+          "The assistant stopped responding. The request may have failed or " +
+          "been blocked -- please try again.",
+      });
+    }
+    // Best-effort: unstick pi's streaming state so the next prompt runs. If the
+    // brain is wedged on a dead socket this may not land, but the UI is already
+    // recovered either way.
+    this.send({ type: "abort" });
   }
 
   private handleLine(line: string): void {
@@ -600,6 +665,10 @@ export class AgentManager {
     const type = data.type as string;
     const noisy = type === "message_update" || type === "tool_execution_update";
     log("← event:", type, noisy ? "" : JSON.stringify(data).slice(0, 150));
+
+    // Any line from the brain is a sign of life: reset/pause/disarm the stall
+    // watchdog before we act on (or early-return from) this event.
+    this.watchdog.observe(type);
 
     if (type === "response" && data.id) {
       const pending = this.pendingResponses.get(data.id as string);

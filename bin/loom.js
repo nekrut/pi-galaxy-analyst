@@ -11,6 +11,8 @@ import {
 } from "../shared/loom-config.js";
 import { spawn } from "child_process";
 import { getLoomVersion, detectInstall } from "./update-check.js";
+import { isUvxAvailable, uvxMissingNotice } from "./uvx-check.js";
+import { resolveHideThinking, isInteractiveTerminal } from "./thinking-pref.js";
 import { pickChannel } from "../shared/version-compare.js";
 import {
   isCustomProvider,
@@ -30,6 +32,7 @@ const extensionPath = resolve(__dirname, "../extensions/loom");
 // the brain stays shell-neutral; the command no-ops when embedded in Orbit.
 const orbitHandoffPath = resolve(__dirname, "../extensions/orbit-handoff");
 const cliUpdatePath = resolve(__dirname, "../extensions/cli-update");
+const whatsNewPath = resolve(__dirname, "../extensions/whats-new");
 const updateCheckScript = resolve(__dirname, "update-check.js");
 
 // pi-mcp-adapter is what teaches Pi how to use MCP servers from mcp.json
@@ -58,6 +61,15 @@ if (userArgs.includes("--safe")) {
 // Opt-in bash sandbox: run allowed bash inside an OS sandbox (the gate still gates).
 if (userArgs.includes("--sandbox")) {
   process.env.LOOM_SANDBOX = "1";
+}
+// A bare interactive CLI always has a local execution surface, so the exec-guard
+// (brain side) must stay on regardless of any ambient LOOM_LOCAL_EXEC in the
+// launching env. The web/desktop shells run the brain with --mode rpc and set
+// LOOM_LOCAL_EXEC authoritatively themselves (off for the no-exec web container,
+// on for desktop), so only pin it here for the non-rpc CLI path.
+const isRpcMode = userArgs.includes("--mode") && userArgs[userArgs.indexOf("--mode") + 1] === "rpc";
+if (!isRpcMode) {
+  process.env.LOOM_LOCAL_EXEC = "on";
 }
 if (userArgs.includes("--no-update-check")) {
   process.env.LOOM_NO_UPDATE_CHECK = "1";
@@ -306,8 +318,12 @@ if (!isInformationalCommand) {
   if (hasGalaxyCredentials) {
     mcpConfig.mcpServers.galaxy = {
       command: "uvx",
-      args: ["galaxy-mcp>=1.6.0"],
+      args: ["galaxy-mcp>=1.8.0"],
       directTools: true,
+      // Local-path upload over MCP times out on large files (-32001); the
+      // loom-native galaxy_upload_local_file tool handles those instead. URL
+      // upload (upload_file_from_url) and the rest stay exposed.
+      excludeTools: ["upload_file"],
       env: {
         GALAXY_URL: galaxyUrl,
         GALAXY_API_KEY: galaxyApiKey,
@@ -556,6 +572,8 @@ const args = [
   orbitHandoffPath,
   "-e",
   cliUpdatePath,
+  "-e",
+  whatsNewPath,
   ...providerArgs,
   ...userArgs,
 ];
@@ -588,6 +606,14 @@ if (userArgs[0] === "update") {
 } else {
   checkLLMProvider();
 
+  // Galaxy is configured but the uvx runner that launches galaxy-mcp is missing.
+  // Warn (don't block): Loom is still useful without Galaxy, and pi-mcp-adapter
+  // would otherwise fail to spawn that server with a buried error. Orbit bundles
+  // uv onto PATH before spawn, so this only fires for standalone CLI installs.
+  if (galaxyUrl && galaxyApiKey && !isUvxAvailable()) {
+    console.error(`\n${uvxMissingNotice()}\n`);
+  }
+
   // Resolve pi-coding-agent's own version by walking up from its entry point to
   // the package root. Used to pin the changelog watermark below.
   function resolvePiVersion() {
@@ -607,12 +633,21 @@ if (userArgs[0] === "update") {
     return null;
   }
 
-  // Suppress Pi's keybinding banner, resource listing, and "What's New"
-  // changelog. Loom is the product identity -- users shouldn't see Pi internals
-  // unless they pass --verbose. The changelog draws from pi-coding-agent's own
-  // CHANGELOG.md and is gated on lastChangelogVersion; pinning that to Pi's
-  // current version means getNewEntries() never finds anything newer to show.
-  if (!hasArg("--verbose")) {
+  // Reconcile the Pi settings loom manages. Two concerns share one read/write:
+  //  - Startup quiet (banner, resource listing, "What's New" changelog): loom is
+  //    the product identity, so users shouldn't see Pi internals unless they
+  //    pass --verbose. The changelog is gated on lastChangelogVersion; pinning
+  //    it to Pi's current version means getNewEntries() finds nothing newer.
+  //  - Thinking visibility (interactive terminal only): Pi streams the model's
+  //    reasoning into the TUI, which is noisy, so loom hides it by default.
+  //    `hideThinkingBlock` is a persisted global Pi setting that only the
+  //    interactive renderer reads, so only reconcile it for an interactive
+  //    terminal launch -- never for the non-interactive modes (rpc for Orbit
+  //    and the web server, json for evals, headless --print), which would
+  //    churn the global file for a setting they never read. Override
+  //    persistently with `ui.showThinking: true` in ~/.loom/config.json, or
+  //    just toggle it live in-session with Ctrl+T.
+  {
     const piSettingsPath = join(agentDir, "settings.json");
     try {
       let piSettings = {};
@@ -620,15 +655,29 @@ if (userArgs[0] === "update") {
         piSettings = JSON.parse(readFileSync(piSettingsPath, "utf-8"));
       }
       let changed = false;
-      if (!piSettings.quietStartup) {
-        piSettings.quietStartup = true;
-        changed = true;
+
+      if (!hasArg("--verbose")) {
+        if (!piSettings.quietStartup) {
+          piSettings.quietStartup = true;
+          changed = true;
+        }
+        const piVersion = resolvePiVersion();
+        if (piVersion && piSettings.lastChangelogVersion !== piVersion) {
+          piSettings.lastChangelogVersion = piVersion;
+          changed = true;
+        }
       }
-      const piVersion = resolvePiVersion();
-      if (piVersion && piSettings.lastChangelogVersion !== piVersion) {
-        piSettings.lastChangelogVersion = piVersion;
-        changed = true;
+
+      if (isInteractiveTerminal(userArgs)) {
+        const hideThinking = resolveHideThinking({
+          configShowThinking: loomConfig.ui?.showThinking,
+        });
+        if (piSettings.hideThinkingBlock !== hideThinking) {
+          piSettings.hideThinkingBlock = hideThinking;
+          changed = true;
+        }
       }
+
       if (changed) {
         mkdirSync(dirname(piSettingsPath), { recursive: true });
         writeFileSync(piSettingsPath, JSON.stringify(piSettings, null, 2));

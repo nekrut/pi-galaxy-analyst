@@ -9,15 +9,18 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanTools } from "./tools";
+import { registerGalaxyUploadTool } from "./galaxy-upload";
 import { registerNotebookSyncTools } from "./tools-sync";
 import { registerSyncCommand } from "./sync-command";
 import { registerSkillsCommand } from "./skills-command";
 import { setupContextInjection, formatConnectionStatus } from "./context";
 import { setupUIBridge } from "./ui-bridge";
 import { registerSessionLifecycle } from "./session-lifecycle";
+import { recordGalaxyConnected } from "./galaxy-cred-drift";
 import { registerActivityHooks } from "./activity-hooks";
 import { registerExecutionCommands } from "./execution-commands";
 import { registerFeedbackCommand } from "./feedback-command";
+import { registerTesterIdCommand } from "./tester-id-command";
 import { registerTeamTools } from "./teams/tool";
 import { isTeamDispatchEnabled } from "./teams/is-enabled";
 import { registerSessionIndexTools } from "./session-index/tools";
@@ -25,6 +28,8 @@ import { isSessionIndexEnabled } from "./session-index/is-enabled";
 import { registerConfusablesHint } from "./confusables-hint";
 import { registerExecGuard } from "./exec-guard";
 import { registerSandbox } from "./sandbox";
+import { isLocalExecDisabled } from "./local-exec";
+import { registerSecretRedaction } from "./secret-redaction";
 import * as fs from "fs";
 import { getState, getNotebookPath, getNotebookWidgetMode, setNotebookWidgetMode } from "./state";
 import {
@@ -33,31 +38,48 @@ import {
   switchProfile,
   profileNameFromUrl,
   normalizeGalaxyUrl,
-  warnOnUnusableActiveProfile,
 } from "./profiles";
 import { LoomWidgetKey, encodeMarkdownWidget } from "../../shared/loom-shell-contract.js";
 
 export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
-  warnOnUnusableActiveProfile();
-
-  // Register the local-execution safety gate first so its tool_call decision is
-  // the authoritative boundary before anything else runs.
-  registerExecGuard(pi);
-  // The opt-in bash sandbox layers an OS sandbox UNDER the gate (the gate still
-  // decides allow/ask/deny; the sandbox only contains an allowed command's blast
-  // radius). Default-on file-write confinement lives in the gate itself.
-  registerSandbox(pi);
+  // Local-execution safety gate + opt-in bash sandbox. Both only make sense
+  // when the brain has a local execution surface. A shell that runs the brain
+  // with no local exec -- the web/container remote shell (and eventually native
+  // Windows remote-only) -- sets LOOM_LOCAL_EXEC=off and supplies its own
+  // authoritative tool_call gate (web-mode-gate). Registering exec-guard there
+  // is redundant, and its interactive approval prompts have no human to answer
+  // in a headless container, so they would hang the agent on the first gated
+  // action. Skipping both keeps the shell's gate the single tool_call authority.
+  // Shells WITH a local exec surface (desktop, CLI) set LOOM_LOCAL_EXEC
+  // authoritatively at spawn so an ambient value can't toggle this off here.
+  if (!isLocalExecDisabled()) {
+    // Register the gate first so its tool_call decision is the authoritative
+    // boundary before anything else runs.
+    registerExecGuard(pi);
+    // The opt-in bash sandbox layers an OS sandbox UNDER the gate (the gate still
+    // decides allow/ask/deny; the sandbox only contains an allowed command's blast
+    // radius). Default-on file-write confinement lives in the gate itself.
+    registerSandbox(pi);
+  }
+  // Data-shaped backstop to the path-shaped gate: scrub known secret VALUES out
+  // of tool OUTPUT before it returns to the model, so an approved/slipped read
+  // (or an `env` dump) can't push API keys into the provider's logs (#183).
+  // Passive and prompt-free, so it stays on even when a remote shell owns the
+  // tool_call boundary and the gate above is skipped.
+  registerSecretRedaction(pi);
 
   setupUIBridge(pi);
   registerSessionLifecycle(pi);
   registerActivityHooks(pi);
 
   registerPlanTools(pi);
+  registerGalaxyUploadTool(pi);
   registerNotebookSyncTools(pi);
   registerSyncCommand(pi);
   registerSkillsCommand(pi);
   registerExecutionCommands(pi);
   registerFeedbackCommand(pi);
+  registerTesterIdCommand(pi);
   registerConfusablesHint(pi);
   if (isTeamDispatchEnabled()) {
     registerTeamTools(pi);
@@ -75,6 +97,19 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     description:
       "Connect to Galaxy server. Use /connect to pick a profile or add a new one, /connect <name> to switch.",
     handler: async (args, ctx) => {
+      // In a curated remote shell (no local exec) the Galaxy connection is pinned
+      // to operator-injected env; the user must not repoint it or overwrite the
+      // injected key. Slash commands are dispatched from browser input before the
+      // model runs and bypass the tool_call gate, so guard here -- without it a
+      // remote client could /connect to an attacker host or a cloud-metadata URL
+      // (SSRF) and overwrite GALAXY_URL/GALAXY_API_KEY in-process.
+      if (isLocalExecDisabled()) {
+        ctx.ui.notify(
+          "Galaxy connection is managed by the host in remote mode and can't be changed here.",
+          "info",
+        );
+        return;
+      }
       const { profiles, active } = loadProfiles();
       const profileNames = Object.keys(profiles);
 
@@ -345,6 +380,12 @@ export default function galaxyAnalystExtension(pi: ExtensionAPI): void {
     }
 
     if (event.toolName === "galaxy_connect" && !event.isError) {
+      // A non-error galaxy_connect means we're now bound to the current env
+      // creds (galaxy-mcp raises on failure -> isError), so advance the
+      // credential-drift baseline. Keyed off isError, not the loose success
+      // string below, which both false-matches ("unsuccessful") and would miss
+      // a success that omits the literal.
+      recordGalaxyConnected();
       try {
         const resultText =
           typeof event.result === "string" ? event.result : JSON.stringify(event.result);

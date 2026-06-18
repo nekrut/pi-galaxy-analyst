@@ -11,6 +11,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as path from "path";
 import { getNotebookPath } from "./state";
 import { appendActivityEvent } from "./activity";
+import { collectSecretValues, redactSecrets } from "./secret-redaction";
+import { loadConfig } from "../../shared/loom-config.js";
 
 // Read-only / filesystem-traversal tools clutter the log without telling the
 // user anything they'd want to re-read later. Omit them.
@@ -65,9 +67,13 @@ function sessionDir(): string | null {
   return nb ? path.dirname(nb) : null;
 }
 
-function summarizeResult(result: unknown): string {
+// Redact BEFORE truncating so a secret can't survive by being split across the
+// truncation boundary. Tool RESULTS (unlike args) carry whatever a command
+// printed -- a `cat`-style leak lands here, and this log also feeds /feedback.
+export function summarizeResult(result: unknown, secrets: string[] = []): string {
   if (result == null) return "";
-  const str = typeof result === "string" ? result : JSON.stringify(result);
+  const raw = typeof result === "string" ? result : JSON.stringify(result);
+  const str = redactSecrets(raw, secrets);
   if (str.length <= RESULT_SUMMARY_MAX) return str;
   return (
     str.slice(0, RESULT_SUMMARY_MAX) + `… [truncated ${str.length - RESULT_SUMMARY_MAX} chars]`
@@ -107,6 +113,7 @@ export function registerActivityHooks(pi: ExtensionAPI): void {
     if (NOISY_TOOLS.has(event.toolName)) return;
     const dir = sessionDir();
     if (!dir) return;
+    const secrets = collectSecretValues(loadConfig(), process.env);
     appendActivityEvent(dir, {
       timestamp: new Date().toISOString(),
       kind: "tool.end",
@@ -115,7 +122,7 @@ export function registerActivityHooks(pi: ExtensionAPI): void {
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
-        resultSummary: summarizeResult(event.result),
+        resultSummary: summarizeResult(event.result, secrets),
       },
     });
   });

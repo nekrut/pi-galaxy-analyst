@@ -6,7 +6,10 @@
  * file being text and dirty.
  */
 
+import type { Marked } from "marked";
 import { renderMarkdown } from "../chat/markdown.js";
+import { extOf, imagePreviewBlob } from "./image-preview.js";
+import { buildPreviewMarked, previewImageBaseDir } from "./markdown-preview.js";
 
 type FileKind = "text" | "image" | "pdf" | "binary";
 
@@ -44,6 +47,7 @@ const TEXT_EXTS = new Set([
   ".csv",
   ".tsv",
   ".tab",
+  ".tabular",
   // bioinformatics text formats
   ".fa",
   ".fasta",
@@ -52,8 +56,13 @@ const TEXT_EXTS = new Set([
   ".ffn",
   ".fastq",
   ".fq",
+  ".fastqsanger",
+  ".fastqillumina",
+  ".fastqsolexa",
+  ".fastqcssanger",
   ".vcf",
   ".bed",
+  ".interval",
   ".bedgraph",
   ".wig",
   ".gff",
@@ -73,42 +82,13 @@ const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]);
 
 const PDF_EXTS = new Set([".pdf"]);
 
-function extOf(path: string): string {
-  const base = path.split("/").pop() ?? "";
-  // Handle .gz / .bz2 / .xz / .zst suffixes — strip and look at the inner ext.
-  // (Useful for things like sample.vcf.gz that should still be recognized as
-  // text in spirit; we treat the compressed version as binary because we
-  // can't decompress in the renderer, but exposing the inner ext is harmless.)
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0) return "";
-  return base.slice(dot).toLowerCase();
-}
-
-function kindOf(path: string): FileKind {
+export function kindOf(path: string): FileKind {
   const ext = extOf(path);
   if (!ext) return "text"; // no extension → treat as text
   if (TEXT_EXTS.has(ext)) return "text";
   if (IMAGE_EXTS.has(ext)) return "image";
   if (PDF_EXTS.has(ext)) return "pdf";
   return "binary";
-}
-
-function mimeForImage(ext: string): string {
-  switch (ext) {
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".gif":
-      return "image/gif";
-    case ".svg":
-      return "image/svg+xml";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
-  }
 }
 
 function formatBytes(n: number): string {
@@ -126,6 +106,9 @@ export class FileViewer {
   private dirty = false;
   private editor: HTMLTextAreaElement | null = null;
   private preview: HTMLDivElement | null = null;
+  // Per-file Marked instance that rewrites relative image srcs against the
+  // markdown file's directory (#283). Undefined → renderMarkdown's default.
+  private previewMarked: Marked | undefined;
   private saveBtn: HTMLButtonElement | null = null;
   private statusEl: HTMLElement | null = null;
   private editBtn: HTMLButtonElement | null = null;
@@ -170,6 +153,7 @@ export class FileViewer {
     this.dirty = false;
     this.editor = null;
     this.preview = null;
+    this.previewMarked = undefined;
     this.saveBtn = null;
     this.statusEl = null;
     this.editBtn = null;
@@ -229,7 +213,7 @@ export class FileViewer {
         this.editor.setSelectionRange(Math.min(selStart, cap), Math.min(selEnd, cap));
         // Re-render markdown preview if it's the currently visible pane.
         if (this.preview && !this.preview.classList.contains("hidden")) {
-          this.preview.innerHTML = renderMarkdown(newText);
+          this.preview.innerHTML = renderMarkdown(newText, this.previewMarked);
         }
       }
     } else if (this.currentKind === "image") {
@@ -264,7 +248,7 @@ export class FileViewer {
         this.statusEl.className = "file-viewer-status saved";
       }
       if (this.preview && !this.preview.classList.contains("hidden")) {
-        this.preview.innerHTML = renderMarkdown(newText);
+        this.preview.innerHTML = renderMarkdown(newText, this.previewMarked);
       }
       banner.remove();
     });
@@ -288,11 +272,9 @@ export class FileViewer {
   private reloadImage(bytes: Uint8Array): void {
     const img = this.container.querySelector<HTMLImageElement>("img.file-viewer-image");
     if (!img) return;
-    const buf = bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength,
-    ) as ArrayBuffer;
-    const blob = new Blob([buf]);
+    // Must keep the MIME type — a typeless blob: URL loads raster formats fine
+    // but breaks SVG, which is what made previews vanish on the next reload (#188).
+    const blob = imagePreviewBlob(this.currentPath ?? "", bytes);
     const nextUrl = URL.createObjectURL(blob);
     const prev = this.currentImageUrl;
     this.currentImageUrl = nextUrl;
@@ -309,6 +291,7 @@ export class FileViewer {
     this.dirty = false;
     this.editor = null;
     this.preview = null;
+    this.previewMarked = undefined;
     this.saveBtn = null;
     this.statusEl = null;
     this.editBtn = null;
@@ -336,6 +319,12 @@ export class FileViewer {
     const ext = extOf(relPath);
     const isMarkdown = ext === ".md";
     const text = new TextDecoder("utf-8").decode(bytes);
+
+    // Resolve relative image srcs in the preview against the markdown file's
+    // own directory, served over the cwd-jailed orbit-artifact:// scheme (#283).
+    if (isMarkdown) {
+      this.previewMarked = buildPreviewMarked(previewImageBaseDir(relPath));
+    }
 
     // Head-preview path: render read-only with a banner. Skip the
     // editor + Save toolbar + markdown preview toggle entirely — the
@@ -447,7 +436,7 @@ export class FileViewer {
     if (!this.editor || !this.preview) return;
     if (mode === "preview") {
       // Render preview from current (possibly dirty) editor contents.
-      const html = renderMarkdown(this.editor.value);
+      const html = renderMarkdown(this.editor.value, this.previewMarked);
       this.preview.innerHTML = html;
       this.editor.classList.add("hidden");
       this.preview.classList.remove("hidden");
@@ -523,13 +512,7 @@ export class FileViewer {
     const wrap = document.createElement("div");
     wrap.className = "file-viewer-image-wrap";
 
-    const ext = extOf(relPath);
-    const mime = mimeForImage(ext);
-    // Copy into a fresh ArrayBuffer to satisfy Blob's BlobPart typing, which
-    // requires a plain ArrayBuffer (not ArrayBufferLike).
-    const buffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(buffer).set(bytes);
-    const blob = new Blob([buffer], { type: mime });
+    const blob = imagePreviewBlob(relPath, bytes);
     const url = URL.createObjectURL(blob);
     this.currentImageUrl = url;
 

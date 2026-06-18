@@ -209,15 +209,18 @@ a:visited {
    window. When a banner is showing it IS that top strip, so on darwin it has to
    double as the titlebar -- same drag + inset treatment .pane-title gets
    otherwise -- or it both collides with the lights and kills the drag region.
-   Only #update-banner needs the left inset (its text is left-aligned); the
-   bypass/sandbox banners center their text, which never reaches under the
-   lights. The buttons/links stay no-drag (mirrors the .pane-title rule). */
+   Only #update-banner and #whatsnew-banner need the left inset (their text is
+   left-aligned); the bypass/sandbox banners center their text, which never
+   reaches under the lights. The buttons/links stay no-drag (mirrors the
+   .pane-title rule). */
 body.platform-darwin #update-banner,
 body.platform-darwin #bypass-banner,
-body.platform-darwin #sandbox-banner {
+body.platform-darwin #sandbox-banner,
+body.platform-darwin #whatsnew-banner {
   -webkit-app-region: drag;
 }
-body.platform-darwin #update-banner {
+body.platform-darwin #update-banner,
+body.platform-darwin #whatsnew-banner {
   padding-left: 78px;
 }
 body.platform-darwin #update-banner button,
@@ -225,7 +228,9 @@ body.platform-darwin #update-banner a,
 body.platform-darwin #bypass-banner button,
 body.platform-darwin #bypass-banner a,
 body.platform-darwin #sandbox-banner button,
-body.platform-darwin #sandbox-banner a {
+body.platform-darwin #sandbox-banner a,
+body.platform-darwin #whatsnew-banner button,
+body.platform-darwin #whatsnew-banner a {
   -webkit-app-region: no-drag;
 }
 
@@ -448,6 +453,32 @@ body.files-collapsed #files-divider {
 
 /* Pane-toggle buttons (files/artifact) live in the chat-pane title bar.
    Subtle by default, brighten on hover, gold when their pane is open. */
+.chat-copy-btn {
+  position: fixed;
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition:
+    background 0.1s,
+    color 0.1s;
+  white-space: nowrap;
+}
+.chat-copy-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .pane-title-btn {
   appearance: none;
   background: transparent;
@@ -704,13 +735,18 @@ body:not(.artifact-collapsed) #artifact-toggle {
 /* Children of .pane-title default to "drag" (titlebar drag region on macOS).
    Re-enable clicks on interactive children. If you add a new interactive
    element (textarea, [role=button], a custom clickable container, etc.) inside
-   any .pane-title, add it here or it will swallow clicks on macOS. */
+   any .pane-title, add it here or it will swallow clicks on macOS.
+
+   Non-interactive text labels (.pane-title-label, .files-title-label) are
+   deliberately NOT listed -- they stay part of the drag region. The chat title
+   centers its label with `flex: 1`, so a no-drag label spans nearly the whole
+   band and leaves only the ~8px edge padding draggable, which is why dragging
+   the window over the chat pane only caught in the gaps (#315). Keep plain
+   text labels out of this list. */
 .pane-title button,
 .pane-title input,
 .pane-title select,
 .pane-title a,
-.pane-title .pane-title-label,
-.pane-title .files-title-label,
 .pane-title .pane-title-actions,
 .pane-title .files-title-actions {
   -webkit-app-region: no-drag;
@@ -1222,6 +1258,72 @@ body.platform-darwin #files-title {
   font-style: italic;
 }
 
+/* /cost breakdown rendered locally in chat (issue #263). The shared markdown
+   table rules are scoped to :not(.system-info), so re-style the table here. */
+.message.system-info .cost-breakdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0 10px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  display: block;
+  overflow-x: auto;
+}
+
+.message.system-info .cost-breakdown table th,
+.message.system-info .cost-breakdown table td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message.system-info .cost-breakdown table th {
+  background: var(--bg-deep);
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.message.system-info .cost-breakdown table tbody tr:nth-child(even) td {
+  background: var(--bg-stripe);
+}
+
+.message.system-info .cost-breakdown table code {
+  font-family: var(--font);
+  font-size: 11.5px;
+  padding: 0 3px;
+  background: var(--bg-deep);
+  border-radius: 3px;
+  color: var(--accent);
+}
+
+.cost-append-btn {
+  margin-top: 4px;
+  padding: 5px 12px;
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.cost-append-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.cost-append-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* ── Thinking Indicator ────────────────────────────────────────────────────── */
 
 .thinking-indicator {
@@ -1594,6 +1696,45 @@ body.platform-darwin #files-title {
   padding: 6px 12px 8px;
 }
 
+#activity-galaxy-history-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--masthead);
+  color: var(--text);
+  overflow: hidden;
+}
+#activity-galaxy-history-section.hidden {
+  display: none;
+}
+
+#galaxy-history-body {
+  padding: 6px 12px 8px;
+}
+
+.galaxy-history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.galaxy-history-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+.galaxy-history-link:hover {
+  text-decoration: underline;
+}
+.galaxy-history-meta {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .galaxy-invocation-row {
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
@@ -1850,8 +1991,15 @@ body.platform-darwin #files-title {
   opacity: 0.85;
 }
 
+/* Stop carries a visible label (not just an icon) so it's unmistakable while a
+   slow turn is "thinking" -- the bare red square went unnoticed (#225). */
 #abort-btn {
   background: var(--error);
+  width: auto;
+  gap: 6px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .hidden {
@@ -2087,6 +2235,30 @@ body.platform-darwin #files-title {
 .report-disclosure p {
   margin-top: 6px;
   line-height: 1.5;
+}
+
+.report-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 20px;
+  text-align: center;
+}
+.report-success-check {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--success-bg);
+  color: var(--success);
+  font-size: 26px;
+  line-height: 48px;
+}
+.report-success-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .prefs-row-with-btn {
@@ -2990,4 +3162,114 @@ body.platform-darwin #files-title {
 .file-viewer-stale-banner .file-viewer-btn {
   font-size: 10px;
   padding: 2px 8px;
+}
+
+/* Remote mode: hide local-filesystem affordances */
+body.remote-mode #files-pane,
+body.remote-mode #files-divider,
+body.remote-mode #files-toggle,
+body.remote-mode #files-show-hidden,
+body.remote-mode #files-refresh {
+  display: none !important;
+}
+
+/* Galaxy creds are server-injected; no local cwd in remote mode */
+body.remote-mode #prefs-section-galaxy,
+body.remote-mode #prefs-section-analysis {
+  display: none;
+}
+
+/* Credentials are server-injected and execution is cloud-forced in remote mode;
+   hide the credential/safety/cwd/update/feedback affordances the desktop UI
+   adds. The shim no-ops these anyway, but they have no business being shown. */
+body.remote-mode #welcome-overlay,
+body.remote-mode #update-banner,
+body.remote-mode #report-issue-btn,
+body.remote-mode #exec-mode-toggle,
+body.remote-mode #cwd-bar,
+body.remote-mode #prefs-section-llm,
+body.remote-mode #prefs-section-skills,
+body.remote-mode #prefs-section-safety {
+  display: none !important;
+}
+
+/* Native remote-only desktop (Windows): no local shell, so hide the local/cloud
+   execution toggle, the bash sandbox banner, and the Safety + Analysis prefs
+   (sandbox/bypass and the local default-cwd + conda picker are all local-exec
+   concerns). KEEP the files pane, Galaxy/LLM config, the cwd bar, and first-run
+   -- the desktop owns a real machine and real credentials. */
+body.remote-desktop #exec-mode-toggle,
+body.remote-desktop #sandbox-banner,
+body.remote-desktop #prefs-section-safety,
+body.remote-desktop #prefs-section-analysis {
+  display: none !important;
+}
+
+/* What's-new banner -- mirrors #update-banner; shown once per upgrade. */
+#whatsnew-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--accent-bg);
+  color: var(--text-bright);
+  border-bottom: 1px solid var(--border-strong);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+#whatsnew-banner.hidden {
+  display: none;
+}
+#whatsnew-banner .wn-banner-text {
+  flex: 1;
+}
+#whatsnew-banner-version {
+  font-weight: 600;
+  color: var(--accent);
+}
+#whatsnew-banner .wn-banner-link {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+}
+#whatsnew-banner .wn-banner-link:hover {
+  background: var(--accent);
+  color: var(--bg-deep);
+}
+#whatsnew-banner .wn-banner-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+#whatsnew-banner .wn-banner-dismiss:hover {
+  color: var(--text-bright);
+}
+/* What's-new modal body */
+.whatsnew-entry {
+  margin-bottom: 16px;
+}
+.whatsnew-entry:last-child {
+  margin-bottom: 0;
+}
+.whatsnew-entry h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  color: var(--accent);
+}
+.whatsnew-entry ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.whatsnew-entry li {
+  margin: 2px 0;
 }

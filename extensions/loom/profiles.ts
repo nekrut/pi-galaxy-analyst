@@ -10,8 +10,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { loadConfig, saveConfig } from "./config";
+import { piAgentDir } from "./agent-dir.js";
 
 export interface GalaxyProfile {
   url: string;
@@ -115,6 +115,15 @@ export function normalizeGalaxyUrl(url: string): string {
   return `https://${trimmed}`;
 }
 
+/**
+ * True for an IPv4 loopback (127.0.0.0/8), localhost, or IPv6 ::1. A bare
+ * `startsWith("127.")` would wrongly accept a resolvable hostname like
+ * `127.evil.example`, which over http would leak the API key in cleartext.
+ */
+function isLoopbackHost(host: string): boolean {
+  return host === "localhost" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) || host === "::1";
+}
+
 export function validateGalaxyUrl(url: string): { ok: true } | { ok: false; reason: string } {
   let parsed: URL;
   try {
@@ -124,7 +133,7 @@ export function validateGalaxyUrl(url: string): { ok: true } | { ok: false; reas
   }
   if (parsed.protocol === "http:") {
     const host = parsed.hostname.toLowerCase();
-    if (host === "localhost" || host.startsWith("127.") || host === "::1") {
+    if (isLoopbackHost(host)) {
       // Loopback HTTP is fine for local Galaxy installs.
       return { ok: true };
     }
@@ -153,11 +162,7 @@ export function saveProfile(name: string, url: string, apiKey: string): void {
   if (!v.ok) throw new Error(v.reason);
   const host = new URL(url).hostname.toLowerCase();
   const trusted =
-    host === "localhost" ||
-    host.startsWith("127.") ||
-    host === "::1" ||
-    host === "galaxyproject.org" ||
-    host.endsWith(".galaxyproject.org");
+    isLoopbackHost(host) || host === "galaxyproject.org" || host.endsWith(".galaxyproject.org");
   if (!trusted) {
     console.warn(
       `[galaxy] Profile "${name}" points at ${host} (not a galaxyproject.org subdomain).`,
@@ -185,25 +190,37 @@ export function resolveProfileApiKey(name: string, profile: GalaxyProfile): stri
   throw new Error(`Profile "${name}" has no API key configured.`);
 }
 
+export type ActiveGalaxyStatus = "usable" | "configured-unusable" | "none";
+
 /**
- * Called once at brain startup. If the active profile is encrypted-only
- * and the shell hasn't injected `GALAXY_API_KEY`, log a clear stderr
- * line so the user knows why Galaxy calls won't work -- otherwise the
- * brain would silently 401 against every request.
+ * Usability of the active Galaxy profile for THIS process. The startup greeting
+ * reads this so its message can't contradict the actual credential state.
+ *
+ * - `usable`: GALAXY_URL + GALAXY_API_KEY are both in env (however they got
+ *   there -- plaintext profile, explicit export, or Orbit's decrypt-inject).
+ * - `configured-unusable`: no usable env key, but the active profile carries an
+ *   encrypted key this process can't decrypt (Orbit-only safeStorage). Galaxy
+ *   calls would 401; the fix is to run from Orbit or export GALAXY_API_KEY.
+ * - `none`: no usable active profile to speak of.
+ *
+ * Pure given (profiles, env); `activeGalaxyStatus()` is the thin live wrapper.
  */
-export function warnOnUnusableActiveProfile(): void {
-  const { active, profiles } = loadProfiles();
-  if (!active) return;
-  const profile = profiles[active];
-  if (!profile) return;
-  if (profile.apiKey) return;
-  if (process.env.GALAXY_API_KEY) return;
-  if (!profile.apiKeyEncrypted) return;
-  console.error(
-    `[galaxy] Active profile "${active}" has only an encrypted API key and ` +
-      `GALAXY_API_KEY is not set in the environment. Galaxy calls will fail. ` +
-      `Run from Orbit (auto-injects the decrypted key) or export GALAXY_API_KEY explicitly.`,
-  );
+export function getActiveGalaxyStatus(
+  profiles: GalaxyProfiles,
+  env: NodeJS.ProcessEnv,
+): ActiveGalaxyStatus {
+  if (env.GALAXY_URL && env.GALAXY_API_KEY) return "usable";
+  const active = profiles.active;
+  if (!active) return "none";
+  const profile = profiles.profiles[active];
+  if (profile && !profile.apiKey && !env.GALAXY_API_KEY && profile.apiKeyEncrypted) {
+    return "configured-unusable";
+  }
+  return "none";
+}
+
+export function activeGalaxyStatus(): ActiveGalaxyStatus {
+  return getActiveGalaxyStatus(loadProfiles(), process.env);
 }
 
 /**
@@ -274,8 +291,7 @@ export function deleteProfile(name: string): boolean {
  */
 export function syncMcpConfig(url: string): void {
   try {
-    const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
-    const mcpPath = path.join(agentDir, "mcp.json");
+    const mcpPath = path.join(piAgentDir(), "mcp.json");
     if (!fs.existsSync(mcpPath)) return;
 
     const config = JSON.parse(fs.readFileSync(mcpPath, "utf-8"));

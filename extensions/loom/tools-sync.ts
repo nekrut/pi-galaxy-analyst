@@ -15,6 +15,18 @@ import {
   linkGalaxyPage,
   resumeGalaxyPage,
 } from "./galaxy-pages-sync";
+import { listRecentPages } from "./galaxy-pages-api";
+import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
+
+export const NOTEBOOK_PUSH_TO_GALAXY_DESCRIPTION = `Push the local notebook.md to a Galaxy page. If the notebook already
+has a loom-galaxy-page binding block, updates that page in place (creates a
+new revision). If there's no binding yet, pass history_id (and optionally title,
+slug, annotation) to create a new page attached to that history and bind it.
+Strips loom-galaxy-page blocks from the body sent to Galaxy, but keeps
+loom-invocation blocks (they're analysis content). Unconditional local-wins:
+any concurrent Galaxy-UI edits since the last sync are overwritten.
+
+${GALAXY_PAGE_MARKDOWN_GUIDANCE}`;
 
 function errorContent(e: unknown) {
   return {
@@ -30,15 +42,55 @@ function errorContent(e: unknown) {
 
 export function registerNotebookSyncTools(pi: ExtensionAPI): void {
   pi.registerTool({
+    name: "notebook_list_galaxy_pages",
+    label: "List recent Galaxy pages",
+    description: `List the user's Galaxy pages (history notebooks), most-recently-edited
+first, so you can find one to resume when the user asks to pick up Galaxy work
+but hasn't given a page id. Each entry has page_id, title, slug, update_time,
+and history_id. history_id is the field that matters: an entry WITH a history_id
+is a real history notebook you can resume and read its bound history back; an
+entry with history_id null is a workflow invocation report (no bound history) --
+prefer a history-bound page for resume. After picking one (usually the most
+recent history-bound page), confirm it with the user, then call
+notebook_resume_from_galaxy with its page_id.`,
+    parameters: Type.Object({
+      limit: Type.Optional(
+        Type.Number({
+          description: "Max pages to return, most-recent first. Defaults to 20.",
+        }),
+      ),
+    }),
+    async execute(_callId, params, _signal, _onUpdate, _ctx) {
+      try {
+        const pages = await listRecentPages({ limit: params.limit ?? 20 });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  pages,
+                  hint:
+                    "Entries with a history_id are resumable history notebooks; " +
+                    "history_id null means a workflow invocation report (not resumable as a bound history).",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          details: { count: pages.length },
+        };
+      } catch (e) {
+        return errorContent(e);
+      }
+    },
+  });
+
+  pi.registerTool({
     name: "notebook_push_to_galaxy",
     label: "Push notebook to Galaxy page",
-    description: `Push the local notebook.md to a Galaxy page. If the notebook already
-has a loom-galaxy-page binding block, updates that page in place (creates a
-new revision). If there's no binding yet, pass history_id (and optionally title,
-slug, annotation) to create a new page attached to that history and bind it.
-Strips loom-galaxy-page blocks from the body sent to Galaxy, but keeps
-loom-invocation blocks (they're analysis content). Unconditional local-wins:
-any concurrent Galaxy-UI edits since the last sync are overwritten.`,
+    description: NOTEBOOK_PUSH_TO_GALAXY_DESCRIPTION,
     parameters: Type.Object({
       history_id: Type.Optional(
         Type.String({

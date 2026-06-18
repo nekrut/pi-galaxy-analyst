@@ -71,10 +71,13 @@ export interface OrbitAPI {
     | { ok: false; error: string; size?: number }
   >;
   writeFile(relPath: string, content: string): Promise<{ ok: true } | { ok: false; error: string }>;
-  onFilesChanged(callback: () => void): () => void;
+  // changedPaths is the batch of changed cwd-relative paths, or null when the
+  // watcher couldn't name what changed (#313).
+  onFilesChanged(callback: (changedPaths: string[] | null) => void): () => void;
   getConfig(): Promise<Record<string, unknown>>;
   saveConfig(config: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
   refreshSkills: () => Promise<{ ok: boolean; error?: string }>;
+  getGalaxyUser(): Promise<import("../main/galaxy-user.js").GalaxyUserStatus>;
   setBypassPermissions(
     enabled: boolean,
   ): Promise<{ ok: boolean; enabled: boolean; cancelled?: boolean }>;
@@ -152,7 +155,10 @@ export interface OrbitAPI {
     hasUpdate: boolean;
     releaseUrl: string;
   } | null>;
+  getVersion(): Promise<{ version: string; isPackaged: boolean }>;
   openReleasePage(url?: string): Promise<{ opened: boolean }>;
+  openGalaxyHistory(url: string): Promise<{ opened: boolean }>;
+  getGalaxyStatus(): Promise<{ connected: boolean; url: string | null }>;
   restartToUpdate(): Promise<{ restarting: boolean }>;
   onUpdateDownloaded(cb: (info: { version: string }) => void): void;
   onUpdateError(cb: (info: { message: string }) => void): void;
@@ -170,13 +176,14 @@ const api: OrbitAPI = {
   readFile: (relPath, opts) => ipcRenderer.invoke("files:read", relPath, opts),
   writeFile: (relPath, content) => ipcRenderer.invoke("files:write", relPath, content),
   onFilesChanged: (callback) => {
-    const handler = () => callback();
+    const handler = (_e: unknown, changedPaths: string[] | null) => callback(changedPaths ?? null);
     ipcRenderer.on("files:changed", handler);
     return () => ipcRenderer.removeListener("files:changed", handler);
   },
   getConfig: () => ipcRenderer.invoke("config:get"),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
   refreshSkills: () => ipcRenderer.invoke("skills:refresh"),
+  getGalaxyUser: () => ipcRenderer.invoke("galaxy:current-user"),
   setBypassPermissions: (enabled) => ipcRenderer.invoke("guardian:set-bypass", enabled),
   validateApiKey: (provider, key, baseUrl) =>
     ipcRenderer.invoke("apiKey:validate", provider, key, baseUrl),
@@ -259,7 +266,10 @@ const api: OrbitAPI = {
 
   listAllModels: () => ipcRenderer.invoke("models:list-all"),
   checkVersion: () => ipcRenderer.invoke("version:check"),
+  getVersion: () => ipcRenderer.invoke("version:current"),
   openReleasePage: (url) => ipcRenderer.invoke("version:open-release", url),
+  openGalaxyHistory: (url) => ipcRenderer.invoke("galaxy:open-history", url),
+  getGalaxyStatus: () => ipcRenderer.invoke("galaxy:status"),
   restartToUpdate: () => ipcRenderer.invoke("update:restart"),
   onUpdateDownloaded: (cb) => {
     ipcRenderer.on("update:downloaded", (_e, info) => cb(info));
