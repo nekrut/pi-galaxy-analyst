@@ -420,8 +420,16 @@ export function registerIpcHandlers(agent: AgentManager): void {
     }
   });
 
-  ipcMain.handle("skills:refresh", async () => {
+  ipc.handle("skills:refresh", async () => {
     try {
+      // Don't yank the agent out from under an in-flight turn -- stop()/start()
+      // would silently kill active work. Make the user stop the turn first.
+      if (agent.getStatusSnapshot().turnActive) {
+        return {
+          ok: false,
+          error: "The agent is mid-task -- stop the current turn before refreshing skills.",
+        };
+      }
       const config = loadConfig();
       const repos = (config.skills?.repos ?? []) as Array<{
         name?: string;
