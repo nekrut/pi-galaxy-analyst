@@ -180,7 +180,18 @@ export async function treeWalkSkillPaths(
       `tree-walk ${slug.owner}/${slug.repo}@${repo.branch} failed: HTTP ${res.status}`,
     );
   }
-  const json = (await res.json()) as { tree?: Array<{ path?: string; type?: string }> };
+  const json = (await res.json()) as {
+    tree?: Array<{ path?: string; type?: string }>;
+    truncated?: boolean;
+  };
+  if (json.truncated) {
+    // GitHub caps recursive trees (~100k entries / 7MB) and returns a partial
+    // list -- some SKILL.md paths would silently vanish from the catalog.
+    console.warn(
+      `[skills] tree-walk ${slug.owner}/${slug.repo}@${repo.branch} was truncated; ` +
+        `some skills may be missing from the catalog`,
+    );
+  }
   const tree = Array.isArray(json.tree) ? json.tree : [];
   return tree
     .filter(
