@@ -161,7 +161,36 @@ sudo apt-get install -f
 orbit
 ```
 
-The Orbit window opens on your Windows desktop via WSLg -- no further configuration needed.
+On most setups the Orbit window opens on your Windows desktop via WSLg with no
+further configuration. On a fresh or minimal WSL2 distro it may not appear the
+first time -- see [If the window doesn't appear](#if-the-window-doesnt-appear)
+below.
+
+### If the window doesn't appear
+
+On a fresh or minimal WSL2 distro, WSLg's GUI session sometimes fails to come
+up on the first launch: `orbit` starts with no error in the terminal, but no
+window appears and the taskbar entry shows a `[WARN COPY MODE] ...` title. A
+full WSL restart is what reliably clears it. Here's the recovery, in order:
+
+1. Make sure the common GUI client libraries are present. Installing any GTK
+   app pulls them in, and `gedit` is a convenient one:
+
+   ```bash
+   sudo apt-get update && sudo apt-get install -y gedit
+   ```
+
+2. From **PowerShell** on Windows, fully restart WSL so WSLg re-initializes:
+
+   ```powershell
+   wsl --shutdown
+   ```
+
+   This stops **all** running WSL2 distros and the WSL VM, so save work in any
+   other WSL sessions first.
+
+3. Reopen your WSL2 terminal and run `orbit` again -- the window should now
+   appear. (Launching `gedit` is a quick way to confirm WSLg itself is back.)
 
 ### Notes
 
