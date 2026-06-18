@@ -321,11 +321,12 @@ describe("catalog cache", () => {
 });
 
 describe("BUILTIN_CATALOG", () => {
-  it("ships the curated galaxy-skills duo, all loom-tagged", () => {
+  it("ships the curated galaxy-skills set, all loom-tagged", () => {
     const entries = BUILTIN_CATALOG["galaxy-skills"];
     expect(entries.map((e) => e.path)).toEqual([
       "collection-manipulation/SKILL.md",
       "galaxy-integration/mcp-reference/SKILL.md",
+      "udt-authoring/SKILL.md",
     ]);
     for (const e of entries) expect(e.surfaces).toContain("loom");
   });
