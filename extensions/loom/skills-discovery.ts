@@ -74,8 +74,8 @@ export function createSkillsCacheTag(url: string, branch: string): string {
   return crypto.createHash("sha256").update(`${url}@${branch}`).digest("hex").slice(0, 8);
 }
 
-/** Resolve a github.com repo URL into its raw.githubusercontent.com base, or null. */
-export function githubRawBase(repoUrl: string, branch: string): string | null {
+/** Parse a github.com repo URL into its owner/repo, or null. */
+export function parseGithubRepo(repoUrl: string): { owner: string; repo: string } | null {
   let parsed: URL;
   try {
     parsed = new URL(repoUrl);
@@ -84,12 +84,26 @@ export function githubRawBase(repoUrl: string, branch: string): string | null {
   }
   if (parsed.hostname !== "github.com") return null;
   const segs = parsed.pathname.replace(/^\/+|\/+$/g, "").split("/");
-  if (segs.length < 2) return null;
-  const [owner, repo] = segs;
-  if (!owner || !repo) return null;
-  const cleanRepo = repo.replace(/\.git$/i, "");
+  if (segs.length < 2 || !segs[0] || !segs[1]) return null;
+  return { owner: segs[0], repo: segs[1].replace(/\.git$/i, "") };
+}
+
+/** Resolve a github.com repo URL into its raw.githubusercontent.com base, or null. */
+export function githubRawBase(repoUrl: string, branch: string): string | null {
+  const slug = parseGithubRepo(repoUrl);
+  if (!slug) return null;
   const cleanBranch = (branch || "main").replace(/^\/+|\/+$/g, "");
-  return `https://raw.githubusercontent.com/${owner}/${cleanRepo}/${cleanBranch}`;
+  // Reject path traversal in the branch: a git ref never contains "..", and an
+  // unescaped (or %2e-escaped) ".." here would walk raw.githubusercontent.com
+  // out of the allowlisted owner/repo (e.g. branch "../../other/repo/main").
+  let decodedBranch = cleanBranch;
+  try {
+    decodedBranch = decodeURIComponent(cleanBranch);
+  } catch {
+    // malformed escape -- fall through to the raw form for the check
+  }
+  if (decodedBranch.includes("..")) return null;
+  return `https://raw.githubusercontent.com/${slug.owner}/${slug.repo}/${cleanBranch}`;
 }
 
 /** The on-disk cache dir for a repo: ~/.loom/cache/skills/<name>@<hash>/ */
@@ -147,25 +161,12 @@ export async function fetchSkillFile(
   return { ok: true, text, cached: false };
 }
 
-function githubOwnerRepo(repoUrl: string): { owner: string; repo: string } | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(repoUrl);
-  } catch {
-    return null;
-  }
-  if (parsed.hostname !== "github.com") return null;
-  const segs = parsed.pathname.replace(/^\/+|\/+$/g, "").split("/");
-  if (segs.length < 2 || !segs[0] || !segs[1]) return null;
-  return { owner: segs[0], repo: segs[1].replace(/\.git$/i, "") };
-}
-
 /** List every SKILL.md path in a repo via the GitHub trees API. Throws on HTTP failure. */
 export async function treeWalkSkillPaths(
   repo: ConfiguredSkillRepo,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const slug = githubOwnerRepo(repo.url);
+  const slug = parseGithubRepo(repo.url);
   if (!slug) return [];
   const api =
     `https://api.github.com/repos/${slug.owner}/${slug.repo}/git/trees/` +
