@@ -144,9 +144,12 @@ export async function fetchSkillFile(
     }
   }
 
+  // Encode each path segment -- a SKILL.md path could contain URL-significant
+  // characters (#, ?) that would otherwise corrupt the request.
+  const encodedPath = cleanPath.split("/").map(encodeURIComponent).join("/");
   let response: Response;
   try {
-    response = await fetch(`${rawBase}/${cleanPath}`, { signal });
+    response = await fetch(`${rawBase}/${encodedPath}`, { signal });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -186,10 +189,11 @@ export async function treeWalkSkillPaths(
   };
   if (json.truncated) {
     // GitHub caps recursive trees (~100k entries / 7MB) and returns a partial
-    // list -- some SKILL.md paths would silently vanish from the catalog.
-    console.warn(
-      `[skills] tree-walk ${slug.owner}/${slug.repo}@${repo.branch} was truncated; ` +
-        `some skills may be missing from the catalog`,
+    // list. Persisting it would drop SKILL.md paths, and a dropped surface-tagged
+    // skill flips selectSkills into tag-or-all. Throw (like a failed file fetch)
+    // so refreshCatalog keeps the last-known-good catalog rather than a partial.
+    throw new Error(
+      `tree-walk ${slug.owner}/${slug.repo}@${repo.branch} was truncated; refusing a partial catalog`,
     );
   }
   const tree = Array.isArray(json.tree) ? json.tree : [];

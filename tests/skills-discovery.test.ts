@@ -197,6 +197,21 @@ describe("treeWalkSkillPaths", () => {
     );
     await expect(treeWalkSkillPaths(REPO)).rejects.toThrow(/403/);
   });
+
+  it("throws when the tree is truncated rather than persisting a partial walk", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ tree: [{ path: "a/SKILL.md", type: "blob" }], truncated: true }),
+            { status: 200 },
+          ),
+        ),
+    );
+    await expect(treeWalkSkillPaths(REPO)).rejects.toThrow(/truncated/i);
+  });
 });
 
 describe("discoverCatalog", () => {
