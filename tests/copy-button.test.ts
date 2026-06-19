@@ -12,7 +12,7 @@ function input(overrides: Partial<CopyButtonInput> = {}): CopyButtonInput {
     rangeCount: 1,
     inContainer: true,
     rect: { top: 100, bottom: 120, right: 300, width: 200, height: 20 },
-    container: { top: 0, bottom: 800 },
+    container: { top: 0, bottom: 800, left: 0, right: 1000 },
     viewport: VIEWPORT,
     ...overrides,
   };
@@ -92,20 +92,47 @@ describe("computeCopyButtonPlacement", () => {
   // out of the visible scrollport. The button must hide rather than strand at a
   // stale position over the rest of the pane.
   it("hides when the selection has scrolled above the chat scrollport", () => {
-    const container = { top: 100, bottom: 700 };
+    const container = { top: 100, bottom: 700, left: 0, right: 1000 };
     const rect = { top: 30, bottom: 50, right: 300, width: 200, height: 20 };
     expect(computeCopyButtonPlacement(input({ container, rect }))).toEqual({ hidden: true });
   });
 
   it("hides when the selection has scrolled below the chat scrollport", () => {
-    const container = { top: 100, bottom: 700 };
+    const container = { top: 100, bottom: 700, left: 0, right: 1000 };
     const rect = { top: 740, bottom: 760, right: 300, width: 200, height: 20 };
     expect(computeCopyButtonPlacement(input({ container, rect }))).toEqual({ hidden: true });
   });
 
   it("stays shown when the selection straddles the scrollport's top edge (still partly visible)", () => {
-    const container = { top: 100, bottom: 700 };
+    const container = { top: 100, bottom: 700, left: 0, right: 1000 };
     const rect = { top: 80, bottom: 140, right: 300, width: 200, height: 60 };
     expect(computeCopyButtonPlacement(input({ container, rect }))).toMatchObject({ hidden: false });
+  });
+
+  // #339: a selection inside a wide / horizontally-scrollable block (e.g. a long
+  // line in a code block) lays its text out far beyond the visible chat panel --
+  // Range rects aren't clipped by ancestor overflow. Clamping to the viewport
+  // alone flings the button into the right-hand pane. It must clamp to the chat
+  // container's right edge instead.
+  it("clamps the right edge to the chat container, not the viewport, when the selection overflows right", () => {
+    const container = { top: 0, bottom: 800, left: 0, right: 600 };
+    const rect = { top: 100, bottom: 120, right: 1400, width: 1200, height: 20 };
+    expect(computeCopyButtonPlacement(input({ container, rect }))).toEqual({
+      hidden: false,
+      top: 124,
+      left: 516,
+    });
+  });
+
+  // The container can be inset from the viewport's left edge too (a left gutter
+  // or shell). The left clamp must use the container's left, not the viewport's.
+  it("clamps the left edge to the chat container when the container is inset from the left", () => {
+    const container = { top: 0, bottom: 800, left: 300, right: 1000 };
+    const rect = { top: 100, bottom: 120, right: 320, width: 20, height: 20 };
+    expect(computeCopyButtonPlacement(input({ container, rect }))).toEqual({
+      hidden: false,
+      top: 124,
+      left: 304,
+    });
   });
 });

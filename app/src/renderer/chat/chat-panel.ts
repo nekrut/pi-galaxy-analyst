@@ -543,7 +543,7 @@ export class ChatPanel {
           width: rect.width,
           height: rect.height,
         },
-        container: { top: crect.top, bottom: crect.bottom },
+        container: { top: crect.top, bottom: crect.bottom, left: crect.left, right: crect.right },
         viewport: { width: window.innerWidth, height: window.innerHeight },
       });
       if (placement.hidden) {
