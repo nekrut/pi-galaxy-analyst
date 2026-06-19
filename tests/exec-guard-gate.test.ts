@@ -126,3 +126,78 @@ describe("registerExecGuard", () => {
     expect(select).not.toHaveBeenCalled();
   });
 });
+
+describe("registerExecGuard -- destructive Galaxy ops (#338)", () => {
+  const delEvent = (id: string) => ({
+    type: "tool_call",
+    toolName: "galaxy_update_history",
+    toolCallId: id,
+    input: { deleted: true, history_id: "h" },
+  });
+  const purgeEvent = (id: string) => ({
+    type: "tool_call",
+    toolName: "galaxy_update_history",
+    toolCallId: id,
+    input: { purged: true, history_id: "h" },
+  });
+
+  it("uses a yes/no confirm (not the 4-choice select) and blocks on cancel", async () => {
+    const c = ctx(); // confirm -> false
+    const r = await handler(delEvent("d1"), c);
+    expect(c.ui.confirm).toHaveBeenCalled();
+    expect(c.ui.select).not.toHaveBeenCalled();
+    expect(r?.block).toBe(true);
+  });
+
+  it("proceeds when the user confirms", async () => {
+    const c = ctx({ ui: { select: vi.fn(), confirm: vi.fn(async () => true), notify: vi.fn() } });
+    const r = await handler(delEvent("d2"), c);
+    expect(r?.block).toBeFalsy();
+  });
+
+  it("re-prompts every time -- a destructive op is never cached for the session", async () => {
+    const confirm = vi.fn();
+    confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const c = ctx({ ui: { select: vi.fn(), confirm, notify: vi.fn() } });
+    const r1 = await handler(delEvent("dup"), c);
+    const r2 = await handler(delEvent("dup"), c); // identical input
+    expect(r1?.block).toBeFalsy();
+    expect(r2?.block).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("purge confirmation is honest about irreversibility", async () => {
+    const confirm = vi.fn(async () => false);
+    const c = ctx({ ui: { select: vi.fn(), confirm, notify: vi.fn() } });
+    await handler(purgeEvent("d4"), c);
+    const msg = confirm.mock.calls[0][1] as string;
+    expect(msg).toMatch(/purge/i);
+    expect(msg).toMatch(/cannot be undone|permanent/i);
+  });
+
+  it("delete confirmation flags the whole-history scope", async () => {
+    const confirm = vi.fn(async () => false);
+    const c = ctx({ ui: { select: vi.fn(), confirm, notify: vi.fn() } });
+    await handler(delEvent("d5"), c);
+    expect(confirm.mock.calls[0][1] as string).toMatch(/entire history/i);
+  });
+
+  it("non-interactive denies a destructive op without prompting", async () => {
+    const confirm = vi.fn(async () => true);
+    const c = ctx({ hasUI: false, ui: { select: vi.fn(), confirm, notify: vi.fn() } });
+    const r = await handler(delEvent("d6"), c);
+    expect(r?.block).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("shows its own destructive confirm even before local-exec consent is acknowledged", async () => {
+    fs.writeFileSync(path.join(sandbox, ".loom", "config.json"), JSON.stringify({}));
+    const confirm = vi.fn(async () => false);
+    const c = ctx({ ui: { select: vi.fn(), confirm, notify: vi.fn() } });
+    const r = await handler(delEvent("d7"), c);
+    expect(r?.block).toBe(true);
+    // exactly one confirm -- the destructive one, not a separate consent disclosure first
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0][1] as string).toMatch(/entire history/i);
+  });
+});

@@ -264,3 +264,42 @@ describe("web-mode-gate registration (default export)", () => {
     expect(await handler({ toolName: "galaxy_run_tool", input: {} })).toBeUndefined();
   });
 });
+
+describe("shouldBlockTool -- destructive Galaxy ops (#338)", () => {
+  const allowlist = ["/tmp/loom-session/notebook.md"];
+  const cwd = "/tmp/loom-session";
+
+  it("blocks a whole-history delete (remote mode has no confirmation UI)", () => {
+    const r = shouldBlockTool(
+      "galaxy_update_history",
+      { deleted: true, history_id: "h" },
+      allowlist,
+      cwd,
+    );
+    expect(r?.block).toBe(true);
+  });
+
+  it("blocks a history purge", () => {
+    expect(
+      shouldBlockTool("galaxy_update_history", { purged: true, history_id: "h" }, allowlist, cwd)
+        ?.block,
+    ).toBe(true);
+  });
+
+  it("blocks a delete dispatched through the code-mode run_galaxy_tool({code}) envelope", () => {
+    const r = shouldBlockTool(
+      "galaxy_run_galaxy_tool",
+      { code: "call_tool('update_history', {'deleted': True})" },
+      allowlist,
+      cwd,
+    );
+    expect(r?.block).toBe(true);
+  });
+
+  it("still permits a non-destructive update_history (rename) and reads", () => {
+    expect(
+      shouldBlockTool("galaxy_update_history", { name: "renamed" }, allowlist, cwd),
+    ).toBeUndefined();
+    expect(shouldBlockTool("galaxy_get_histories", {}, allowlist, cwd)).toBeUndefined();
+  });
+});

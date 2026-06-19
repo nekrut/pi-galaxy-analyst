@@ -1,6 +1,12 @@
 import { classifyBash } from "./bash-risk";
 import { isSensitivePath, isCredentialStore, isProtectedWritePath } from "./sensitive-read";
 import type { PolicyDeps, PolicyRequest, PolicyResult } from "./types";
+import {
+  classifyGalaxyDestructive,
+  describeGalaxyDestructive,
+  isGalaxyDestructiveCurl,
+} from "../../../shared/galaxy-destructive.js";
+import type { GalaxyDestructiveOp } from "../../../shared/galaxy-destructive.js";
 
 // A dedicated credential store's CONTENTS are never readable by the agent --
 // denied for every tier, not downgraded to an ask. This is the floor that closes
@@ -40,6 +46,21 @@ function finalizeAsk(req: PolicyRequest, category: string, reason: string): Poli
     };
   }
   return { decision: "ask", category, reason };
+}
+
+// A destructive, irreversible Galaxy operation (#338). Always confirm -- regardless of
+// model tier, so it deliberately does NOT go through finalizeAsk (no weak->deny downgrade).
+// A non-interactive session has no one to approve, so it denies rather than running silently.
+function destructiveGalaxy(req: PolicyRequest, op: GalaxyDestructiveOp): PolicyResult {
+  const headline = describeGalaxyDestructive(op).headline;
+  if (!req.interactive) {
+    return {
+      decision: "deny",
+      category: "galaxy:destructive",
+      reason: `${headline} (denied: no interactive session to approve)`,
+    };
+  }
+  return { decision: "ask", category: "galaxy:destructive", reason: headline };
 }
 
 export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
@@ -82,6 +103,14 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     }
     if (c.kind === "safe") {
       return { decision: "allow", category: "bash:safe", reason: c.reason };
+    }
+    // Destructive Galaxy API call via raw curl/wget (DELETE /api/histories/{id}). A
+    // guardrail, not a boundary -- routes the unknown command to the same destructive
+    // confirm as the MCP path (asks even a weak model) instead of a generic "unknown" ask.
+    // Catastrophic pipes were already denied above, so they never reach here.
+    {
+      const op = isGalaxyDestructiveCurl(command);
+      if (op) return destructiveGalaxy(req, op);
     }
     // Unknown command. A trusted workspace relaxes by one notch only, and only
     // for this category: trusted model ask->allow, weak model deny->ask (the
@@ -162,6 +191,14 @@ export function decide(req: PolicyRequest, deps: PolicyDeps): PolicyResult {
     if (inside)
       return { decision: "allow", category: "write:in-jail", reason: "write inside workspace" };
     return finalizeAsk(req, "write:escape", `write outside workspace: ${p}`);
+  }
+
+  // Destructive Galaxy MCP operations (whole-history delete/purge) -- called directly or
+  // dispatched through the code-mode run_galaxy_tool envelope -- must be confirmed
+  // regardless of tier (#338). Non-destructive Galaxy/MCP tools fall through to the allow.
+  {
+    const op = classifyGalaxyDestructive(toolName, req.toolInput);
+    if (op) return destructiveGalaxy(req, op);
   }
 
   // Everything else is allowed: Galaxy/notebook tools, web fetchers, MCP. These are

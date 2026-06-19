@@ -84,6 +84,25 @@ export function registerExecGuard(pi: ExtensionAPI): void {
       return { block: true, reason: result.reason };
     }
 
+    // Destructive Galaxy op (#338): its own yes/no confirm, never cached and never
+    // offered "allow for session"/"trust workspace" -- every irreversible action
+    // re-prompts. Independent of the one-time local-exec consent disclosure (that's
+    // about shell execution; this is its own, more pointed prompt). The decision here
+    // is always "ask" -- the non-interactive case already denied above.
+    if (result.category === "galaxy:destructive") {
+      const proceed = await ctx.ui.confirm(
+        "Confirm destructive Galaxy operation",
+        `${ctx.model?.id ?? "The model"} wants to: ${result.reason}\n\nContinue?`,
+        {},
+      );
+      if (proceed) {
+        audit(event.toolName, input, result, "allowed:destructive-confirm");
+        return;
+      }
+      audit(event.toolName, input, result, "blocked:destructive-user");
+      return { block: true, reason: "Destructive Galaxy operation cancelled by user." };
+    }
+
     // ask: session memory first.
     if (sessionAllow.has(sig(event.toolName, input))) {
       audit(event.toolName, input, result, "allowed:session");
