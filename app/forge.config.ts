@@ -206,7 +206,7 @@ function pruneNodeBundle(): void {
   }
 }
 
-// Bundle uv/uvx so Galaxy MCP (`uvx galaxy-mcp>=1.8.0`) doesn't need a
+// Bundle uv/uvx so Galaxy MCP (`uvx galaxy-mcp>=1.9.0`) doesn't need a
 // system-installed uv. Pulls the latest release tarball from astral-sh/uv.
 // "latest" resolves to a specific tag at fetch time -- the cached tarball
 // won't auto-refresh; remove `.loom-stage/cache/` to pick up newer uv.
