@@ -318,7 +318,7 @@ if (!isInformationalCommand) {
   if (hasGalaxyCredentials) {
     mcpConfig.mcpServers.galaxy = {
       command: "uvx",
-      args: ["galaxy-mcp>=1.8.0"],
+      args: ["galaxy-mcp>=1.9.0"],
       directTools: true,
       // Local-path upload over MCP times out on large files (-32001); the
       // loom-native galaxy_upload_local_file tool handles those instead. URL
