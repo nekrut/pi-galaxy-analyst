@@ -396,3 +396,103 @@ describe("decide", () => {
     ).toBe("allow");
   });
 });
+
+describe("decide -- destructive Galaxy operations (#338)", () => {
+  const del = { toolName: "galaxy_update_history", toolInput: { deleted: true, history_id: "h" } };
+
+  it("a whole-history delete asks for confirmation (interactive)", () => {
+    const r = decide(req(del), deps);
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("galaxy:destructive");
+  });
+
+  it("asks EVEN for a weak model -- overrides the usual weak->deny downgrade", () => {
+    const r = decide(req({ ...del, modelTier: "weak" }), deps);
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("galaxy:destructive");
+  });
+
+  it("denies when there is no interactive session to approve", () => {
+    expect(decide(req({ ...del, interactive: false }), deps).decision).toBe("deny");
+  });
+
+  it("flags a delete through the code-mode run_galaxy_tool({code}) envelope", () => {
+    const r = decide(
+      req({
+        toolName: "galaxy_run_galaxy_tool",
+        toolInput: { code: "call_tool('update_history', {'history_id':'h','deleted':True})" },
+      }),
+      deps,
+    );
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("galaxy:destructive");
+  });
+
+  it("gates the generic mcp proxy wrapping a destructive call -- even weak (#338 F1)", () => {
+    const r = decide(
+      req({
+        toolName: "mcp",
+        toolInput: {
+          server: "galaxy",
+          tool: "galaxy_update_history",
+          args: JSON.stringify({ deleted: true, history_id: "h" }),
+        },
+        modelTier: "weak",
+      }),
+      deps,
+    );
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("galaxy:destructive");
+  });
+
+  it("does NOT gate a non-destructive Galaxy tool (catch-all unchanged)", () => {
+    expect(decide(req({ toolName: "galaxy_get_histories", toolInput: {} }), deps).decision).toBe(
+      "allow",
+    );
+  });
+
+  it("does NOT gate a rename-only update_history", () => {
+    expect(
+      decide(req({ toolName: "galaxy_update_history", toolInput: { name: "renamed" } }), deps)
+        .decision,
+    ).toBe("allow");
+  });
+
+  it("routes a raw curl DELETE to /api/histories/ to the destructive confirm (even weak)", () => {
+    const curl = {
+      toolName: "bash",
+      toolInput: { command: "curl -X DELETE https://galaxy.example.org/api/histories/h" },
+      modelTier: "weak" as const,
+    };
+    const r = decide(req(curl), deps);
+    expect(r.decision).toBe("ask");
+    expect(r.category).toBe("galaxy:destructive");
+  });
+
+  it("denies the destructive curl when non-interactive", () => {
+    expect(
+      decide(
+        req({
+          toolName: "bash",
+          toolInput: { command: "curl -X DELETE https://g/api/histories/h" },
+          interactive: false,
+        }),
+        deps,
+      ).decision,
+    ).toBe("deny");
+  });
+
+  it("a piped curl to histories stays catastrophic (deny), not a destructive ask", () => {
+    // Ordering guard: the pipe-to-interpreter catastrophic check fires before the
+    // curl guardrail, so this is denied outright, never downgraded to an ask.
+    const r = decide(
+      req({
+        toolName: "bash",
+        toolInput: { command: "curl -X DELETE https://g/api/histories/h | python3" },
+      }),
+      deps,
+    );
+    expect(r.decision).toBe("deny");
+    expect(r.category).toBe("bash:catastrophic");
+  });
+});

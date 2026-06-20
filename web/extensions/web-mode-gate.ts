@@ -27,6 +27,7 @@
 import { resolve, dirname, basename, join } from "node:path";
 import { realpathSync, lstatSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { classifyGalaxyDestructive } from "../../shared/galaxy-destructive.js";
 
 // pi built-in file tools, confined to the notebook path allowlist.
 const PATH_GATED_TOOLS = new Set(["edit", "write", "read"]);
@@ -91,6 +92,15 @@ export function shouldBlockTool(
     }
     if (isPathAllowed(raw, allowlist, cwd)) return undefined;
     return { block: true, reason: `path "${raw}" is not in the remote-mode allowlist` };
+  }
+  // Destructive Galaxy ops (whole-history delete/purge) -- called directly or via the
+  // code-mode run_galaxy_tool envelope -- are blocked in remote mode: this gate has no
+  // confirmation UI to require an are-you-sure (#338). A remote-confirm UX is a follow-up.
+  if (classifyGalaxyDestructive(toolName, input)) {
+    return {
+      block: true,
+      reason: `${toolName} is a destructive Galaxy operation; blocked in remote mode (no confirmation UI available)`,
+    };
   }
   // Curated remote surface -> allowed.
   if (ALLOWED_EXACT.has(toolName)) return undefined;
