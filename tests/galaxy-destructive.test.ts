@@ -188,6 +188,29 @@ describe("describeGalaxyDestructive", () => {
     expect(typeof headline).toBe("string");
     expect(headline.length).toBeGreaterThan(0);
   });
+
+  it("dataset purge wording names the dataset and says it cannot be undone", () => {
+    const { headline } = describeGalaxyDestructive({
+      kind: "dataset-purge",
+      datasetId: "d1",
+      irreversible: true,
+    });
+    expect(headline).toMatch(/dataset/i);
+    expect(headline).toMatch(/cannot be undone|permanent/i);
+    expect(headline).toContain("d1");
+    expect(headline).not.toMatch(/entire history/i);
+  });
+
+  it("dataset delete wording is dataset-scoped and recoverable (not 'entire history')", () => {
+    const { headline } = describeGalaxyDestructive({
+      kind: "dataset-delete",
+      datasetId: "d1",
+      irreversible: false,
+    });
+    expect(headline).toMatch(/dataset/i);
+    expect(headline).toMatch(/undelete|recoverable/i);
+    expect(headline).not.toMatch(/entire history/i);
+  });
 });
 
 describe("isGalaxyDestructiveCurl", () => {
@@ -237,10 +260,28 @@ describe("isGalaxyDestructiveCurl", () => {
     expect(isGalaxyDestructiveCurl("http DELETE https://g/api/histories/abc")).toBeNull();
   });
 
-  it("does NOT flag dataset-level /contents/ deletes (out of v1 scope) (#338 F5)", () => {
+  it("flags a dataset-level /contents/ DELETE as a dataset delete (soft)", () => {
     expect(
       isGalaxyDestructiveCurl("curl -X DELETE https://g/api/histories/abc/contents/d1"),
-    ).toBeNull();
+    ).toMatchObject({ kind: "dataset-delete", datasetId: "d1", irreversible: false });
+  });
+
+  it("flags a dataset purge (?purge=true on /contents/) as irreversible", () => {
+    expect(
+      isGalaxyDestructiveCurl("curl -X DELETE 'https://g/api/histories/abc/contents/d1?purge=true'"),
+    ).toMatchObject({ kind: "dataset-purge", datasetId: "d1", irreversible: true });
+  });
+
+  it("flags a dataset purge carried in the request body", () => {
+    expect(
+      isGalaxyDestructiveCurl(`curl -X DELETE https://g/api/histories/abc/contents/d1 -d '{"purge":true}'`),
+    ).toMatchObject({ kind: "dataset-purge", irreversible: true });
+  });
+
+  it("still flags a dataset delete with a shell-variable id (no fake literal)", () => {
+    const op = isGalaxyDestructiveCurl(`curl -X DELETE "$URL/api/histories/$H/contents/$DS?purge=true"`);
+    expect(op).toMatchObject({ kind: "dataset-purge", irreversible: true });
+    expect(op?.datasetId).toBeUndefined();
   });
 
   it("does NOT flag a GET", () => {

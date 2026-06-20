@@ -1,6 +1,7 @@
 export interface GalaxyDestructiveOp {
-  kind: "history-delete" | "history-purge";
+  kind: "history-delete" | "history-purge" | "dataset-delete" | "dataset-purge";
   historyId?: string;
+  datasetId?: string;
   irreversible: boolean;
 }
 export function classifyGalaxyDestructive(
