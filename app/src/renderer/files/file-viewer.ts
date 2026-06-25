@@ -8,10 +8,11 @@
 
 import type { Marked } from "marked";
 import { renderMarkdown } from "../chat/markdown.js";
+import { buildHtmlPreviewDocument } from "./html-preview.js";
 import { extOf, imagePreviewBlob } from "./image-preview.js";
 import { buildPreviewMarked, previewImageBaseDir } from "./markdown-preview.js";
 
-type FileKind = "text" | "image" | "pdf" | "binary";
+type FileKind = "text" | "html" | "image" | "pdf" | "binary";
 
 const TEXT_EXTS = new Set([
   // generic
@@ -40,8 +41,6 @@ const TEXT_EXTS = new Set([
   ".cfg",
   ".conf",
   ".xml",
-  ".html",
-  ".htm",
   ".css",
   // tabular
   ".csv",
@@ -80,11 +79,14 @@ const TEXT_EXTS = new Set([
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"]);
 
+const HTML_EXTS = new Set([".html", ".htm"]);
+
 const PDF_EXTS = new Set([".pdf"]);
 
 export function kindOf(path: string): FileKind {
   const ext = extOf(path);
   if (!ext) return "text"; // no extension → treat as text
+  if (HTML_EXTS.has(ext)) return "html";
   if (TEXT_EXTS.has(ext)) return "text";
   if (IMAGE_EXTS.has(ext)) return "image";
   if (PDF_EXTS.has(ext)) return "pdf";
@@ -115,6 +117,7 @@ export class FileViewer {
   private previewBtn: HTMLButtonElement | null = null;
   private currentImageUrl: string | null = null;
   private currentPdfUrl: string | null = null;
+  private currentHtmlUrl: string | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -162,7 +165,9 @@ export class FileViewer {
     const root = document.createElement("div");
     root.className = "file-viewer-root";
 
-    if (this.currentKind === "text") {
+    if (this.currentKind === "html") {
+      this.renderHtml(root, relPath, bytes, preview, size);
+    } else if (this.currentKind === "text") {
       this.renderText(root, relPath, bytes, preview, size);
     } else if (this.currentKind === "image") {
       this.renderImage(root, relPath, bytes, size);
@@ -197,7 +202,10 @@ export class FileViewer {
     }
     if (!res.ok) return;
 
-    if (this.currentKind === "text") {
+    if (this.currentKind === "html") {
+      const newText = new TextDecoder("utf-8").decode(res.bytes);
+      this.renderHtmlPreview(newText);
+    } else if (this.currentKind === "text") {
       if (!this.editor) return;
       const newText = new TextDecoder("utf-8").decode(res.bytes);
       if (this.editor.value === newText) return;
@@ -213,7 +221,7 @@ export class FileViewer {
         this.editor.setSelectionRange(Math.min(selStart, cap), Math.min(selEnd, cap));
         // Re-render markdown preview if it's the currently visible pane.
         if (this.preview && !this.preview.classList.contains("hidden")) {
-          this.preview.innerHTML = renderMarkdown(newText, this.previewMarked);
+          this.renderPreview(newText);
         }
       }
     } else if (this.currentKind === "image") {
@@ -248,7 +256,7 @@ export class FileViewer {
         this.statusEl.className = "file-viewer-status saved";
       }
       if (this.preview && !this.preview.classList.contains("hidden")) {
-        this.preview.innerHTML = renderMarkdown(newText, this.previewMarked);
+        this.renderPreview(newText);
       }
       banner.remove();
     });
@@ -307,6 +315,10 @@ export class FileViewer {
       URL.revokeObjectURL(this.currentPdfUrl);
       this.currentPdfUrl = null;
     }
+    if (this.currentHtmlUrl) {
+      URL.revokeObjectURL(this.currentHtmlUrl);
+      this.currentHtmlUrl = null;
+    }
   }
 
   private renderText(
@@ -330,31 +342,7 @@ export class FileViewer {
     // editor + Save toolbar + markdown preview toggle entirely — the
     // user can't usefully edit a 200 MB file's first 10 lines.
     if (headPreview) {
-      const toolbar = document.createElement("div");
-      toolbar.className = "file-viewer-toolbar";
-      const filename = document.createElement("span");
-      filename.className = "file-viewer-filename";
-      filename.textContent = relPath;
-      filename.title = relPath;
-      toolbar.appendChild(filename);
-      const sizeLabel = document.createElement("span");
-      sizeLabel.className = "file-viewer-status";
-      sizeLabel.textContent = typeof size === "number" ? formatBytes(size) : "";
-      toolbar.appendChild(sizeLabel);
-      root.appendChild(toolbar);
-
-      const banner = document.createElement("div");
-      banner.className = "file-viewer-preview-banner";
-      const truncated = headPreview.byteBudgetHit
-        ? `Preview only — first ${headPreview.lineCount} lines (truncated mid-line: lines longer than 64 KB are clipped).`
-        : `Preview only — first ${headPreview.lineCount} lines.`;
-      banner.textContent = `${truncated} Open externally to see the full file.`;
-      root.appendChild(banner);
-
-      const pre = document.createElement("pre");
-      pre.className = "file-viewer-preview-text";
-      pre.textContent = text;
-      root.appendChild(pre);
+      this.renderHeadPreview(root, relPath, text, headPreview, size);
       return;
     }
 
@@ -432,12 +420,89 @@ export class FileViewer {
     this.setMode(isMarkdown ? "preview" : "edit");
   }
 
+  private renderHeadPreview(
+    root: HTMLElement,
+    relPath: string,
+    text: string,
+    headPreview: { kind: "head"; lineCount: number; byteBudgetHit: boolean },
+    size?: number,
+  ): void {
+    const toolbar = document.createElement("div");
+    toolbar.className = "file-viewer-toolbar";
+    const filename = document.createElement("span");
+    filename.className = "file-viewer-filename";
+    filename.textContent = relPath;
+    filename.title = relPath;
+    toolbar.appendChild(filename);
+    const sizeLabel = document.createElement("span");
+    sizeLabel.className = "file-viewer-status";
+    sizeLabel.textContent = typeof size === "number" ? formatBytes(size) : "";
+    toolbar.appendChild(sizeLabel);
+    root.appendChild(toolbar);
+
+    const banner = document.createElement("div");
+    banner.className = "file-viewer-preview-banner";
+    const truncated = headPreview.byteBudgetHit
+      ? `Preview only — first ${headPreview.lineCount} lines (truncated mid-line: lines longer than 64 KB are clipped).`
+      : `Preview only — first ${headPreview.lineCount} lines.`;
+    banner.textContent = `${truncated} Open externally to see the full file.`;
+    root.appendChild(banner);
+
+    const pre = document.createElement("pre");
+    pre.className = "file-viewer-preview-text";
+    pre.textContent = text;
+    root.appendChild(pre);
+  }
+
+  private renderHtml(
+    root: HTMLElement,
+    relPath: string,
+    bytes: Uint8Array,
+    headPreview?: { kind: "head"; lineCount: number; byteBudgetHit: boolean },
+    size?: number,
+  ): void {
+    const text = new TextDecoder("utf-8").decode(bytes);
+    if (headPreview) {
+      this.renderHeadPreview(root, relPath, text, headPreview, size);
+      return;
+    }
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "file-viewer-toolbar";
+
+    const filename = document.createElement("span");
+    filename.className = "file-viewer-filename";
+    filename.textContent = relPath;
+    filename.title = relPath;
+    toolbar.appendChild(filename);
+
+    const openBtn = document.createElement("button");
+    openBtn.className = "file-viewer-btn";
+    openBtn.textContent = "Open Externally";
+    openBtn.addEventListener("click", () => {
+      void window.orbit.openFile(relPath);
+    });
+    toolbar.appendChild(openBtn);
+
+    const sizeLabel = document.createElement("span");
+    sizeLabel.className = "file-viewer-status";
+    sizeLabel.textContent = typeof size === "number" ? formatBytes(size) : "";
+    toolbar.appendChild(sizeLabel);
+
+    root.appendChild(toolbar);
+
+    const preview = document.createElement("div");
+    preview.className = "file-viewer-preview file-viewer-html-preview";
+    this.preview = preview;
+    root.appendChild(preview);
+    this.renderHtmlPreview(text);
+  }
+
   private setMode(mode: "edit" | "preview"): void {
     if (!this.editor || !this.preview) return;
     if (mode === "preview") {
       // Render preview from current (possibly dirty) editor contents.
-      const html = renderMarkdown(this.editor.value, this.previewMarked);
-      this.preview.innerHTML = html;
+      this.renderPreview(this.editor.value);
       this.editor.classList.add("hidden");
       this.preview.classList.remove("hidden");
       if (this.editBtn) this.editBtn.classList.remove("active");
@@ -448,6 +513,35 @@ export class FileViewer {
       if (this.editBtn) this.editBtn.classList.add("active");
       if (this.previewBtn) this.previewBtn.classList.remove("active");
     }
+  }
+
+  private renderPreview(text: string): void {
+    if (!this.preview) return;
+    this.preview.innerHTML = renderMarkdown(text, this.previewMarked);
+  }
+
+  private renderHtmlPreview(text: string): void {
+    if (!this.preview || this.currentKind !== "html" || !this.currentPath) return;
+    this.preview.replaceChildren(this.buildHtmlIframe(this.currentPath, text));
+  }
+
+  private buildHtmlIframe(relPath: string, html: string): HTMLIFrameElement {
+    if (this.currentHtmlUrl) {
+      URL.revokeObjectURL(this.currentHtmlUrl);
+      this.currentHtmlUrl = null;
+    }
+    const doc = buildHtmlPreviewDocument(relPath, html);
+    const blob = new Blob([doc], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    this.currentHtmlUrl = url;
+
+    const iframe = document.createElement("iframe");
+    iframe.className = "file-viewer-html-frame";
+    iframe.setAttribute("sandbox", "allow-scripts");
+    iframe.referrerPolicy = "no-referrer";
+    iframe.src = url;
+    iframe.title = relPath;
+    return iframe;
   }
 
   private markDirty(): void {

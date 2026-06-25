@@ -34,6 +34,11 @@ describe("kindOf (renderer file viewer)", () => {
     expect(kindOf("a.tab")).toBe("text");
   });
 
+  it("classifies HTML as its own renderable kind", () => {
+    expect(kindOf("report.html")).toBe("html");
+    expect(kindOf("report.htm")).toBe("html");
+  });
+
   it("keeps real binaries out of the text path", () => {
     expect(kindOf("reads.bam")).toBe("binary");
     expect(kindOf("index.bai")).toBe("binary");
@@ -62,6 +67,11 @@ describe("isTextLikeForPreview (main-process head-preview gate)", () => {
     expect(isTextLikeForPreview("reads.bam")).toBe(false);
     expect(isTextLikeForPreview("archive.gz")).toBe(false);
     expect(isTextLikeForPreview("photo.png")).toBe(false);
+  });
+
+  it("keeps HTML text-like for large-file head previews", () => {
+    expect(isTextLikeForPreview("report.html")).toBe(true);
+    expect(isTextLikeForPreview("report.htm")).toBe(true);
   });
 
   it("keeps the gzipped Galaxy variant binary -- only the last extension counts", () => {

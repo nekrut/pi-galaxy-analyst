@@ -625,6 +625,12 @@ export function registerIpcHandlers(agent: AgentManager): void {
           webSecurity: true,
         },
       });
+      win.webContents.on("before-input-event", (event, input) => {
+        if (input.type === "keyDown" && input.key === "Escape" && !win.isDestroyed()) {
+          event.preventDefault();
+          win.close();
+        }
+      });
       await win.loadFile(absPath);
       return { opened: true };
     }

@@ -631,6 +631,18 @@ body:not(.artifact-collapsed) #artifact-toggle {
 .file-viewer-preview.hidden {
   display: none;
 }
+.file-viewer-html-preview {
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+}
+.file-viewer-html-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
 
 .file-viewer-image-wrap {
   flex: 1;
