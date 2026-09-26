@@ -56,7 +56,7 @@ test("notebook and chat Galaxy links render and open in another tab", async ({ p
     await page.goto(`http://127.0.0.1:${address.port}/__links_fixture`);
     await expect(page.locator("#notebook-view a")).toHaveCount(4);
     await expect(page.locator("#messages a")).toHaveCount(3);
-    const history = page.locator('#notebook-view a[title="Open Galaxy history"]');
+    const history = page.locator('#notebook-view a[title="Open Galaxy history on usegalaxy.org"]');
     await expect(history).toHaveAttribute(
       "href",
       "https://usegalaxy.org/histories/view?id=0123456789abcdeffedcba9876543210",

@@ -94,10 +94,19 @@ export function galaxyLinkServerInText(text) {
   return servers.size === 1 ? (servers.values().next().value ?? "") : "";
 }
 
-/** Typed references only. Bare hashes, history item numbers, dates, etc. stay text. */
-export function galaxyArtifactReferences(text, fallbackServer) {
+/**
+ * Typed references only. Bare hashes, history item numbers, dates, etc. stay text.
+ *
+ * A `galaxy_server_url` in the text only redirects the other IDs when the
+ * caller says the text is trusted metadata (a notebook block Loom wrote).
+ * Otherwise a dataset peek, fetched page, or README could point "Open Galaxy
+ * history" links at any host it likes.
+ */
+export function galaxyArtifactReferences(text, fallbackServer, options = {}) {
   const fields = fieldsIn(text);
-  const server = galaxyLinkServerInText(text) ?? fallbackServer;
+  const server = options.trustTextServer
+    ? (galaxyLinkServerInText(text) ?? fallbackServer)
+    : fallbackServer;
   const pageIds = new Set(fields.filter((f) => f.field === "page_id").map((f) => f.value));
   const pageId = pageIds.size === 1 ? pageIds.values().next().value : undefined;
   const refs = [];
@@ -107,7 +116,8 @@ export function galaxyArtifactReferences(text, fallbackServer) {
     if (field.field === "workflow_id" && fields.some((f) => f.field === "invocation_id")) continue;
     const kind = FIELD_KINDS[field.field];
     const href = galaxyArtifactUrl(
-      server,
+      // Untrusted, the server field still links to the URL it shows -- just not the other IDs.
+      kind === "server" && !options.trustTextServer ? field.value : server,
       kind,
       field.field === "page_slug" ? pageId : field.value,
       { pageId },

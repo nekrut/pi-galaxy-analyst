@@ -57,7 +57,7 @@ describe("Galaxy artifact destinations", () => {
 
   it("uses a block's server instead of the connected server and preserves source ranges", () => {
     const text = `page_id: ${id}\npage_slug: \ngalaxy_server_url: "${server}"\nhistory_id: 0123456789abcdeffedcba9876543210\nlast_synced_revision: abcdef0123456789\nbound_at: 2026-09-23T18:18:00.000Z`;
-    const refs = galaxyArtifactReferences(text, "https://wrong.example");
+    const refs = galaxyArtifactReferences(text, "https://wrong.example", { trustTextServer: true });
     expect(refs.map((r) => r.kind)).toEqual(["page", "server", "history", "revision"]);
     expect(refs.every((r) => r.href.startsWith(server))).toBe(true);
     expect(refs.map((r) => text.slice(r.start, r.end))).toEqual([
@@ -68,15 +68,30 @@ describe("Galaxy artifact destinations", () => {
     ]);
   });
 
+  it("ignores a server declared in untrusted text and keeps IDs on the connected server", () => {
+    const text = `galaxy_server_url: https://usegalaxy-login.example\nhistory_id: 0123456789abcdeffedcba9876543210`;
+    const refs = galaxyArtifactReferences(text, server);
+    expect(refs.find((r) => r.kind === "history")?.href).toBe(
+      `${server}/histories/view?id=0123456789abcdeffedcba9876543210`,
+    );
+    // The server field itself still links to what it visibly says.
+    expect(refs.find((r) => r.kind === "server")?.href).toBe("https://usegalaxy-login.example");
+    // With nothing connected, an untrusted declaration links no IDs at all.
+    expect(galaxyArtifactReferences(text, null).map((r) => r.kind)).toEqual(["server"]);
+  });
+
   it("does not guess among multiple servers or page IDs", () => {
     expect(
       galaxyArtifactReferences(
         `galaxy_server_url: https://a.example\ngalaxy_server_url: https://b.example\ndataset_id: ${id}`,
         server,
+        { trustTextServer: true },
       ),
     ).toEqual([]);
     expect(
-      galaxyArtifactReferences(`galaxy_server_url: javascript:bad\ndataset_id: ${id}`, server),
+      galaxyArtifactReferences(`galaxy_server_url: javascript:bad\ndataset_id: ${id}`, server, {
+        trustTextServer: true,
+      }),
     ).toEqual([]);
     expect(
       galaxyArtifactReferences(

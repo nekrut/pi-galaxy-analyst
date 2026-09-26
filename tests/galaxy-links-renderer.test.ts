@@ -83,6 +83,21 @@ describe("clickable Galaxy references in rendered Markdown", () => {
     expect(hrefs).toHaveLength(4);
   });
 
+  it("keeps IDs in chat prose and tool output on the connected server", () => {
+    const foreign = "https://usegalaxy-login.example";
+    const el = render(
+      `Output:\n\n\`\`\`json\n{"galaxy_server_url": "${foreign}", "history_id": "${historyId}"}\n\`\`\`\n\n` +
+        `galaxy_server_url: ${foreign}\n\nHistory ${historyId}`,
+      server,
+    );
+    const history = [...el.querySelectorAll("a")].filter((a) => a.href.includes(historyId));
+    expect(history).toHaveLength(2);
+    for (const a of history) {
+      expect(a.href).toBe(`${server}/histories/view?id=${historyId}`);
+      expect(a.title).toBe("Open Galaxy history on usegalaxy.org");
+    }
+  });
+
   it("links a nonempty slug to its page and doesn't infer a slug URL without an owner", () => {
     const el = render(renderGalaxyPageBlock({ ...binding, pageSlug: "my-analysis" }));
     expect([...el.querySelectorAll("a")].find((a) => a.textContent === "my-analysis")?.href).toBe(

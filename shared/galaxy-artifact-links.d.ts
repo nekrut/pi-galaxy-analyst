@@ -26,4 +26,5 @@ export function galaxyLinkServerInText(text: string): string | null;
 export function galaxyArtifactReferences(
   text: string,
   fallbackServer?: string | null,
+  options?: { trustTextServer?: boolean },
 ): GalaxyArtifactReference[];
