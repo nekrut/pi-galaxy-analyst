@@ -2,6 +2,12 @@ import {
   galaxyArtifactReferences,
   galaxyLinkServerInText,
 } from "../../../../shared/galaxy-artifact-links.js";
+import { NOTEBOOK_FENCE_READ_PREFIXES } from "../../../../shared/notebook-fences.js";
+
+// Notebook blocks can carry either fence prefix during the Loom -> Orbit rename.
+const LINKABLE_LANGUAGE = new RegExp(
+  `\\blanguage-(?:(?:${NOTEBOOK_FENCE_READ_PREFIXES.join("|")})-(?:galaxy-page|invocation|job)|ya?ml|json|text)\\b`,
+);
 
 /**
  * Link explicit Galaxy references in an already sanitized DOM. Text and code
@@ -66,8 +72,5 @@ function eligible(el: HTMLElement): boolean {
   if (el.tagName !== "PRE") return true;
   const language = el.querySelector("code")?.className ?? "";
   // Don't turn Python, shell scripts, or Markdown examples into UI controls.
-  return (
-    !language ||
-    /\blanguage-(?:loom-galaxy-page|loom-invocation|loom-job|ya?ml|json|text)\b/.test(language)
-  );
+  return !language || LINKABLE_LANGUAGE.test(language);
 }

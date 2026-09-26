@@ -75,6 +75,14 @@ describe("clickable Galaxy references in rendered Markdown", () => {
     expect(el.querySelector('a[title*="revision"]')?.title).toContain("JSON");
   });
 
+  it("links notebook blocks written under the orbit- fence prefix too", () => {
+    const orbitBlock = block.replace("```loom-galaxy-page", "```orbit-galaxy-page");
+    expect(orbitBlock).not.toBe(block);
+    const hrefs = [...render(orbitBlock).querySelectorAll("a")].map((a) => a.href);
+    expect(hrefs).toEqual([...render(block).querySelectorAll("a")].map((a) => a.href));
+    expect(hrefs).toHaveLength(4);
+  });
+
   it("links a nonempty slug to its page and doesn't infer a slug URL without an owner", () => {
     const el = render(renderGalaxyPageBlock({ ...binding, pageSlug: "my-analysis" }));
     expect([...el.querySelectorAll("a")].find((a) => a.textContent === "my-analysis")?.href).toBe(
