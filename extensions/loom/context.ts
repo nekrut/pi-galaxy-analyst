@@ -23,14 +23,20 @@ import {
 } from "./skills-discovery";
 import { findGalaxyPageBlocks } from "./galaxy-page-binding";
 import { isLocalShellDisabled } from "./local-exec.js";
+import { resolveWorkspaceStateDirName, type WorkspaceStateDirName } from "./workspace-state-dir";
 import { SRA_IMPORT_GUIDANCE } from "./sra-import-gate";
+import { MCP_RECOVERY_GUIDANCE } from "./mcp-recovery";
+import { GALAXY_POLL_GUIDANCE } from "./galaxy-poll-guard";
 import { GALAXY_PAGE_MARKDOWN_GUIDANCE } from "./galaxy-page-markdown-guidance";
 import { GALAXY_ARTIFACT_LINK_GUIDANCE } from "./galaxy-artifact-link-guidance";
 import { galaxyArtifactUrl, type GalaxyArtifactKind } from "../../shared/galaxy-artifact-links.js";
 import {
   buildUserInstructionsBlock,
   buildWorkspaceInstructionsContext,
+  discoverInstructionFiles,
+  takeShadowNotices,
 } from "./user-instructions.js";
+import { readEnv } from "../../shared/orbit-env.js";
 
 const NOTEBOOK_HEAD_MAX_CHARS = 2000;
 const NOTEBOOK_TAIL_MAX_CHARS = 4000;
@@ -173,7 +179,7 @@ You are **${modelStr}** running via the **${active}** provider. This is your cur
  * rest of the config, and never tells the agent to open the file (#183).
  */
 export function buildTesterIdBlock(): string {
-  const testerId = loadConfig().testerId || process.env.LOOM_TESTER_ID;
+  const testerId = loadConfig().testerId || readEnv("TESTER_ID");
   if (!testerId) return "";
   return `## Orbit tester ID
 
@@ -281,19 +287,20 @@ Galaxy is connected.
 
 ### If a Galaxy tool reports it's not connected
 
-The live Galaxy MCP connection is per-session and does **not** survive a resume
-or a long idle period, even though the credentials above stay configured. So a
-\`galaxy_*\` tool can come back "not connected" / "connection closed" / with a
-transport timeout at any time -- most often on the first Galaxy action after
-resuming this project. That does **not** mean Galaxy is unavailable; it means
-this session's connection needs to be re-established.
+The live Galaxy MCP connection may need to be re-established after a resume
+or long idle period, even though credentials stay configured. Distinguish
+Galaxy authentication errors from a dropped MCP transport and request timeouts.
+A timeout alone does not prove that the connection is dead.
 
 When it happens -- and before you ever tell the user Galaxy is disconnected:
-1. Call \`galaxy_connect()\` first to re-bind this session. Do NOT report a
-   disconnection you haven't tried to fix.
-2. If \`galaxy_connect()\` itself fails with a transport error (connection
-   closed / timed out, not an auth error), tell the user to run
-   \`/mcp reconnect galaxy\` (no restart needed), then retry.
+1. For "Not connected to Galaxy", call \`galaxy_connect()\` to re-bind
+   this session. Do not report a disconnection you haven't tried to fix.
+2. For a dropped transport, call \`mcp({connect: "galaxy"})\` yourself,
+   then \`galaxy_connect()\`. Verify both results before continuing.
+3. For timeouts, narrow read-only queries first. Before retrying a mutation,
+   check whether Galaxy accepted it. Never blindly replay a submission.
+4. Only if your own reconnect fails, tell the user they can run
+   \`/mcp reconnect galaxy\` (no restart needed).
 
 Never report "Galaxy is disconnected" as a final answer without attempting
 \`galaxy_connect()\` in the same turn.
@@ -447,35 +454,49 @@ is invisible to the background poller. Use the IDs returned by Galaxy.
 `;
 }
 
+// Resolved once per workspace for the life of the process: the system prompt
+// is one cached block, and the agent creating the dir mid-session must not
+// flip its name and bust that cache.
+const stateDirNameByCwd = new Map<string, WorkspaceStateDirName>();
+function sessionStateDirName(cwd: string): WorkspaceStateDirName {
+  let name = stateDirNameByCwd.get(cwd);
+  if (!name) {
+    name = resolveWorkspaceStateDirName(cwd);
+    stateDirNameByCwd.set(cwd, name);
+  }
+  return name;
+}
+
 /**
  * Local-tool environment convention — per-analysis conda env rooted in
  * the analysis cwd. Always relevant; no longer mode-gated.
  */
-export function buildLocalEnvContext(): string {
+export function buildLocalEnvContext(cwd: string = process.cwd()): string {
   // No local shell (Windows remote-only): the conda/bash local-tool path does
   // not exist here -- don't coach the model to use a shell it can't reach.
   if (isLocalShellDisabled()) return "";
+  const env = `${sessionStateDirName(cwd)}/env`;
   return `
 ## Local-tool environment (per-analysis conda env)
 
 When running any bioinformatics tool locally, use a **per-analysis conda
-environment** rooted at \`.loom/env/\` inside the current analysis
+environment** rooted at \`${env}/\` inside the current analysis
 directory. Isolates tool versions between analyses and keeps each
 notebook's reproducibility record self-contained.
 
 Conventions:
 
-- **Env path:** \`.loom/env/\` (prefix style: \`-p .loom/env\`, not \`-n name\`).
+- **Env path:** \`${env}/\` (prefix style: \`-p ${env}\`, not \`-n name\`).
 - **Channel priority:** \`-c bioconda -c conda-forge\`, in that order.
 - **Prefer \`mamba\`** if available (\`which mamba\`) — much faster solves.
   Fall back to \`conda\` if absent. Same flags either way.
 
 Lifecycle (lazy):
 
-1. First tool needed: \`test -d .loom/env\`. If missing:
-   \`conda create -p .loom/env -c bioconda -c conda-forge -y python=3.11\`
-2. Install in batches: \`conda install -p .loom/env -c bioconda -c conda-forge -y bwa samtools lofreq\`
-3. Run via \`conda run -p .loom/env <cmd>\` or full path \`.loom/env/bin/<cmd>\`.
+1. First tool needed: \`test -d ${env}\`. If missing:
+   \`conda create -p ${env} -c bioconda -c conda-forge -y python=3.11\`
+2. Install in batches: \`conda install -p ${env} -c bioconda -c conda-forge -y bwa samtools lofreq\`
+3. Run via \`conda run -p ${env} <cmd>\` or full path \`${env}/bin/<cmd>\`.
 4. Record installs under a \`## Environment\` heading in \`notebook.md\` for
    reproducibility.
 
@@ -560,7 +581,7 @@ the activity stream.
 # — without the \`.failed\` branch a quick crash gets reported as
 # "still running" indefinitely.
 mkdir -p foldseek_work
-nohup sh -c '.loom/env/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 \\
+nohup sh -c '${env}/bin/foldseek easy-cluster ... > foldseek_work/run.log 2>&1 \\
   && touch foldseek_work/.done || touch foldseek_work/.failed' > /dev/null 2>&1 &
 disown
 echo "Launched foldseek — tail foldseek_work/run.log to monitor"
@@ -1212,6 +1233,9 @@ export function setupContextInjection(pi: ExtensionAPI): void {
     // (see the pi.on("context") handler) instead of busting the cached prefix.
     // The live activity tail was likewise dropped; it stays in the Activity pane.
     const omitAnchors = isLlama4Family(ctx.model);
+    for (const notice of takeShadowNotices(discoverInstructionFiles())) {
+      ctx.ui.notify(notice, "info");
+    }
     const systemPrompt = [
       buildActiveModelBlock(),
       buildTesterIdBlock(),
@@ -1224,8 +1248,10 @@ export function setupContextInjection(pi: ExtensionAPI): void {
       buildNotebookWriteBlock(),
       buildExecutionModeBlock(),
       buildGalaxyContextBlock(),
+      MCP_RECOVERY_GUIDANCE,
+      GALAXY_POLL_GUIDANCE,
       buildSkillsContext(),
-      buildLocalEnvContext(),
+      buildLocalEnvContext(ctx.cwd),
       buildNoLocalShellBlock(),
       buildTeamDispatchContext(),
       buildSessionIndexContext(),
